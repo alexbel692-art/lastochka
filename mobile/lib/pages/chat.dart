@@ -17,6 +17,7 @@ import '../calls/voip.dart';
 import '../chat/stickers.dart';
 import '../chat/voice.dart';
 import '../main.dart';
+import '../system/notify.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/bubble_shape.dart';
@@ -54,6 +55,8 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
+    openRoomId = room.id;
+    clearRoomNotification(room.id);
     _init();
     _scroll.addListener(() {
       if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 600) _more();
@@ -117,6 +120,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    if (openRoomId == room.id) openRoomId = null;
     _tl?.cancelSubscriptions();
     _syncSub?.cancel();
     _recTimer?.cancel();

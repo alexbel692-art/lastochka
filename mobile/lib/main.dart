@@ -7,6 +7,8 @@ import 'package:matrix/encryption/utils/key_verification.dart';
 import 'package:matrix/matrix.dart';
 
 import 'calls/voip.dart';
+import 'system/desktop.dart';
+import 'system/notify.dart';
 import 'matrix_client.dart';
 import 'pages/chats.dart';
 import 'pages/login.dart';
@@ -16,7 +18,7 @@ import 'theme.dart';
 late Client client;
 final navKey = GlobalKey<NavigatorState>();
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   // Вместо серого экрана при ошибке — понятное сообщение и кнопка «Назад».
   ErrorWidget.builder = (details) => Material(
@@ -36,9 +38,16 @@ Future<void> main() async {
         ),
       );
   await initializeDateFormatting('ru');
+  await initDesktop();
   client = await createClient();
   initVoip();
+  await initNotifications();
   runApp(const LastochkaApp());
+  // автозапуск с Windows — сразу в трей, без окна
+  if (args.contains('--hidden')) {
+    appVisible = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) => hideMainWindow());
+  }
 }
 
 class LastochkaApp extends StatefulWidget {
@@ -50,10 +59,20 @@ class LastochkaApp extends StatefulWidget {
 class _LastochkaAppState extends State<LastochkaApp> {
   StreamSubscription? _login, _verify;
 
+  late final AppLifecycleListener _life;
+
   @override
   void initState() {
     super.initState();
-    _login = client.onLoginStateChanged.stream.listen((_) => setState(() {}));
+    _life = AppLifecycleListener(onStateChange: (s) {
+      if (!isDesktopOS) appVisible = s == AppLifecycleState.resumed;
+    });
+    if (client.isLogged()) WidgetsBinding.instance.addPostFrameCallback((_) => _afterLogin());
+    _login = client.onLoginStateChanged.stream.listen((s) {
+      setState(() {});
+      if (s == LoginState.loggedIn) _afterLogin();
+      if (s == LoginState.loggedOut) stopBackgroundService();
+    });
     // входящие запросы на подтверждение (с другого устройства или от собеседника)
     _verify = client.onKeyVerificationRequest.stream.listen((KeyVerification req) {
       final ctx = navKey.currentContext;
@@ -61,8 +80,15 @@ class _LastochkaAppState extends State<LastochkaApp> {
     });
   }
 
+  // после входа: разрешение на уведомления и фоновая служба (Android)
+  Future<void> _afterLogin() async {
+    await requestNotificationPermission();
+    await startBackgroundService();
+  }
+
   @override
   void dispose() {
+    _life.dispose();
     _login?.cancel();
     _verify?.cancel();
     super.dispose();

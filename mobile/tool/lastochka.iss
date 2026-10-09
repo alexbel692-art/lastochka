@@ -32,8 +32,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{commonprograms}\Ласточка (новая версия)"; Filename: "{app}\Lastochka.exe"
-Name: "{commondesktop}\Ласточка (новая версия)"; Filename: "{app}\Lastochka.exe"; Tasks: desktopicon
+Name: "{commonprograms}\Ласточка (новая версия)"; Filename: "{app}\Lastochka.exe"; AppUserModelID: "Lastochka.App"
+Name: "{commondesktop}\Ласточка (новая версия)"; Filename: "{app}\Lastochka.exe"; Tasks: desktopicon; AppUserModelID: "Lastochka.App"
 
 [Run]
 Filename: "{app}\Lastochka.exe"; Description: "{cm:LaunchProgram,Ласточка}"; Flags: nowait postinstall skipifsilent

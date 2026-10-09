@@ -8,6 +8,8 @@ import 'package:webrtc_interface/webrtc_interface.dart' hide Navigator;
 import '../main.dart';
 import 'call_page.dart';
 import 'sounds.dart';
+import '../system/desktop.dart';
+import '../system/notify.dart';
 import 'turn_proxy.dart';
 
 late VoIP voip;
@@ -39,12 +41,26 @@ class LastochkaVoip implements WebRTCDelegate {
 
   @override
   Future<void> handleNewCall(CallSession session) async {
+    ringing = session;
     navKey.currentState?.push(MaterialPageRoute(builder: (_) => CallPage(session: session)));
+    // приложение свёрнуто или закрыто — полноэкранное уведомление; на компьютере — показать окно
+    if (isDesktopOS) {
+      await showMainWindow();
+    }
+    if (!appVisible || !isDesktopOS) await showCallNotification(session);
+    session.onCallStateChanged.stream.listen((s) {
+      if (s != CallState.kRinging) {
+        clearCallNotification();
+        if (ringing == session) ringing = null;
+      }
+    });
   }
 
   @override
   Future<void> handleCallEnded(CallSession session) async {
     await stopRingtone();
+    await clearCallNotification();
+    if (ringing == session) ringing = null;
   }
 
   @override
@@ -72,8 +88,18 @@ class LastochkaVoip implements WebRTCDelegate {
   EncryptionKeyProvider? get keyProvider => null;
 }
 
+/// Входящий звонок, который сейчас звонит.
+CallSession? ringing;
+
 void initVoip() {
   voip = VoIP(client, LastochkaVoip());
+  // кнопки «Ответить» / «Отклонить» в уведомлении
+  onCallAction = (action, callId) {
+    final c = ringing;
+    if (c == null || c.callId != callId) return;
+    if (action == 'answer') c.answer();
+    if (action == 'decline') c.reject();
+  };
 }
 
 /// Позвонить собеседнику в чате.

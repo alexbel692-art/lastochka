@@ -12,20 +12,53 @@ def edit(path, fn):
         print('patched', path)
 
 # --- Android: разрешения и название ---
-PERMS = ['INTERNET', 'RECORD_AUDIO', 'CAMERA', 'POST_NOTIFICATIONS', 'MODIFY_AUDIO_SETTINGS', 'ACCESS_NETWORK_STATE', 'CHANGE_NETWORK_STATE', 'WAKE_LOCK', 'BLUETOOTH_CONNECT']
+PERMS = ['FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_REMOTE_MESSAGING', 'USE_FULL_SCREEN_INTENT', 'RECEIVE_BOOT_COMPLETED', 'VIBRATE', 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', 'INTERNET', 'RECORD_AUDIO', 'CAMERA', 'POST_NOTIFICATIONS', 'MODIFY_AUDIO_SETTINGS', 'ACCESS_NETWORK_STATE', 'CHANGE_NETWORK_STATE', 'WAKE_LOCK', 'BLUETOOTH_CONNECT']
 def manifest(s):
     for p in PERMS:
         line = f'<uses-permission android:name="android.permission.{p}"/>'
         if line not in s:
             s = s.replace('<application', line + '\n    <application', 1)
     s = re.sub(r'android:label="[^"]*"', 'android:label="Ласточка"', s)
+    # приложение и окно: движок живёт после закрытия окна, звонок показывается поверх блокировки
+    if 'android:name=".MainApplication"' not in s:
+        if 'android:name="${applicationName}"' in s:
+            s = s.replace('android:name="${applicationName}"', 'android:name=".MainApplication"', 1)
+        else:
+            s = s.replace('<application', '<application\n        android:name=".MainApplication"', 1)
+    if 'android:showWhenLocked' not in s:
+        s = s.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n            android:showWhenLocked="true"\n            android:turnScreenOn="true"', 1)
+    comps = '''
+        <service android:name=".SyncService" android:exported="false" android:foregroundServiceType="remoteMessaging"/>
+        <receiver android:name=".BootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
+        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"/>
+'''
+    if '.SyncService' not in s:
+        s = s.replace('</application>', comps + '    </application>', 1)
     return s
 edit('android/app/src/main/AndroidManifest.xml', manifest)
+
+import shutil, glob
+kt_dir = 'android/app/src/main/kotlin/app/lastochka/lastochka'
+if os.path.isdir('android'):
+    os.makedirs(kt_dir, exist_ok=True)
+    for f in glob.glob('tool/android/*.kt'):
+        shutil.copy(f, kt_dir)
+    os.makedirs('android/app/src/main/res/drawable', exist_ok=True)
+    shutil.copy('tool/android/ic_notification.xml', 'android/app/src/main/res/drawable/ic_notification.xml')
 
 gradle = 'android/app/build.gradle.kts'
 signed = os.path.exists('android/key.properties')
 def gradle_fn(s):
     s = s.replace('minSdk = flutter.minSdkVersion', 'minSdk = 23')
+    # уведомлениям нужна поддержка новых функций Java на старых Android
+    if 'isCoreLibraryDesugaringEnabled' not in s:
+        s = s.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true', 1)
+        s += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
     s = re.sub(r'ndkVersion = .*', 'ndkVersion = "27.0.12077973"', s)
     if signed and 'create("release")' not in s:
         block = '''    signingConfigs {
@@ -92,3 +125,39 @@ if os.path.exists('windows/CMakeLists.txt'):
             s = re.sub(r'(VALUE "%s", )"[^"]*"' % k, r'\1"Lastochka"', s)
         return re.sub(r'(VALUE "LegalCopyright", )"[^"]*"', r'\1""', s)
     edit('windows/runner/Runner.rc', rc)
+
+# --- macOS: закрытие окна не завершает Ласточку, клик по значку в Dock снова открывает окно ---
+ad = 'macos/Runner/AppDelegate.swift'
+if os.path.exists(ad):
+    def ad_fn(s):
+        s = re.sub(r'(applicationShouldTerminateAfterLastWindowClosed\(_ sender: NSApplication\) -> Bool \{\s*return )true', r'\1false', s)
+        if 'applicationShouldHandleReopen' not in s:
+            i = s.rindex('}')
+            s = s[:i] + """
+  override func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    if !flag { for window in sender.windows { window.makeKeyAndOrderFront(self) } }
+    NSApp.activate(ignoringOtherApps: true)
+    return true
+  }
+""" + s[i:]
+        return s
+    edit(ad, ad_fn)
+
+# --- Windows: одна копия Ласточки на пользователя (повторный запуск показывает окно из трея) ---
+mc = 'windows/runner/main.cpp'
+if os.path.exists(mc):
+    def mc_fn(s):
+        if 'LastochkaSingleInstance' in s:
+            return s
+        m = re.search(r'(wWinMain\([^)]*\)\s*\{)', s)
+        title = 'L"\\u041b\\u0430\\u0441\\u0442\\u043e\\u0447\\u043a\\u0430"'
+        code = f"""
+  HANDLE single = CreateMutexW(nullptr, TRUE, L"LastochkaSingleInstance");
+  if (single != nullptr && GetLastError() == ERROR_ALREADY_EXISTS) {{
+    HWND w = FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", {title});
+    if (w) {{ ShowWindow(w, SW_SHOW); ShowWindow(w, SW_RESTORE); SetForegroundWindow(w); }}
+    return EXIT_SUCCESS;
+  }}
+"""
+        return s[:m.end()] + code + s[m.end():]
+    edit(mc, mc_fn)
