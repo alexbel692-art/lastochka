@@ -91,3 +91,11 @@ Future<void> startCall(BuildContext context, Room room, {required bool video}) a
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Не удалось позвонить: нет доступа к микрофону или камере')));
   }
 }
+
+/// Звонить можно в личный чат или в чат, где ровно два участника.
+bool canCall(Room room) {
+  if (room.membership != Membership.join) return false;
+  if (room.isDirectChat) return true;
+  final n = room.summary.mJoinedMemberCount ?? room.getParticipants([Membership.join]).length;
+  return n == 2;
+}

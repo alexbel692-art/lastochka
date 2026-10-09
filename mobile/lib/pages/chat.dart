@@ -141,8 +141,8 @@ class _ChatPageState extends State<ChatPage> {
           ),
         ]),
         actions: [
-          if (room.isDirectChat || members == 2) ...[
-            IconButton(icon: const Icon(Icons.call_outlined), tooltip: 'Позвонить', onPressed: () => startCall(context, room, video: false)),
+          if (canCall(room)) ...[
+            IconButton(icon: const Icon(Icons.call_outlined), tooltip: 'Аудиозвонок', onPressed: () => startCall(context, room, video: false)),
             IconButton(icon: const Icon(Icons.videocam_outlined), tooltip: 'Видеозвонок', onPressed: () => startCall(context, room, video: true)),
           ],
         ],

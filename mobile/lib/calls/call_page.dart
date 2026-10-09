@@ -80,6 +80,17 @@ class _CallPageState extends State<CallPage> {
     _bindStreams();
   }
 
+  /// Ответить только голосом (на видеозвонок — с выключенной камерой).
+  Future<void> _answerAudio() async {
+    await call.answer();
+    if (call.type == CallType.kVideo) {
+      try {
+        await call.setLocalVideoMuted(true);
+      } catch (_) {}
+      _bindStreams();
+    }
+  }
+
   Future<void> _finish() async {
     if (_closing) return;
     _closing = true;
@@ -182,7 +193,9 @@ class _CallPageState extends State<CallPage> {
                   padding: const EdgeInsets.only(bottom: 40),
                   child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
                     _btn(Icons.call_end, 'Отклонить', () => call.reject(), bg: const Color(0xFFE53935)),
-                    _btn(call.type == CallType.kVideo ? Icons.videocam : Icons.call, 'Ответить', () => call.answer(), bg: const Color(0xFF43A047)),
+                    _btn(Icons.call, call.type == CallType.kVideo ? 'Без видео' : 'Ответить', _answerAudio, bg: const Color(0xFF43A047)),
+                    if (call.type == CallType.kVideo)
+                      _btn(Icons.videocam, 'С видео', () => call.answer(), bg: const Color(0xFF43A047)),
                   ]),
                 )
               else if (!ended)

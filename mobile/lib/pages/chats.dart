@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:matrix/matrix.dart';
 
 import '../main.dart';
+import '../calls/voip.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import 'chat.dart';
@@ -202,6 +203,10 @@ class _ChatsPageState extends State<ChatsPage> {
       showDragHandle: true,
       builder: (c) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (canCall(room)) ...[
+            ListTile(leading: const Icon(Icons.call_outlined), title: const Text('Аудиозвонок'), onTap: () => Navigator.pop(c, 'call')),
+            ListTile(leading: const Icon(Icons.videocam_outlined), title: const Text('Видеозвонок'), onTap: () => Navigator.pop(c, 'video')),
+          ],
           ListTile(leading: Icon(fav ? Icons.push_pin : Icons.push_pin_outlined), title: Text(fav ? 'Открепить' : 'Закрепить'), onTap: () => Navigator.pop(c, 'fav')),
           ListTile(leading: Icon(muted ? Icons.notifications_outlined : Icons.notifications_off_outlined), title: Text(muted ? 'Включить уведомления' : 'Без звука'), onTap: () => Navigator.pop(c, 'mute')),
           ListTile(leading: const Icon(Icons.mark_chat_read_outlined), title: const Text('Отметить прочитанным'), onTap: () => Navigator.pop(c, 'read')),
@@ -211,6 +216,8 @@ class _ChatsPageState extends State<ChatsPage> {
     );
     try {
       switch (a) {
+        case 'call' || 'video':
+          if (mounted) await startCall(context, room, video: a == 'video');
         case 'fav':
           await room.setFavourite(!fav);
         case 'mute':
