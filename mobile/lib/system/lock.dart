@@ -49,8 +49,8 @@ class AppLock {
   }
 
   static String _hash(String pin, String salt) {
-    var d = utf8.encode('$salt:$pin');
-    for (var i = 0; i < 20000; i++) {
+    List<int> d = utf8.encode('$salt:$pin');
+    for (var i = 0; i < 5000; i++) {
       d = sha256.convert([...d, ...utf8.encode(salt)]).bytes;
     }
     return base64.encode(d);

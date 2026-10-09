@@ -87,6 +87,7 @@ USAGE = {
     'NSCameraUsageDescription': 'Камера нужна для видеозвонков и фото',
     'NSMicrophoneUsageDescription': 'Микрофон нужен для звонков и голосовых сообщений',
     'NSPhotoLibraryUsageDescription': 'Доступ к фото нужен, чтобы отправлять снимки в чат',
+    'NSFaceIDUsageDescription': 'Face ID нужен, чтобы разблокировать Ласточку без код-пароля',
 }
 def plist_fn(s):
     if '<key>CFBundleDisplayName</key>' in s:
