@@ -22,6 +22,10 @@ dependencies:
   intl: any
   collection: ^1.18.0
   image_picker: ^1.1.2
+  flutter_webrtc: ^1.0.0
+  webrtc_interface: ^1.2.0
+  flutter_ringtone_player: ^4.0.0
+  crypto: ^3.0.6
 
 dev_dependencies:
   flutter_test:

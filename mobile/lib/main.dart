@@ -6,6 +6,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:matrix/encryption/utils/key_verification.dart';
 import 'package:matrix/matrix.dart';
 
+import 'calls/voip.dart';
 import 'matrix_client.dart';
 import 'pages/chats.dart';
 import 'pages/login.dart';
@@ -19,6 +20,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('ru');
   client = await createClient();
+  initVoip();
   runApp(const LastochkaApp());
 }
 

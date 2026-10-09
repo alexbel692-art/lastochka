@@ -12,7 +12,7 @@ def edit(path, fn):
         print('patched', path)
 
 # --- Android: разрешения и название ---
-PERMS = ['INTERNET', 'RECORD_AUDIO', 'CAMERA', 'POST_NOTIFICATIONS', 'MODIFY_AUDIO_SETTINGS', 'ACCESS_NETWORK_STATE', 'WAKE_LOCK']
+PERMS = ['INTERNET', 'RECORD_AUDIO', 'CAMERA', 'POST_NOTIFICATIONS', 'MODIFY_AUDIO_SETTINGS', 'ACCESS_NETWORK_STATE', 'CHANGE_NETWORK_STATE', 'WAKE_LOCK', 'BLUETOOTH_CONNECT']
 def manifest(s):
     for p in PERMS:
         line = f'<uses-permission android:name="android.permission.{p}"/>'
@@ -46,6 +46,10 @@ def gradle_fn(s):
     return s
 edit(gradle, gradle_fn)
 print('android signing:', 'release key' if signed else 'DEBUG key (секрет ANDROID_KEYSTORE не задан)')
+
+# правила сжатия кода: модуль звонков WebRTC вызывается из нативного кода
+with open('android/app/proguard-rules.pro', 'a', encoding='utf-8') as f:
+    f.write('-keep class org.webrtc.** { *; }\n-keep class com.cloudwebrtc.webrtc.** { *; }\n')
 
 # --- iOS: название и описания доступа ---
 plist = 'ios/Runner/Info.plist'

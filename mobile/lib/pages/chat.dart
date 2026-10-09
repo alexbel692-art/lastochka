@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:matrix/matrix.dart';
 
 import '../main.dart';
+import '../calls/voip.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import 'chats.dart';
@@ -136,6 +137,12 @@ class _ChatPageState extends State<ChatPage> {
             ]),
           ),
         ]),
+        actions: [
+          if (room.isDirectChat || members == 2) ...[
+            IconButton(icon: const Icon(Icons.call_outlined), tooltip: 'Позвонить', onPressed: () => startCall(context, room, video: false)),
+            IconButton(icon: const Icon(Icons.videocam_outlined), tooltip: 'Видеозвонок', onPressed: () => startCall(context, room, video: true)),
+          ],
+        ],
       ),
       body: Container(
         color: Bubbles.wall(context),
