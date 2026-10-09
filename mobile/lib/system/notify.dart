@@ -71,7 +71,12 @@ Future<void> requestNotificationPermission() async {
     if (Platform.isAndroid) {
       final a = _fln.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
       await a?.requestNotificationsPermission();
-      await a?.requestFullScreenIntentPermission();
+      // экран входящего звонка поверх блокировки (Android 14+): спрашиваем один раз
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool('notify.fullscreenAsked') != true) {
+        await prefs.setBool('notify.fullscreenAsked', true);
+        await a?.requestFullScreenIntentPermission();
+      }
     } else if (Platform.isIOS) {
       await _fln.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()?.requestPermissions(alert: true, badge: true, sound: true);
     } else if (Platform.isMacOS) {

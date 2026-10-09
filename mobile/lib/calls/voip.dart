@@ -47,7 +47,7 @@ class LastochkaVoip implements WebRTCDelegate {
     if (isDesktopOS) {
       await showMainWindow();
     }
-    if (!appVisible || !isDesktopOS) await showCallNotification(session);
+    if (!appVisible) await showCallNotification(session);
     session.onCallStateChanged.stream.listen((s) {
       if (s != CallState.kRinging) {
         clearCallNotification();

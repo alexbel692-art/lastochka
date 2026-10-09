@@ -194,8 +194,8 @@ jobs:
           target_commitish: ${{ github.sha }}
           body: |
             Новая Ласточка на Flutter — одна программа для всех устройств.
-            • Android (телефоны и планшеты): Lastochka-…-Android.apk
-            • Windows: Lastochka-Setup-….exe (установка для всех пользователей, подходит для RDP) или portable.zip
-            • macOS (Apple Silicon и Intel): Lastochka-…-Mac.dmg
+            • Android (телефоны и планшеты): Lastochka-…-Android.apk — сообщения и звонки приходят и при закрытом приложении
+            • Windows: Lastochka-Setup-….exe (для всех пользователей, подходит для RDP; живёт в трее, запускается с Windows) или portable.zip
+            • macOS (Apple Silicon и Intel): Lastochka-…-Mac.dmg — при закрытии окна остаётся в строке меню
             • iPhone: Lastochka-…-iPhone-unsigned.ipa — без подписи Apple, ставится через Sideloadly/AltStore
           files: dist/*

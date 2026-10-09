@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:matrix/encryption/utils/key_verification.dart';
 import 'package:matrix/matrix.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'calls/voip.dart';
 import 'system/desktop.dart';
@@ -43,6 +45,8 @@ Future<void> main(List<String> args) async {
   initVoip();
   await initNotifications();
   runApp(const LastochkaApp());
+  // Android может запустить Ласточку в фоне (после перезагрузки, фоновой службой) — окна нет
+  if (!isDesktopOS) appVisible = WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
   // автозапуск с Windows — сразу в трей, без окна
   if (args.contains('--hidden')) {
     appVisible = false;
@@ -82,8 +86,31 @@ class _LastochkaAppState extends State<LastochkaApp> {
 
   // после входа: разрешение на уведомления и фоновая служба (Android)
   Future<void> _afterLogin() async {
+    if (!appVisible && !isDesktopOS) {
+      await startBackgroundService();
+      return;
+    }
     await requestNotificationPermission();
     await startBackgroundService();
+    if (Platform.isAndroid && !await isIgnoringBatteryOptimizations()) {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool('bg.batteryAsked') == true) return;
+      await prefs.setBool('bg.batteryAsked', true);
+      final ctx = navKey.currentContext;
+      if (ctx == null || !ctx.mounted) return;
+      final ok = await showDialog<bool>(
+        context: ctx,
+        builder: (d) => AlertDialog(
+          title: const Text('Звонки при закрытом приложении'),
+          content: const Text('Чтобы сообщения и звонки приходили, даже когда Ласточка закрыта, разрешите ей работать без ограничений батареи. Расход заряда почти не изменится.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Позже')),
+            FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Разрешить')),
+          ],
+        ),
+      );
+      if (ok == true) await requestIgnoreBatteryOptimizations();
+    }
   }
 
   @override
