@@ -12,6 +12,7 @@ import 'calls/voip.dart';
 import 'chat/autodelete.dart';
 import 'pages/settings.dart';
 import 'system/lock.dart';
+import 'system/updater.dart';
 import 'system/desktop.dart';
 import 'system/notify.dart';
 import 'matrix_client.dart';
@@ -76,6 +77,7 @@ Future<void> main(List<String> args) async {
   startAutodeleteSweeper();
   autoAcceptDirectInvites();
   handlePasswordConfirmations();
+  Updater.instance.start();
   runApp(const LastochkaApp());
   // Android может запустить Ласточку в фоне (после перезагрузки, фоновой службой) — окна нет
   if (!isDesktopOS) appVisible = WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;

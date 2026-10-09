@@ -1,4 +1,4 @@
-name: Ласточка на Flutter (Android, iPhone, Windows, macOS)
+name: Ласточка (Android, iPhone, Windows, macOS)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       version:
         description: 'Версия (например 0.4.0)'
         required: true
-        default: '0.4.0'
+        default: '4.0.0'
       publish:
         description: 'Опубликовать в релизах'
         type: boolean
@@ -66,7 +66,7 @@ jobs:
         run: tool/annotate.sh "tests" flutter test
       - name: Сборка APK
         run: |
-          tool/annotate.sh "build apk" flutter build apk --release --build-name="$V" --build-number="${{ github.run_number }}"
+          tool/annotate.sh "build apk" flutter build apk --release --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
           mkdir -p ../dist && cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android.apk"
       - uses: actions/upload-artifact@v4
         with:
@@ -94,7 +94,7 @@ jobs:
       # Поставить на iPhone можно через Sideloadly/AltStore со своим Apple ID.
       - name: Сборка iOS
         run: |
-          tool/annotate.sh "ios config" flutter build ios --release --no-codesign --config-only --build-name="$V" --build-number="${{ github.run_number }}"
+          tool/annotate.sh "ios config" flutter build ios --release --no-codesign --config-only --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
           cd ios
           ../tool/annotate.sh "build ios" xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release \
             -sdk iphoneos -destination generic/platform=iOS -derivedDataPath build/dd \
@@ -125,13 +125,15 @@ jobs:
           tool/annotate.sh "macos pub get" flutter pub get
           dart run flutter_launcher_icons
       - name: Сборка macOS
-        run: tool/annotate.sh "build macos" flutter build macos --release --build-name="$V" --build-number="${{ github.run_number }}"
+        run: tool/annotate.sh "build macos" flutter build macos --release --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
       - name: Образ диска
         run: |
           APP=build/macos/Build/Products/Release/Lastochka.app
           lipo -info "$APP/Contents/MacOS/Lastochka" || true
           mkdir -p dmg ../dist && cp -R "$APP" dmg/ && ln -s /Applications dmg/Applications
-          hdiutil create -volname "Ласточка" -srcfolder dmg -ov -format UDZO "../dist/Lastochka-$V-Mac.dmg"
+          hdiutil create -volname "Ласточка" -srcfolder dmg -ov -format UDZO "../dist/Lastochka-$V-arm64.dmg"
+          # одна универсальная сборка; второе имя — чтобы прежняя версия на Intel-Mac нашла обновление
+          cp "../dist/Lastochka-$V-arm64.dmg" "../dist/Lastochka-$V-x64.dmg"
       - uses: actions/upload-artifact@v4
         with:
           name: macos
@@ -155,7 +157,7 @@ jobs:
           tool/annotate.sh "windows pub get" flutter pub get
           dart run flutter_launcher_icons
       - name: Сборка Windows
-        run: tool/annotate.sh "build windows" flutter build windows --release --build-name="$V" --build-number="${{ github.run_number }}"
+        run: tool/annotate.sh "build windows" flutter build windows --release --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
       - name: Установщик и архив
         run: |
           R=build/windows/x64/runner/Release
@@ -185,17 +187,26 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - run: ls -la dist && cd dist && sha256sum * > SHA256SUMS.txt
+      - uses: actions/checkout@v5
+        with:
+          path: src
+      - name: Подпись файлов
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          node src/scripts/sign-files.cjs dist "${{ inputs.version }}"
+          cd dist && sha256sum $(ls | grep -v '\.sig$') > SHA256SUMS.txt && ls -la
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: mobile-v${{ inputs.version }}
-          name: Ласточка ${{ inputs.version }} — новая версия (Android, iPhone, Windows, macOS)
-          prerelease: true
+          tag_name: v${{ inputs.version }}
+          name: Ласточка ${{ inputs.version }}
+          prerelease: false
+          make_latest: true
           target_commitish: ${{ github.sha }}
           body: |
-            Новая Ласточка на Flutter — одна программа для всех устройств.
-            • Android (телефоны и планшеты): Lastochka-…-Android.apk — сообщения и звонки приходят и при закрытом приложении
-            • Windows: Lastochka-Setup-….exe (для всех пользователей, подходит для RDP; живёт в трее, запускается с Windows) или portable.zip
-            • macOS (Apple Silicon и Intel): Lastochka-…-Mac.dmg — при закрытии окна остаётся в строке меню
+            Ласточка — защищённый мессенджер на Matrix. Одна программа для всех устройств; обновляется сама, каждое обновление подписано и проверяется перед установкой.
+            • Windows: Lastochka-Setup-….exe — установка для всех пользователей (подходит для RDP), живёт в трее, запускается с Windows. Прежняя версия 3.x удаляется автоматически.
+            • macOS (Apple Silicon и Intel): Lastochka-…-arm64.dmg (или -x64.dmg — это тот же файл)
+            • Android (телефоны и планшеты): Lastochka-…-Android.apk
             • iPhone: Lastochka-…-iPhone-unsigned.ipa — без подписи Apple, ставится через Sideloadly/AltStore
           files: dist/*

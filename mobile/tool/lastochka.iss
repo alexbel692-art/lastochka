@@ -16,11 +16,12 @@ OutputDir=..\..\dist
 OutputBaseFilename=Lastochka-Setup-{#AppVer}
 SetupIconFile=..\windows\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\Lastochka.exe
-UninstallDisplayName=Ласточка (новая версия)
+UninstallDisplayName=Ласточка
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 CloseApplications=yes
+RestartApplications=no
 
 [Languages]
 Name: "ru"; MessagesFile: "compiler:Languages\Russian.isl"
@@ -31,9 +32,47 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+; ярлыки предварительной версии
+Type: files; Name: "{commonprograms}\Ласточка (новая версия).lnk"
+Type: files; Name: "{commondesktop}\Ласточка (новая версия).lnk"
+
 [Icons]
-Name: "{commonprograms}\Ласточка (новая версия)"; Filename: "{app}\Lastochka.exe"; AppUserModelID: "Lastochka.App"
-Name: "{commondesktop}\Ласточка (новая версия)"; Filename: "{app}\Lastochka.exe"; Tasks: desktopicon; AppUserModelID: "Lastochka.App"
+Name: "{commonprograms}\Ласточка"; Filename: "{app}\Lastochka.exe"; AppUserModelID: "Lastochka.App"
+Name: "{commondesktop}\Ласточка"; Filename: "{app}\Lastochka.exe"; Tasks: desktopicon; AppUserModelID: "Lastochka.App"
 
 [Run]
+; обычная установка — галочка «Запустить»; тихое автообновление — запускаем сами
 Filename: "{app}\Lastochka.exe"; Description: "{cm:LaunchProgram,Ласточка}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Lastochka.exe"; Flags: nowait runasoriginaluser skipifnotsilent
+
+[Code]
+// Прежняя версия Ласточки (3.x) установлена отдельной программой — после установки новой удаляем её тихо.
+procedure RemoveOldFrom(RootKey: Integer);
+var
+  Names: TArrayOfString;
+  I, RC: Integer;
+  Key, Name, Quiet: String;
+begin
+  Key := 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall';
+  if not RegGetSubkeyNames(RootKey, Key, Names) then Exit;
+  for I := 0 to GetArrayLength(Names) - 1 do
+  begin
+    if Pos('5E0C2B7A', Names[I]) > 0 then Continue;
+    if not RegQueryStringValue(RootKey, Key + '\' + Names[I], 'DisplayName', Name) then Continue;
+    if Pos('Ласточка 3.', Name) <> 1 then Continue;
+    if not RegQueryStringValue(RootKey, Key + '\' + Names[I], 'QuietUninstallString', Quiet) then Continue;
+    Log('Удаляем прежнюю версию: ' + Name);
+    Exec(ExpandConstant('{cmd}'), '/C "' + Quiet + '"', '', SW_HIDE, ewWaitUntilTerminated, RC);
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    RemoveOldFrom(HKLM64);
+    RemoveOldFrom(HKLM32);
+    RemoveOldFrom(HKCU);
+  end;
+end;

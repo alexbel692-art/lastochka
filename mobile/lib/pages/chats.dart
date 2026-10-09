@@ -9,6 +9,7 @@ import '../calls/voip.dart';
 import '../chat/autodelete.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
+import '../widgets/update_banner.dart';
 import 'chat.dart';
 import 'settings.dart';
 
@@ -368,7 +369,9 @@ class _ChatsPageState extends State<ChatsPage> {
       ),
       drawer: _drawer(context),
       floatingActionButton: FloatingActionButton(onPressed: _newChat, tooltip: 'Новый чат', child: const Icon(Icons.edit_outlined)),
-      body: client.prevBatch == null && client.rooms.isEmpty
+      body: Column(children: [
+        const UpdateBanner(),
+        Expanded(child: client.prevBatch == null && client.rooms.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : rooms.isEmpty && _people.isEmpty
               ? Center(child: Text(_q.text.isEmpty ? 'Здесь пока нет чатов' : 'Ничего не найдено', style: TextStyle(color: hint)))
@@ -438,6 +441,8 @@ class _ChatsPageState extends State<ChatsPage> {
                     );
                   },
                 ),
+        ),
+      ]),
     );
   }
 

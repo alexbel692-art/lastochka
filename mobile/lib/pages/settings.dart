@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
 import '../system/desktop.dart';
 import '../system/notify.dart';
+import '../system/updater.dart';
 import 'passcode.dart';
 import '../widgets/avatar.dart';
 import 'login.dart';
@@ -133,7 +134,17 @@ class _SettingsPageState extends State<SettingsPage> {
         if (Platform.isIOS)
           _row(Icons.info_outline, 'Уведомления на iPhone', sub: 'Приходят, пока Ласточка открыта или недавно свёрнута. Чтобы они приходили всегда, нужен сервер push-уведомлений Apple.'),
         _header('О программе'),
-        _row(Icons.info_outline, 'Ласточка', sub: 'Защищённый мессенджер на Matrix'),
+        _row(Icons.info_outline, 'Ласточка $appVersion', sub: 'Защищённый мессенджер на Matrix'),
+        if (Updater.instance.supported)
+          _row(Icons.system_update_alt, 'Проверить обновления', sub: 'Обновления подписаны ключом разработчика и проверяются перед установкой', onTap: () async {
+            final has = await Updater.instance.check();
+            if (!context.mounted) return;
+            if (has) {
+              Navigator.of(context).popUntil((r) => r.isFirst);
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('У вас последняя версия')));
+            }
+          }),
         if (isDesktopOS) _row(Icons.close, 'Выйти из Ласточки', sub: 'Закрыть программу полностью', onTap: quitApp),
         const Divider(),
         _row(Icons.logout, 'Выйти', color: Colors.redAccent, onTap: () => logout(context)),
