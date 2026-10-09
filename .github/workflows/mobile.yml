@@ -1,0 +1,99 @@
+name: Mobile (Android, iOS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия (например 0.1.0)'
+        required: true
+        default: '0.1.0'
+      publish:
+        description: 'Опубликовать APK в релизах'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: mobile
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Платформенные папки
+        run: |
+          flutter --version
+          flutter create --platforms android,ios --org app.lastochka --project-name lastochka .
+          rm -rf test
+      - name: Ключ подписи
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE }}
+          KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > android/app/upload.jks
+            printf 'storeFile=upload.jks\nstorePassword=%s\nkeyAlias=lastochka\nkeyPassword=%s\n' "$KP" "$KP" > android/key.properties
+          else
+            echo "::warning::Секрет ANDROID_KEYSTORE не задан — APK подписан временным ключом"
+          fi
+      - name: Настройка проекта
+        run: python3 tool/ci_prepare.py
+      - name: Зависимости
+        run: tool/annotate.sh "pub get" flutter pub get
+      - name: Иконки
+        run: tool/annotate.sh "icons" dart run flutter_launcher_icons
+      - name: Проверка кода
+        run: tool/annotate.sh "analyze" flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Сборка APK
+        run: |
+          V="${{ inputs.version }}"
+          tool/annotate.sh "build apk" flutter build apk --release --build-name="$V" --build-number="${{ github.run_number }}"
+          cp build/app/outputs/flutter-apk/app-release.apk "../Lastochka-$V.apk"
+          sha256sum "../Lastochka-$V.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: Lastochka-*.apk
+      - name: Релиз
+        if: ${{ inputs.publish }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mobile-v${{ inputs.version }}
+          name: Ласточка для Android ${{ inputs.version }}
+          prerelease: true
+          target_commitish: ${{ github.sha }}
+          body: |
+            Ранняя версия Ласточки для телефона: вход, чаты, сообщения, фото, подтверждение устройства.
+            Установка: скачайте APK на телефон и откройте его (разрешите установку из этого источника).
+          files: Lastochka-*.apk
+
+  ios:
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Платформенные папки
+        run: |
+          flutter create --platforms android,ios --org app.lastochka --project-name lastochka .
+          rm -rf test
+          python3 tool/ci_prepare.py
+      - name: Зависимости
+        run: tool/annotate.sh "ios pub get" flutter pub get
+      - name: Сборка iOS (без подписи)
+        run: tool/annotate.sh "build ios" flutter build ios --release --no-codesign --build-name="${{ inputs.version }}"
