@@ -89,10 +89,11 @@ class _TrayListener with TrayListener {
   }
 }
 
-Future<void> initDesktop() async {
+Future<void> initDesktop({bool hidden = false}) async {
   if (!isDesktopOS) return;
   try {
     await windowManager.ensureInitialized();
+    if (hidden) appVisible = false;
     await windowManager.setTitle('Ласточка');
     await windowManager.setMinimumSize(const Size(380, 520));
     await windowManager.setPreventClose(true);

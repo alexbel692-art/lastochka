@@ -16,7 +16,7 @@ late VoIP voip;
 
 class LastochkaVoip implements WebRTCDelegate {
   @override
-  MediaDevices get mediaDevices => rtc.navigator.mediaDevices;
+  MediaDevices get mediaDevices => _Media(rtc.navigator.mediaDevices);
 
   @override
   Future<RTCPeerConnection> createPeerConnection(Map<String, dynamic> configuration, [Map<String, dynamic> constraints = const {}]) async {
@@ -42,6 +42,7 @@ class LastochkaVoip implements WebRTCDelegate {
   @override
   Future<void> handleNewCall(CallSession session) async {
     ringing = session;
+    await setCallMode(true);
     navKey.currentState?.push(MaterialPageRoute(builder: (_) => CallPage(session: session)));
     // приложение свёрнуто или закрыто — полноэкранное уведомление; на компьютере — показать окно
     if (isDesktopOS) {
@@ -60,6 +61,7 @@ class LastochkaVoip implements WebRTCDelegate {
   Future<void> handleCallEnded(CallSession session) async {
     await stopRingtone();
     await clearCallNotification();
+    await setCallMode(false);
     if (ringing == session) ringing = null;
   }
 
@@ -97,7 +99,15 @@ void initVoip() {
   onCallAction = (action, callId) {
     final c = ringing;
     if (c == null || c.callId != callId) return;
-    if (action == 'answer') c.answer();
+    if (action == 'answer') {
+      c.answer().then((_) async {
+        if (c.type == CallType.kVideo && (c.localUserMediaStream?.stream?.getVideoTracks().isEmpty ?? false)) {
+          try {
+            await c.setLocalVideoMuted(false);
+          } catch (_) {}
+        }
+      });
+    }
     if (action == 'decline') c.reject();
   };
 }
@@ -124,4 +134,37 @@ bool canCall(Room room) {
   if (room.isDirectChat) return true;
   final n = room.summary.mJoinedMemberCount ?? room.getParticipants([Membership.join]).length;
   return n == 2;
+}
+
+/// Камера и микрофон. Пока окно Ласточки закрыто (звонок пришёл в фоне), камеру не включаем —
+/// Android её не даст, и звонок оборвался бы. Видео включится после ответа.
+class _Media extends MediaDevices {
+  final MediaDevices inner;
+  _Media(this.inner);
+
+  @override
+  Future<MediaStream> getUserMedia(Map<String, dynamic> c) async {
+    if (!appVisible && c['video'] != null && c['video'] != false) {
+      return inner.getUserMedia({...c, 'video': false});
+    }
+    try {
+      return await inner.getUserMedia(c);
+    } catch (e) {
+      // камера занята или недоступна — звоним без видео
+      if (c['video'] != null && c['video'] != false) return inner.getUserMedia({...c, 'video': false});
+      rethrow;
+    }
+  }
+
+  @override
+  Future<MediaStream> getDisplayMedia(Map<String, dynamic> c) => inner.getDisplayMedia(c);
+
+  @override
+  Future<List<dynamic>> getSources() => inner.getSources();
+
+  @override
+  Future<List<MediaDeviceInfo>> enumerateDevices() => inner.enumerateDevices();
+
+  @override
+  Future<MediaDeviceInfo> selectAudioOutput([AudioOutputOptions? options]) => inner.selectAudioOutput(options);
 }

@@ -81,6 +81,17 @@ class _CallPageState extends State<CallPage> {
   }
 
   /// Ответить только голосом (на видеозвонок — с выключенной камерой).
+  /// Ответ с видео: если звонок пришёл в фоне, камера ещё не включена — включаем после ответа.
+  Future<void> _answerVideo() async {
+    await call.answer();
+    if (call.localUserMediaStream?.stream?.getVideoTracks().isEmpty ?? false) {
+      try {
+        await call.setLocalVideoMuted(false);
+      } catch (_) {}
+    }
+    _bindStreams();
+  }
+
   Future<void> _answerAudio() async {
     await call.answer();
     if (call.type == CallType.kVideo) {
@@ -195,7 +206,7 @@ class _CallPageState extends State<CallPage> {
                     _btn(Icons.call_end, 'Отклонить', () => call.reject(), bg: const Color(0xFFE53935)),
                     _btn(Icons.call, call.type == CallType.kVideo ? 'Без видео' : 'Ответить', _answerAudio, bg: const Color(0xFF43A047)),
                     if (call.type == CallType.kVideo)
-                      _btn(Icons.videocam, 'С видео', () => call.answer(), bg: const Color(0xFF43A047)),
+                      _btn(Icons.videocam, 'С видео', _answerVideo, bg: const Color(0xFF43A047)),
                   ]),
                 )
               else if (!ended)

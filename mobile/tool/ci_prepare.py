@@ -12,7 +12,7 @@ def edit(path, fn):
         print('patched', path)
 
 # --- Android: разрешения и название ---
-PERMS = ['FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_REMOTE_MESSAGING', 'USE_FULL_SCREEN_INTENT', 'RECEIVE_BOOT_COMPLETED', 'VIBRATE', 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', 'INTERNET', 'RECORD_AUDIO', 'CAMERA', 'POST_NOTIFICATIONS', 'MODIFY_AUDIO_SETTINGS', 'ACCESS_NETWORK_STATE', 'CHANGE_NETWORK_STATE', 'WAKE_LOCK', 'BLUETOOTH_CONNECT']
+PERMS = ['FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_REMOTE_MESSAGING', 'FOREGROUND_SERVICE_MICROPHONE', 'USE_FULL_SCREEN_INTENT', 'RECEIVE_BOOT_COMPLETED', 'VIBRATE', 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', 'INTERNET', 'RECORD_AUDIO', 'CAMERA', 'POST_NOTIFICATIONS', 'MODIFY_AUDIO_SETTINGS', 'ACCESS_NETWORK_STATE', 'CHANGE_NETWORK_STATE', 'WAKE_LOCK', 'BLUETOOTH_CONNECT']
 def manifest(s):
     for p in PERMS:
         line = f'<uses-permission android:name="android.permission.{p}"/>'
@@ -25,10 +25,8 @@ def manifest(s):
             s = s.replace('android:name="${applicationName}"', 'android:name=".MainApplication"', 1)
         else:
             s = s.replace('<application', '<application\n        android:name=".MainApplication"', 1)
-    if 'android:showWhenLocked' not in s:
-        s = s.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n            android:showWhenLocked="true"\n            android:turnScreenOn="true"', 1)
     comps = '''
-        <service android:name=".SyncService" android:exported="false" android:foregroundServiceType="remoteMessaging"/>
+        <service android:name=".SyncService" android:exported="false" android:foregroundServiceType="remoteMessaging|microphone"/>
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
@@ -161,3 +159,8 @@ if os.path.exists(mc):
 """
         return s[:m.end()] + code + s[m.end():]
     edit(mc, mc_fn)
+
+# --- Windows: при автозапуске (--hidden) окно не показывается — Ласточка стартует в трее ---
+fw = 'windows/runner/flutter_window.cpp'
+if os.path.exists(fw):
+    edit(fw, lambda s: s.replace('this->Show();', 'if (wcsstr(GetCommandLineW(), L"--hidden") == nullptr) this->Show();') if '--hidden' not in s else s)

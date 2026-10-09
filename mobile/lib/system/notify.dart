@@ -7,6 +7,7 @@ import 'dart:isolate';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,7 +22,19 @@ bool _ready = false;
 
 /// Открытый сейчас чат и видно ли окно — чтобы не уведомлять о том, что и так на экране.
 String? openRoomId;
-bool appVisible = true;
+final visibility = ValueNotifier<bool>(true);
+bool get appVisible => visibility.value;
+set appVisible(bool v) => visibility.value = v;
+
+const _system = MethodChannel('lastochka/system');
+
+/// Android: экран поверх блокировки разрешён только во время звонка.
+Future<void> setCallMode(bool on) async {
+  if (!Platform.isAndroid) return;
+  try {
+    await _system.invokeMethod('callMode', on);
+  } catch (_) {}
+}
 
 /// Действия с уведомлением звонка (ответить/отклонить) передаются сюда.
 void Function(String action, String? payload)? onCallAction;
@@ -63,6 +76,19 @@ Future<void> initNotifications() async {
     Logs().w('[Ласточка] уведомления недоступны', e);
   }
   client.onNotification.stream.listen(_onEvent);
+  if (Platform.isAndroid) {
+    // нажатия на уведомления, когда окно Ласточки было закрыто, приходят отсюда
+    _system.setMethodCallHandler((call) async {
+      if (call.method == 'notificationTap' && call.arguments is Map) {
+        final m = call.arguments as Map;
+        _handle('${m['action'] ?? ''}', '${m['payload'] ?? ''}');
+      }
+      return null;
+    });
+    try {
+      await _system.invokeMethod('ready');
+    } catch (_) {}
+  }
 }
 
 /// Спросить разрешение на уведомления (Android 13+, iOS, macOS).
@@ -85,7 +111,15 @@ Future<void> requestNotificationPermission() async {
   } catch (_) {}
 }
 
+String _lastTap = '';
+DateTime _lastTapAt = DateTime(2000);
+
 void _handle(String action, String payload) {
+  // одно нажатие может прийти двумя путями — обрабатываем один раз
+  final key = '$action|$payload';
+  if (key == _lastTap && DateTime.now().difference(_lastTapAt).inSeconds < 3) return;
+  _lastTap = key;
+  _lastTapAt = DateTime.now();
   if (payload.startsWith('call:')) {
     onCallAction?.call(action.isEmpty ? 'open' : action, payload.substring(5));
     if (action != 'decline') showMainWindow();

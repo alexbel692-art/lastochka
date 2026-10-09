@@ -33,13 +33,32 @@ class SyncService : Service() {
             .setShowWhen(false)
             .setContentIntent(open)
             .build()
-        if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
-        else startForeground(1, n)
+        // микрофон в фоне нужен, чтобы входящий звонок зазвонил при закрытой Ласточке;
+        // такой тип разрешён, только когда служба запущена из открытого окна
+        val mic = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED && MainActivity.current != null
+        if (Build.VERSION.SDK_INT >= 34) {
+            try {
+                startForeground(1, n, if (mic) ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
+            } catch (_: Exception) {
+                startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
+            }
+        } else if (Build.VERSION.SDK_INT >= 30) {
+            startForeground(1, n, if (mic) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
+        } else {
+            startForeground(1, n)
+        }
         return START_STICKY
     }
 
     companion object {
         private const val CHANNEL = "background"
+
+        /** Запустить, если пользователь вошёл и не отключил работу в фоне. */
+        fun startIfEnabled(ctx: Context) {
+            val prefs = ctx.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            if (!prefs.getBoolean("flutter.bg.enabled", true) || !prefs.contains("flutter.bg.loggedIn")) return
+            start(ctx)
+        }
         fun start(ctx: Context) {
             val i = Intent(ctx, SyncService::class.java)
             try {

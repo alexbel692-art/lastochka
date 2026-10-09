@@ -40,18 +40,40 @@ Future<void> main(List<String> args) async {
         ),
       );
   await initializeDateFormatting('ru');
-  await initDesktop();
-  client = await createClient();
+  final hidden = args.contains('--hidden');
+  await initDesktop(hidden: hidden);
+  try {
+    client = await createClient();
+  } catch (e) {
+    await showMainWindow();
+    runApp(MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: lightTheme,
+      darkTheme: darkTheme,
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.lock_outline, size: 56, color: Colors.redAccent),
+              const SizedBox(height: 12),
+              const Text('Ласточка не смогла открыть хранилище', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Text('$e', textAlign: TextAlign.center),
+            ]),
+          ),
+        ),
+      ),
+    ));
+    return;
+  }
   initVoip();
   await initNotifications();
   runApp(const LastochkaApp());
   // Android может запустить Ласточку в фоне (после перезагрузки, фоновой службой) — окна нет
   if (!isDesktopOS) appVisible = WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
   // автозапуск с Windows — сразу в трей, без окна
-  if (args.contains('--hidden')) {
-    appVisible = false;
-    WidgetsBinding.instance.addPostFrameCallback((_) => hideMainWindow());
-  }
+  if (hidden) appVisible = false;
 }
 
 class LastochkaApp extends StatefulWidget {

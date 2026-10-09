@@ -29,16 +29,26 @@ Future<Directory> _dataDir() async {
 
 /// Ключ базы. Если системное хранилище недоступно (редко, например macOS без подписи),
 /// ключ лежит в файле в папке приложения, доступной только этому пользователю.
-Future<String> _databaseKey() async {
+/// Новый ключ создаётся, только если базы ещё нет — иначе можно потерять ключи шифрования.
+Future<String> _databaseKey(bool dbExists) async {
   final fallback = File(p.join((await _dataDir()).path, '.$clientName.key'));
   String? key;
-  try {
-    key = await _secure.read(key: _dbKeyName);
-  } catch (e) {
-    Logs().w('[Ласточка] защищённое хранилище недоступно', e);
+  Object? readError;
+  for (var i = 0; i < 3 && key == null; i++) {
+    try {
+      key = await _secure.read(key: _dbKeyName);
+      readError = null;
+      break;
+    } catch (e) {
+      readError = e;
+      await Future.delayed(const Duration(milliseconds: 400));
+    }
   }
   if (key == null && await fallback.exists()) key = (await fallback.readAsString()).trim();
   if (key != null && key.isNotEmpty) return key;
+  if (dbExists && readError != null) {
+    throw StateError('Нет доступа к ключу базы в защищённом хранилище системы. Разрешите Ласточке доступ к связке ключей и перезапустите её.');
+  }
   final rnd = Random.secure();
   key = base64Url.encode(List<int>.generate(32, (_) => rnd.nextInt(256))).replaceAll('=', '');
   try {
@@ -54,7 +64,8 @@ Future<DatabaseApi> _openDatabase() async {
   final cache = await Directory(p.join((await getTemporaryDirectory()).path, '${clientName}_files')).create(recursive: true);
   final factory = createDatabaseFactoryFfi();
   databaseFactory = factory;
-  final cipher = await _databaseKey();
+  final dbFile = File(path);
+  final cipher = await _databaseKey(await dbFile.exists());
 
   Future<Database> open() async {
     final helper = SQfLiteEncryptionHelper(factory: factory, path: path, cipher: cipher);
@@ -73,14 +84,19 @@ Future<DatabaseApi> _openDatabase() async {
         deleteFilesAfterDuration: const Duration(days: 30),
       );
 
+  // отметка «база создана этой версией»: только старую базу (Android до 0.4) можно пересоздать
+  final marker = File('$path.v2');
   try {
-    return await init();
+    final db = await init();
+    if (!await marker.exists()) await marker.writeAsString('1');
+    return db;
   } catch (e) {
-    // база от старой версии не открылась — начинаем с чистой (потребуется войти заново)
-    Logs().w('[Ласточка] база не открылась, создаём новую', e);
-    final f = File(path);
-    if (await f.exists()) await f.delete();
-    return init();
+    if (await marker.exists()) rethrow; // своя база не открылась — не удаляем, чтобы не потерять ключи
+    Logs().w('[Ласточка] база от старой версии не открылась, создаём новую', e);
+    if (await dbFile.exists()) await dbFile.delete();
+    final db = await init();
+    await marker.writeAsString('1');
+    return db;
   }
 }
 

@@ -58,6 +58,7 @@ class _ChatPageState extends State<ChatPage> {
     super.initState();
     openRoomId = room.id;
     clearRoomNotification(room.id);
+    visibility.addListener(_onVisible);
     _init();
     _scroll.addListener(() {
       if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 600) _more();
@@ -81,6 +82,12 @@ class _ChatPageState extends State<ChatPage> {
     _markRead();
   }
 
+  void _onVisible() {
+    if (!appVisible) return;
+    _markRead();
+    clearRoomNotification(room.id);
+  }
+
   Future<void> _more() async {
     final tl = _tl;
     if (tl == null || _loadingMore || !tl.canRequestHistory) return;
@@ -91,7 +98,9 @@ class _ChatPageState extends State<ChatPage> {
     _loadingMore = false;
   }
 
+  // отмечаем прочитанным, только когда чат действительно на экране
   void _markRead() {
+    if (!appVisible) return;
     final last = _tl?.events.firstOrNull;
     if (last == null || room.notificationCount == 0 && room.fullyRead == last.eventId) return;
     room.setReadMarker(last.eventId, mRead: last.eventId).catchError((_) {});
@@ -122,6 +131,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     if (openRoomId == room.id) openRoomId = null;
+    visibility.removeListener(_onVisible);
     _tl?.cancelSubscriptions();
     _syncSub?.cancel();
     _recTimer?.cancel();
@@ -275,6 +285,9 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _jumpTo(String id) async {
+    // сообщение может быть и выше, и ниже текущего места — ищем от самых новых вверх
+    if (_keys[id]?.currentContext == null && _scroll.hasClients) _scroll.jumpTo(0);
+    await Future.delayed(const Duration(milliseconds: 30));
     for (var i = 0; i < 40 && mounted; i++) {
       final ctx = _keys[id]?.currentContext;
       if (ctx != null) {

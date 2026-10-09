@@ -34,9 +34,34 @@ class MainApplication : Application() {
             return e
         }
 
+        private var channel: MethodChannel? = null
+        private var dartReady = false
+        private val pendingTaps = mutableListOf<Map<String, String>>()
+
+        /** Нажатие на уведомление: передать в Dart (если Ласточка ещё запускается — после готовности). */
+        fun forwardTap(intent: Intent?) {
+            val a = intent?.action ?: return
+            if (a != "SELECT_NOTIFICATION" && a != "SELECT_FOREGROUND_NOTIFICATION") return
+            val tap = mapOf("action" to (intent.getStringExtra("actionId") ?: ""), "payload" to (intent.getStringExtra("payload") ?: ""))
+            if (dartReady) channel?.invokeMethod("notificationTap", tap) else pendingTaps.add(tap)
+        }
+
         private fun channel(ctx: Context, e: FlutterEngine) {
-            MethodChannel(e.dartExecutor.binaryMessenger, "lastochka/system").setMethodCallHandler { call, result ->
+            val ch = MethodChannel(e.dartExecutor.binaryMessenger, "lastochka/system")
+            channel = ch
+            ch.setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "ready" -> {
+                        dartReady = true
+                        pendingTaps.forEach { ch.invokeMethod("notificationTap", it) }
+                        pendingTaps.clear()
+                        result.success(true)
+                    }
+                    "callMode" -> {
+                        MainActivity.callMode = call.arguments == true
+                        MainActivity.current?.applyCallMode()
+                        result.success(true)
+                    }
                     "startService" -> { SyncService.start(ctx); result.success(true) }
                     "stopService" -> { ctx.stopService(Intent(ctx, SyncService::class.java)); result.success(true) }
                     "isIgnoringBattery" -> {
