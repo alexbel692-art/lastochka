@@ -9,6 +9,9 @@ import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'calls/voip.dart';
+import 'chat/autodelete.dart';
+import 'pages/settings.dart';
+import 'system/lock.dart';
 import 'system/desktop.dart';
 import 'system/notify.dart';
 import 'matrix_client.dart';
@@ -69,6 +72,9 @@ Future<void> main(List<String> args) async {
   }
   initVoip();
   await initNotifications();
+  await AppLock.instance.init();
+  startAutodeleteSweeper();
+  autoAcceptDirectInvites();
   runApp(const LastochkaApp());
   // Android может запустить Ласточку в фоне (после перезагрузки, фоновой службой) — окна нет
   if (!isDesktopOS) appVisible = WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
@@ -160,6 +166,55 @@ class _LastochkaAppState extends State<LastochkaApp> {
         GlobalCupertinoLocalizations.delegate,
       ],
       home: client.isLogged() ? const VerifyGate(child: ChatsPage()) : const LoginPage(),
+      // код-пароль поверх всего приложения
+      builder: (context, child) => ValueListenableBuilder<bool>(
+        valueListenable: AppLock.instance.locked,
+        builder: (context, locked, _) => Stack(children: [
+          child ?? const SizedBox.shrink(),
+          if (locked && client.isLogged())
+            Positioned.fill(
+              child: LockScreen(onForgot: () async {
+                final ctx = navKey.currentContext;
+                if (ctx == null) return;
+                final ok = await showDialog<bool>(
+                  context: ctx,
+                  builder: (d) => AlertDialog(
+                    title: const Text('Забыли код-пароль?'),
+                    content: const Text('Сбросить код можно только выходом из аккаунта на этом устройстве. Потом войдите снова и подтвердите устройство ключом восстановления.'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
+                      TextButton(onPressed: () => Navigator.pop(d, true), child: const Text('Выйти', style: TextStyle(color: Colors.redAccent))),
+                    ],
+                  ),
+                );
+                if (ok != true) return;
+                await AppLock.instance.disable();
+                await logoutNow();
+              }),
+            ),
+        ]),
+      ),
     );
   }
+}
+
+/// Личный чат от коллеги с вашего сервера принимается автоматически — собеседнику не нужно
+/// ничего нажимать. Приглашения с чужих серверов и в группы по-прежнему спрашивают.
+void autoAcceptDirectInvites() {
+  final seen = <String>{};
+  client.onSync.stream.listen((_) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('invites.autoAccept') == false) return;
+    final myDomain = client.userID?.domain;
+    for (final r in client.rooms.where((r) => r.membership == Membership.invite)) {
+      if (!seen.add(r.id)) continue;
+      final me = r.getState(EventTypes.RoomMember, client.userID!);
+      final isDirect = me?.content['is_direct'] == true;
+      final inviter = me?.senderId;
+      if (!isDirect || inviter == null || inviter.domain != myDomain) continue;
+      try {
+        await r.join();
+      } catch (_) {}
+    }
+  });
 }

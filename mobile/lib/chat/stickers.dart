@@ -10,6 +10,7 @@ import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
+import 'autodelete.dart';
 import '../widgets/mxc_image.dart';
 
 class StickerImg {
@@ -84,7 +85,7 @@ Future<Uri> _builtinMxc(StickerImg s) async {
 
 Future<void> sendSticker(Room room, StickerImg s, {Event? inReplyTo}) async {
   final url = s.url ?? await _builtinMxc(s);
-  await room.sendEvent({'body': s.body, 'url': url.toString(), 'info': {...s.info}}, type: EventTypes.Sticker, inReplyTo: inReplyTo);
+  await room.sendEvent({'body': s.body, 'url': url.toString(), 'info': {...s.info}, ...ttlExtra(room)}, type: EventTypes.Sticker, inReplyTo: inReplyTo);
 }
 
 /// Сохранить стикер или картинку из чата в «Мои стикеры».

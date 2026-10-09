@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 
 import '../calls/voip.dart';
+import '../chat/autodelete.dart';
 import '../main.dart';
 import '../widgets/avatar.dart';
 
@@ -85,6 +86,12 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
               const Divider(),
               ListTile(leading: Icon(Icons.info_outline, color: hint), title: Text(topic), subtitle: const Text('Описание')),
             ],
+            ListTile(
+              leading: Icon(Icons.local_fire_department_outlined, color: roomTtl(room) > 0 ? Colors.deepOrange : hint),
+              title: const Text('Автоудаление сообщений'),
+              subtitle: Text(roomTtl(room) > 0 ? 'Новые сообщения исчезают через ${ttlText(roomTtl(room)).toLowerCase()}' : 'Выключено'),
+              onTap: _ttlDialog,
+            ),
             if (room.pinnedEventIds.isNotEmpty)
               ListTile(leading: Icon(Icons.push_pin_outlined, color: hint), title: Text('Закреплённых сообщений: ${room.pinnedEventIds.length}')),
             if (!room.isDirectChat) ...[
@@ -160,6 +167,33 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
       _toast(e.errcode == 'M_NOT_FOUND' ? 'Пользователь не найден' : e.errorMessage);
     } catch (_) {
       _toast('Не получилось');
+    }
+  }
+
+  Future<void> _ttlDialog() async {
+    final cur = roomTtl(room);
+    final v = await showDialog<int>(
+      context: context,
+      builder: (d) => SimpleDialog(
+        title: const Text('Автоудаление сообщений'),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+            child: Text('Новые сообщения будут исчезать у всех участников через выбранное время после отправки. Уже отправленные не изменятся.',
+                style: TextStyle(color: Theme.of(context).hintColor, fontSize: 13.5)),
+          ),
+          for (final (ms, t) in ttlOptions)
+            RadioListTile<int>(value: ms, groupValue: cur, title: Text(t), onChanged: (x) => Navigator.pop(d, x)),
+        ],
+      ),
+    );
+    if (v == null || v == cur) return;
+    try {
+      await setRoomTtl(room, v);
+      _toast(v > 0 ? 'Автоудаление: ${ttlText(v)}' : 'Автоудаление выключено');
+      if (mounted) setState(() {});
+    } catch (_) {
+      _toast('Нет прав менять настройки этого чата');
     }
   }
 }

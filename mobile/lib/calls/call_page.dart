@@ -105,9 +105,7 @@ class _CallPageState extends State<CallPage> {
   Future<void> _finish() async {
     if (_closing) return;
     _closing = true;
-    if (_connectedAt != null || call.isOutgoing) {
-      CallSounds.hangup();
-    }
+    CallSounds.hangup();
     setState(() {});
     await Future.delayed(const Duration(milliseconds: 1500));
     if (mounted) Navigator.of(context).maybePop();

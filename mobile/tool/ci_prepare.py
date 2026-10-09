@@ -56,7 +56,7 @@ def gradle_fn(s):
     # уведомлениям нужна поддержка новых функций Java на старых Android
     if 'isCoreLibraryDesugaringEnabled' not in s:
         s = s.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true', 1)
-        s += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+        s += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n    implementation("androidx.appcompat:appcompat:1.7.0")\n}\n'
     s = re.sub(r'ndkVersion = .*', 'ndkVersion = "27.0.12077973"', s)
     if signed and 'create("release")' not in s:
         block = '''    signingConfigs {
@@ -164,3 +164,12 @@ if os.path.exists(mc):
 fw = 'windows/runner/flutter_window.cpp'
 if os.path.exists(fw):
     edit(fw, lambda s: s.replace('this->Show();', 'if (wcsstr(GetCommandLineW(), L"--hidden") == nullptr) this->Show();') if '--hidden' not in s else s)
+
+# --- Android: тема AppCompat (нужна окну входа по отпечатку на Android 8 и старше) ---
+for st in ('android/app/src/main/res/values/styles.xml', 'android/app/src/main/res/values-night/styles.xml'):
+    if os.path.exists(st):
+        def st_fn(s):
+            s = s.replace('@android:style/Theme.Light.NoTitleBar', 'Theme.AppCompat.Light.NoActionBar')
+            s = s.replace('@android:style/Theme.Black.NoTitleBar', 'Theme.AppCompat.NoActionBar')
+            return s
+        edit(st, st_fn)

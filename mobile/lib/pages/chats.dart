@@ -78,6 +78,47 @@ class _ChatsPageState extends State<ChatsPage> {
   bool _wide = false;
   bool _searching = false;
   final _q = TextEditingController();
+  List<Profile> _people = [];
+  Timer? _peopleTimer;
+  String _peopleFor = '';
+
+  // поиск людей на сервере (каталог пользователей) — чтобы написать тому, с кем ещё нет чата
+  void _searchPeople() {
+    final q = _q.text.trim();
+    _peopleTimer?.cancel();
+    if (q.length < 2) {
+      if (_people.isNotEmpty) setState(() => _people = []);
+      return;
+    }
+    _peopleTimer = Timer(const Duration(milliseconds: 400), () async {
+      try {
+        final r = await client.searchUserDirectory(q, limit: 10);
+        if (!mounted || _q.text.trim() != q) return;
+        final direct = client.rooms.where((x) => x.isDirectChat).map((x) => x.directChatMatrixID).toSet();
+        setState(() {
+          _peopleFor = q;
+          _people = r.results.where((p) => p.userId != client.userID && !direct.contains(p.userId)).toList();
+        });
+      } catch (_) {}
+    });
+  }
+
+  Future<void> _openPerson(Profile p) async {
+    try {
+      final id = await client.startDirectChat(p.userId, enableEncryption: true);
+      final room = client.getRoomById(id) ?? await client.waitForRoomInSync(id).then((_) => client.getRoomById(id));
+      if (room != null && mounted) {
+        setState(() {
+          _searching = false;
+          _q.clear();
+          _people = [];
+        });
+        _open(room);
+      }
+    } catch (_) {
+      _toast('Не удалось начать чат');
+    }
+  }
 
   @override
   void initState() {
@@ -277,7 +318,10 @@ class _ChatsPageState extends State<ChatsPage> {
             ? TextField(
                 controller: _q,
                 autofocus: true,
-                onChanged: (_) => setState(() {}),
+                onChanged: (_) {
+                  setState(() {});
+                  _searchPeople();
+                },
                 decoration: InputDecoration(
                   hintText: 'Поиск',
                   isDense: true,
@@ -290,7 +334,10 @@ class _ChatsPageState extends State<ChatsPage> {
             icon: Icon(_searching ? Icons.arrow_forward : Icons.search),
             onPressed: () => setState(() {
               _searching = !_searching;
-              if (!_searching) _q.clear();
+              if (!_searching) {
+                _q.clear();
+                _people = [];
+              }
             }),
           ),
         ],
@@ -321,11 +368,27 @@ class _ChatsPageState extends State<ChatsPage> {
       floatingActionButton: FloatingActionButton(onPressed: _newChat, tooltip: 'Новый чат', child: const Icon(Icons.edit_outlined)),
       body: client.prevBatch == null && client.rooms.isEmpty
           ? const Center(child: CircularProgressIndicator())
-          : rooms.isEmpty
+          : rooms.isEmpty && _people.isEmpty
               ? Center(child: Text(_q.text.isEmpty ? 'Здесь пока нет чатов' : 'Ничего не найдено', style: TextStyle(color: hint)))
               : ListView.builder(
-                  itemCount: rooms.length,
+                  itemCount: rooms.length + (_people.isEmpty || _peopleFor != _q.text.trim() ? 0 : _people.length + 1),
                   itemBuilder: (_, i) {
+                    if (i == rooms.length) {
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+                        child: Text('Люди на сервере', style: TextStyle(color: accent, fontWeight: FontWeight.w600)),
+                      );
+                    }
+                    if (i > rooms.length) {
+                      final p = _people[i - rooms.length - 1];
+                      final pn = p.displayName ?? p.userId.localpart ?? p.userId;
+                      return ListTile(
+                        leading: Avatar(mxc: p.avatarUrl, name: pn, size: 48),
+                        title: Text(pn, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        subtitle: const Text('Написать сообщение'),
+                        onTap: () => _openPerson(p),
+                      );
+                    }
                     final r = rooms[i];
                     final name = r.getLocalizedDisplayname();
                     final unread = r.notificationCount;

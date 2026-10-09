@@ -77,7 +77,7 @@ class VoiceRecorder {
   void dispose() => _rec.dispose();
 }
 
-Future<void> sendVoice(Room room, File f, int durationMs, List<int> waveform, {Event? inReplyTo}) async {
+Future<void> sendVoice(Room room, File f, int durationMs, List<int> waveform, {Event? inReplyTo, Map<String, Object> extra = const {}}) async {
   final bytes = await f.readAsBytes();
   await room.sendFileEvent(
     MatrixAudioFile(bytes: bytes, name: 'Голосовое сообщение.m4a', mimeType: 'audio/mp4', duration: durationMs),
@@ -88,6 +88,7 @@ Future<void> sendVoice(Room room, File f, int durationMs, List<int> waveform, {E
       'org.matrix.msc1767.text': 'Голосовое сообщение',
       'org.matrix.msc1767.audio': {'duration': durationMs, 'waveform': waveform},
       'org.matrix.msc3245.voice': <String, Object?>{},
+      ...extra,
     },
   );
   try {

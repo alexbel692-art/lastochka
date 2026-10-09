@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
 import '../system/desktop.dart';
 import '../system/notify.dart';
+import 'passcode.dart';
 import '../widgets/avatar.dart';
 import 'login.dart';
 
@@ -23,6 +24,11 @@ Future<void> logout(BuildContext context) async {
     ),
   );
   if (ok != true) return;
+  await logoutNow();
+}
+
+/// Выйти без вопросов (после подтверждения).
+Future<void> logoutNow() async {
   try {
     await client.logout();
   } catch (_) {
@@ -94,6 +100,12 @@ class _SettingsPageState extends State<SettingsPage> {
         _row(verified ? Icons.verified_user_outlined : Icons.gpp_maybe_outlined, 'Это устройство',
             sub: verified ? 'Подтверждено, сообщения шифруются' : 'Не подтверждено'),
         _row(Icons.devices_outlined, 'Имя устройства', sub: client.deviceName ?? client.deviceID),
+        _header('Конфиденциальность'),
+        _row(Icons.lock_outline, 'Код-пароль', sub: _p?.getString('lock.hash')?.isNotEmpty == true ? 'Включён' : 'Выключен', onTap: () async {
+          await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PasscodePage()));
+          setState(() {});
+        }),
+        _switch(Icons.how_to_reg_outlined, 'Принимать личные чаты автоматически', 'От коллег с вашего сервера — без нажатия «Вступить»', _pref('invites.autoAccept'), (v) => _set('invites.autoAccept', v)),
         _header('Уведомления'),
         _switch(Icons.notifications_outlined, 'Уведомления', 'О новых сообщениях и звонках', _pref('notify.enabled'), (v) => _set('notify.enabled', v)),
         _switch(Icons.short_text, 'Текст сообщения', 'Показывать текст в уведомлении (иначе — «Новое сообщение»)', _pref('notify.text'), (v) => _set('notify.text', v)),

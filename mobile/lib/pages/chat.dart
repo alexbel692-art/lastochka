@@ -14,6 +14,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../calls/voip.dart';
+import '../chat/autodelete.dart';
 import '../chat/stickers.dart';
 import '../chat/voice.dart';
 import '../main.dart';
@@ -52,6 +53,18 @@ class _ChatPageState extends State<ChatPage> {
   Timer? _recTimer;
   bool get _recording => _rec.started != null;
   DateTime _typingSent = DateTime(2000);
+  Timer? _ttlTick, _floatHide;
+  // поиск по чату
+  bool _searching = false;
+  final _searchCtl = TextEditingController();
+  List<String> _hits = [];
+  int _hitIdx = 0;
+  bool _searchingMore = false;
+  // плавающая дата при прокрутке
+  final _listKey = GlobalKey();
+  DateTime? _floatDate;
+  bool _floatShow = false;
+  List<Event> _events = const [];
 
   @override
   void initState() {
@@ -60,7 +73,12 @@ class _ChatPageState extends State<ChatPage> {
     clearRoomNotification(room.id);
     visibility.addListener(_onVisible);
     _init();
+    // исчезающие сообщения: раз в секунду обновляем таймеры и скрываем истёкшие
+    _ttlTick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && (roomTtl(room) > 0 || _events.any((e) => expiryOf(e) > 0))) setState(() {});
+    });
     _scroll.addListener(() {
+      _updateFloatDate();
       if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 600) _more();
       final down = _scroll.position.pixels > 400;
       if (down != _showDown) setState(() => _showDown = down);
@@ -78,6 +96,7 @@ class _ChatPageState extends State<ChatPage> {
     });
     if (!mounted) return tl.cancelSubscriptions();
     setState(() => _tl = tl);
+    openTimelines.add(tl);
     if (tl.events.length < 30) await _more();
     _markRead();
   }
@@ -132,8 +151,11 @@ class _ChatPageState extends State<ChatPage> {
   void dispose() {
     if (openRoomId == room.id) openRoomId = null;
     visibility.removeListener(_onVisible);
+    openTimelines.remove(_tl);
     _tl?.cancelSubscriptions();
     _syncSub?.cancel();
+    _ttlTick?.cancel();
+    _floatHide?.cancel();
     _recTimer?.cancel();
     _rec.dispose();
     _focus.dispose();
@@ -161,8 +183,11 @@ class _ChatPageState extends State<ChatPage> {
     });
     room.setTyping(false).catchError((_) {});
     try {
+      final ttl = ttlExtra(room);
       if (edit != null) {
         await room.sendTextEvent(t, editEventId: edit.eventId);
+      } else if (ttl.isNotEmpty) {
+        await room.sendEvent({'msgtype': MessageTypes.Text, 'body': t, ...ttl}, inReplyTo: reply);
       } else {
         await room.sendTextEvent(t, inReplyTo: reply);
       }
@@ -194,13 +219,13 @@ class _ChatPageState extends State<ChatPage> {
         final x = await ImagePicker().pickImage(source: a == 'camera' ? ImageSource.camera : ImageSource.gallery, imageQuality: 85, maxWidth: 2560);
         if (x == null) return;
         setState(() => _replyTo = null);
-        await room.sendFileEvent(MatrixImageFile(bytes: await x.readAsBytes(), name: x.name), inReplyTo: reply);
+        await room.sendFileEvent(MatrixImageFile(bytes: await x.readAsBytes(), name: x.name), inReplyTo: reply, extraContent: ttlExtra(room));
       } else if (a == 'file') {
         final f = await FilePicker.pickFile();
         if (f == null) return;
         final bytes = await f.readAsBytes();
         setState(() => _replyTo = null);
-        await room.sendFileEvent(MatrixFile.fromMimeType(bytes: bytes, name: f.name), inReplyTo: reply);
+        await room.sendFileEvent(MatrixFile.fromMimeType(bytes: bytes, name: f.name), inReplyTo: reply, extraContent: ttlExtra(room));
       }
       _toBottom();
     } catch (e) {
@@ -219,6 +244,118 @@ class _ChatPageState extends State<ChatPage> {
           ]),
         ),
       );
+
+  // ---------- поиск по чату ----------
+  void _runSearch(String q) {
+    final s = q.trim().toLowerCase();
+    final tl = _tl;
+    if (s.length < 2 || tl == null) return setState(() => _hits = []);
+    final hits = <String>[
+      for (final e in _events)
+        if (memberText(e) == null && !e.redacted && eventPreview(e, tl).toLowerCase().contains(s)) e.eventId,
+    ];
+    setState(() {
+      _hits = hits;
+      _hitIdx = 0;
+    });
+    if (hits.isNotEmpty) _jumpTo(hits.first);
+  }
+
+  /// Перейти к следующему (+1, более старому) или предыдущему (−1) совпадению.
+  Future<void> _hitStep(int d) async {
+    if (_hits.isEmpty) return;
+    var i = _hitIdx + d;
+    if (i >= _hits.length) {
+      // дальше — ищем в более старой истории
+      final tl = _tl;
+      if (tl == null || !tl.canRequestHistory || _searchingMore) return;
+      setState(() => _searchingMore = true);
+      final before = _hits.length;
+      for (var k = 0; k < 5 && tl.canRequestHistory && _hits.length == before; k++) {
+        await _more();
+        if (!mounted) return;
+        setState(() {});
+        await Future.delayed(const Duration(milliseconds: 50));
+        final keep = _hitIdx;
+        _runSearch(_searchCtl.text);
+        _hitIdx = keep;
+      }
+      setState(() => _searchingMore = false);
+      if (_hits.length == before) return;
+      i = before;
+    }
+    if (i < 0) return;
+    setState(() => _hitIdx = i);
+    _jumpTo(_hits[i]);
+  }
+
+  void _closeSearch() {
+    _searchCtl.clear();
+    setState(() {
+      _searching = false;
+      _hits = [];
+    });
+  }
+
+  Widget _searchBar(BuildContext context) {
+    final q = _searchCtl.text.trim();
+    return Material(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        child: Row(children: [
+          Expanded(
+            child: Text(
+              _searchingMore
+                  ? 'Ищем в истории…'
+                  : q.length < 2
+                      ? 'Введите хотя бы 2 буквы'
+                      : _hits.isEmpty
+                          ? 'Ничего не найдено'
+                          : '${_hitIdx + 1} из ${_hits.length}${_tl?.canRequestHistory == true ? '+' : ''}',
+              style: TextStyle(color: Theme.of(context).hintColor),
+            ),
+          ),
+          IconButton(tooltip: 'Раньше', icon: const Icon(Icons.keyboard_arrow_up), onPressed: q.length < 2 ? null : () => _hitStep(1)),
+          IconButton(tooltip: 'Позже', icon: const Icon(Icons.keyboard_arrow_down), onPressed: _hitIdx > 0 ? () => _hitStep(-1) : null),
+        ]),
+      ),
+    );
+  }
+
+  // ---------- плавающая дата ----------
+  void _updateFloatDate() {
+    final box = _listKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.attached) return;
+    final top = box.localToGlobal(Offset.zero).dy;
+    DateTime? best;
+    var bestY = -1e9, minY = 1e9;
+    DateTime? minDate;
+    for (final e in _events) {
+      final rb = _keys[e.eventId]?.currentContext?.findRenderObject() as RenderBox?;
+      if (rb == null || !rb.attached) continue;
+      final y = rb.localToGlobal(Offset.zero).dy - top;
+      if (y <= 36 && y > bestY) {
+        bestY = y;
+        best = e.originServerTs;
+      }
+      if (y < minY) {
+        minY = y;
+        minDate = e.originServerTs;
+      }
+    }
+    final d = best ?? minDate;
+    if (d == null) return;
+    _floatHide?.cancel();
+    _floatHide = Timer(const Duration(milliseconds: 1400), () => mounted ? setState(() => _floatShow = false) : null);
+    if (!_floatShow || _floatDate == null || !DateUtils.isSameDay(_floatDate, d)) {
+      setState(() {
+        _floatDate = d;
+        _floatShow = _scroll.hasClients && _scroll.position.pixels > 40;
+      });
+    }
+  }
 
   // ---------- голосовые ----------
   Future<void> _startRec() async {
@@ -243,7 +380,7 @@ class _ChatPageState extends State<ChatPage> {
     final reply = _replyTo;
     setState(() => _replyTo = null);
     try {
-      await sendVoice(room, r.$1, r.$2, r.$3, inReplyTo: reply);
+      await sendVoice(room, r.$1, r.$2, r.$3, inReplyTo: reply, extra: ttlExtra(room));
       _toBottom();
     } catch (_) {
       _toast('Голосовое не отправлено');
@@ -399,6 +536,8 @@ class _ChatPageState extends State<ChatPage> {
 
   // Видимые события: сообщения, стикеры, вход/выход участников, звонки.
   bool _visible(Event e) {
+    if (isExpired(e)) return false; // исчезнувшее сообщение
+    if (ttlChangeText(e) != null) return true;
     if (e.relationshipType == RelationshipTypes.edit) return false;
     if (e.type == EventTypes.Message || e.type == EventTypes.Sticker || e.type == EventTypes.Encrypted) return true;
     if (e.type == EventTypes.CallInvite) return true;
@@ -420,13 +559,23 @@ class _ChatPageState extends State<ChatPage> {
     final name = room.getLocalizedDisplayname();
     final tl = _tl;
     final events = tl?.events.where(_visible).toList() ?? const <Event>[];
+    _events = events;
     final typing = room.typingUsers.any((u) => u.id != client.userID);
     final accent = Theme.of(context).colorScheme.primary;
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: !widget.embedded,
         titleSpacing: widget.embedded ? 16 : 0,
-        title: InkWell(
+        title: _searching
+            ? TextField(
+                controller: _searchCtl,
+                autofocus: true,
+                textInputAction: TextInputAction.search,
+                onChanged: _runSearch,
+                onSubmitted: (_) => _hitStep(1),
+                decoration: const InputDecoration(hintText: 'Поиск в чате', filled: false, border: InputBorder.none),
+              )
+            : InkWell(
           onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => RoomInfoPage(room: room))),
           child: Row(children: [
           Avatar(mxc: room.avatar, name: name, size: 40),
@@ -438,7 +587,10 @@ class _ChatPageState extends State<ChatPage> {
             ]),
           ),
         ])),
-        actions: [
+        actions: _searching
+            ? [IconButton(tooltip: 'Закрыть поиск', icon: const Icon(Icons.close), onPressed: _closeSearch)]
+            : [
+          IconButton(tooltip: 'Поиск в чате', icon: const Icon(Icons.search), onPressed: () => setState(() => _searching = true)),
           if (canCall(room)) ...[
             IconButton(icon: const Icon(Icons.call_outlined), tooltip: 'Аудиозвонок', onPressed: () => startCall(context, room, video: false)),
             IconButton(icon: const Icon(Icons.videocam_outlined), tooltip: 'Видеозвонок', onPressed: () => startCall(context, room, video: true)),
@@ -457,6 +609,7 @@ class _ChatPageState extends State<ChatPage> {
                   tl == null
                       ? const Center(child: CircularProgressIndicator())
                       : ListView.builder(
+                          key: _listKey,
                           controller: _scroll,
                           reverse: true,
                           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -464,6 +617,21 @@ class _ChatPageState extends State<ChatPage> {
                           itemCount: events.length,
                           itemBuilder: (_, i) => _item(events, i, tl),
                         ),
+                  // дата сверху при прокрутке, как в Telegram
+                  if (_floatDate != null)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: IgnorePointer(
+                        child: AnimatedOpacity(
+                          opacity: _floatShow ? 1 : 0,
+                          duration: const Duration(milliseconds: 250),
+                          child: _DayChip(_floatDate!),
+                        ),
+                      ),
+                    ),
+                  if (_searching) Positioned(left: 0, right: 0, bottom: 0, child: _searchBar(context)),
                   if (_showDown)
                     Positioned(
                       right: 12,
@@ -491,7 +659,8 @@ class _ChatPageState extends State<ChatPage> {
     final older = i + 1 < events.length ? events[i + 1] : null;
     final newer = i > 0 ? events[i - 1] : null;
     final newDay = older == null || !DateUtils.isSameDay(older.originServerTs, e.originServerTs);
-    final service = memberText(e) != null;
+    final serviceText = memberText(e) ?? ttlChangeText(e);
+    final service = serviceText != null;
     bool sameGroup(Event? a) =>
         a != null && a.senderId == e.senderId && memberText(a) == null && a.originServerTs.difference(e.originServerTs).inMinutes.abs() < 10 && DateUtils.isSameDay(a.originServerTs, e.originServerTs);
     final firstOfGroup = newDay || !sameGroup(older);
@@ -500,7 +669,7 @@ class _ChatPageState extends State<ChatPage> {
     return Column(key: key, children: [
       if (newDay) _DayChip(e.originServerTs),
       if (service)
-        _ServiceChip(memberText(e)!)
+        _ServiceChip(serviceText)
       else
         _SwipeToReply(
           onReply: () {
@@ -661,7 +830,12 @@ class _ChatPageState extends State<ChatPage> {
                   onTap: () => _panel ? setState(() => _panel = false) : null,
                   textCapitalization: TextCapitalization.sentences,
                   keyboardType: TextInputType.multiline,
-                  decoration: const InputDecoration(hintText: 'Сообщение', filled: false, border: InputBorder.none, contentPadding: EdgeInsets.symmetric(vertical: 14)),
+                  decoration: InputDecoration(
+                    hintText: roomTtl(room) > 0 ? '🔥 Исчезнет через ${ttlText(roomTtl(room)).replaceFirst('1 ', '')}' : 'Сообщение',
+                    filled: false,
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
                 ),
               ),
               if (empty && _editing == null) IconButton(tooltip: 'Прикрепить', icon: Icon(Icons.attach_file, color: hint), onPressed: _attach),
@@ -886,7 +1060,9 @@ class _Bubble extends StatelessWidget {
       if (k is String) (reactions[k] ??= []).add(r);
     }
 
+    final exp = expiryOf(event);
     final meta = Row(mainAxisSize: MainAxisSize.min, children: [
+      if (exp > 0) Text('🔥${fmtLeft(exp - DateTime.now().millisecondsSinceEpoch)} ', style: TextStyle(fontSize: 11.5, color: metaColor)),
       if (edited) Text('изм. ', style: TextStyle(fontSize: 11.5, color: metaColor)),
       Text(time, style: TextStyle(fontSize: 11.5, color: metaColor)),
       if (mine) ...[
@@ -909,7 +1085,21 @@ class _Bubble extends StatelessWidget {
     if (event.redacted) {
       content = Text('Сообщение удалено', style: TextStyle(fontStyle: FontStyle.italic, color: hint));
     } else if (e.type == EventTypes.Encrypted) {
-      content = Text('🔒 Не удалось расшифровать. Подтвердите устройство или дождитесь ключей.', style: TextStyle(fontStyle: FontStyle.italic, color: hint));
+      content = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        Text('🔒 Ожидание ключа расшифровки…', style: TextStyle(fontStyle: FontStyle.italic, color: hint)),
+        if (e.content['can_request_session'] == true)
+          TextButton.icon(
+            style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
+            icon: const Icon(Icons.key, size: 16),
+            label: const Text('Запросить ключ'),
+            onPressed: () async {
+              try {
+                await e.requestKey();
+                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Запрос отправлен на ваши устройства и отправителю')));
+              } catch (_) {}
+            },
+          ),
+      ]);
     } else if (e.type == EventTypes.CallInvite) {
       content = Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(mine ? Icons.call_made : Icons.call_received, size: 18, color: mine ? Colors.green : accent),

@@ -2,7 +2,11 @@
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'dart:io';
+
 import 'package:audioplayers/audioplayers.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 const _rate = 22050;
 
@@ -68,16 +72,28 @@ class CallSounds {
     await _loop.setReleaseMode(ReleaseMode.loop);
   }
 
-  static Future<void> _play(Uint8List wav) async {
+  // звуки сохраняются во временные файлы: проигрывание из памяти поддерживается не на всех системах
+  static final Map<String, String> _files = {};
+  static Future<Source> _src(String name, Uint8List wav) async {
+    var path = _files[name];
+    if (path == null || !File(path).existsSync()) {
+      path = p.join((await getTemporaryDirectory()).path, 'lastochka_$name.wav');
+      await File(path).writeAsBytes(wav, flush: true);
+      _files[name] = path;
+    }
+    return DeviceFileSource(path);
+  }
+
+  static Future<void> _play(String name, Uint8List wav) async {
     try {
       await _init();
       await _loop.stop();
-      await _loop.play(BytesSource(wav, mimeType: 'audio/wav'));
+      await _loop.play(await _src(name, wav));
     } catch (_) {}
   }
 
-  static Future<void> incoming() => _play(_incoming);
-  static Future<void> outgoing() => _play(_outgoing);
+  static Future<void> incoming() => _play('incoming', _incoming);
+  static Future<void> outgoing() => _play('outgoing', _outgoing);
 
   static Future<void> stop() async {
     try {
@@ -85,11 +101,29 @@ class CallSounds {
     } catch (_) {}
   }
 
+  static DateTime _lastHangup = DateTime(2000);
+
+  /// Сигнал завершения звонка. Звучит один раз, чуть позже конца звонка — когда модуль звонков
+  /// отпустит динамик (иначе на Android звук мог «съедаться»).
   static Future<void> hangup() async {
+    if (DateTime.now().difference(_lastHangup).inSeconds < 2) return;
+    _lastHangup = DateTime.now();
     try {
       await _init();
       await _loop.stop();
-      await _once.play(BytesSource(_hangup, mimeType: 'audio/wav'));
     } catch (_) {}
+    await Future.delayed(const Duration(milliseconds: 350));
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final pl = AudioPlayer();
+      try {
+        await pl.setReleaseMode(ReleaseMode.release);
+        await pl.play(await _src('hangup', _hangup), volume: 1.0);
+        Future.delayed(const Duration(seconds: 2), pl.dispose);
+        return;
+      } catch (_) {
+        pl.dispose();
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+    }
   }
 }

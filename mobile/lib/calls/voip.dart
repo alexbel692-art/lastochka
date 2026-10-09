@@ -60,6 +60,8 @@ class LastochkaVoip implements WebRTCDelegate {
   @override
   Future<void> handleCallEnded(CallSession session) async {
     await stopRingtone();
+    // звук окончания — для любого завершения: сбросили вы, собеседник, отклонили или не дозвонились
+    CallSounds.hangup();
     await clearCallNotification();
     await setCallMode(false);
     if (ringing == session) ringing = null;

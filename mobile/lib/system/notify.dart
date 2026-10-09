@@ -148,7 +148,8 @@ Future<void> _onEvent(Event e) async {
   if (appVisible && openRoomId == room.id) return;
   final prefs = await SharedPreferences.getInstance();
   if (prefs.getBool('notify.enabled') == false) return;
-  final showText = prefs.getBool('notify.text') ?? true;
+  // при включённом код-пароле текст сообщений в уведомлениях не показываем
+  final showText = (prefs.getBool('notify.text') ?? true) && (prefs.getString('lock.hash') ?? '').isEmpty;
   var ev = e;
   if (ev.type == EventTypes.Encrypted && client.encryption != null) {
     try {

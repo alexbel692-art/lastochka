@@ -5,10 +5,11 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 
-class MainActivity : FlutterActivity() {
+// FragmentActivity — нужна для входа по отпечатку/лицу (код-пароль)
+class MainActivity : FlutterFragmentActivity() {
     // окно подключается к уже работающей Ласточке, а при закрытии окна она продолжает работать
     override fun provideFlutterEngine(context: Context): FlutterEngine = MainApplication.engine(application)
     override fun shouldDestroyEngineWithHost(): Boolean = false
