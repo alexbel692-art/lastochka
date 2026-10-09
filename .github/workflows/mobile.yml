@@ -36,7 +36,7 @@ jobs:
         run: |
           flutter --version
           flutter create --platforms android,ios --org app.lastochka --project-name lastochka .
-          rm -rf test
+          rm -f test/widget_test.dart
       - name: Ключ подписи
         env:
           KS: ${{ secrets.ANDROID_KEYSTORE }}
@@ -56,6 +56,8 @@ jobs:
         run: tool/annotate.sh "icons" dart run flutter_launcher_icons
       - name: Проверка кода
         run: tool/annotate.sh "analyze" flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Тесты
+        run: tool/annotate.sh "tests" flutter test
       - name: Сборка APK
         run: |
           V="${{ inputs.version }}"
@@ -92,7 +94,7 @@ jobs:
       - name: Платформенные папки
         run: |
           flutter create --platforms android,ios --org app.lastochka --project-name lastochka .
-          rm -rf test
+          rm -f test/widget_test.dart
           python3 tool/ci_prepare.py
       - name: Зависимости
         run: tool/annotate.sh "ios pub get" flutter pub get

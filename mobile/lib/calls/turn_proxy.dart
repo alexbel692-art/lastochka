@@ -88,11 +88,12 @@ class _Stun {
 }
 
 /// Одно соединение WebRTC ↔ сервер звонков.
-class _Shim {
+class TurnShim {
   final Map<String, String> creds;
   String user = '';
-  final String nonce = List.generate(12, (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0')).join();
-  _Shim(this.creds);
+  final String nonce;
+  TurnShim(this.creds, {String? nonce})
+      : nonce = nonce ?? List.generate(12, (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0')).join();
 
   List<int>? _key(String u) {
     final pass = creds[u];
@@ -128,10 +129,10 @@ class _Shim {
 }
 
 /// Нарезка TCP-потока на кадры STUN / ChannelData.
-class _Framer {
+class StunFramer {
   final void Function(List<int>) onFrame;
   List<int> _buf = [];
-  _Framer(this.onFrame);
+  StunFramer(this.onFrame);
 
   void add(List<int> d) {
     _buf = _buf.isEmpty ? List.of(d) : (_buf..addAll(d));
@@ -238,14 +239,14 @@ class TurnProxy {
     }
     sock.setOption(SocketOption.tcpNoDelay, true);
     up.setOption(SocketOption.tcpNoDelay, true);
-    final shim = _Shim(_creds);
+    final shim = TurnShim(_creds);
     void end() {
       sock.destroy();
       up.destroy();
     }
 
-    final fUp = _Framer((f) => shim.up(f, sock.add, up.add));
-    final fDown = _Framer((f) => sock.add(shim.down(f)));
+    final fUp = StunFramer((f) => shim.up(f, sock.add, up.add));
+    final fDown = StunFramer((f) => sock.add(shim.down(f)));
     sock.listen(fUp.add, onError: (_) => end(), onDone: end, cancelOnError: true);
     up.listen(fDown.add, onError: (_) => end(), onDone: end, cancelOnError: true);
   }
