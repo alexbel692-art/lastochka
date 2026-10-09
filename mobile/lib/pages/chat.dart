@@ -181,11 +181,9 @@ class _ChatPageState extends State<ChatPage> {
         setState(() => _replyTo = null);
         await room.sendFileEvent(MatrixImageFile(bytes: await x.readAsBytes(), name: x.name), inReplyTo: reply);
       } else if (a == 'file') {
-        final r = await FilePicker.platform.pickFiles(withData: true);
-        final f = r?.files.firstOrNull;
+        final f = await FilePicker.pickFile();
         if (f == null) return;
-        final bytes = f.bytes ?? (f.path != null ? await File(f.path!).readAsBytes() : null);
-        if (bytes == null) return;
+        final bytes = await f.readAsBytes();
         setState(() => _replyTo = null);
         await room.sendFileEvent(MatrixFile.fromMimeType(bytes: bytes, name: f.name), inReplyTo: reply);
       }
