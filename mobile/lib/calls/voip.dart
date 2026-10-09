@@ -1,20 +1,18 @@
 // Звонки 1:1 (протокол m.call.*), совместимые с настольной Ласточкой и Element.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 import 'package:matrix/matrix.dart';
 import 'package:webrtc_interface/webrtc_interface.dart' hide Navigator;
 
 import '../main.dart';
 import 'call_page.dart';
+import 'sounds.dart';
 import 'turn_proxy.dart';
 
 late VoIP voip;
 
 class LastochkaVoip implements WebRTCDelegate {
-  final _ring = FlutterRingtonePlayer();
-
   @override
   MediaDevices get mediaDevices => rtc.navigator.mediaDevices;
 
@@ -28,16 +26,12 @@ class LastochkaVoip implements WebRTCDelegate {
 
   @override
   Future<void> playRingtone() async {
-    try {
-      await _ring.playRingtone(looping: true);
-    } catch (_) {}
+    await CallSounds.incoming();
   }
 
   @override
   Future<void> stopRingtone() async {
-    try {
-      await _ring.stop();
-    } catch (_) {}
+    await CallSounds.stop();
   }
 
   @override

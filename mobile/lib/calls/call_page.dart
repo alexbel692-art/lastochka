@@ -1,11 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 import 'package:matrix/matrix.dart';
 
 import '../widgets/avatar.dart';
+import 'sounds.dart';
 
 const _reasons = {
   CallErrorCode.userHangup: 'Звонок завершён',
@@ -62,6 +62,8 @@ class _CallPageState extends State<CallPage> {
       _connectedAt = DateTime.now();
       rtc.Helper.setSpeakerphoneOn(_speaker).catchError((_) {});
     }
+    if (s == CallState.kInviteSent && call.isOutgoing) CallSounds.outgoing();
+    if (s == CallState.kConnecting || s == CallState.kConnected) CallSounds.stop();
     if (s == CallState.kEnded) _finish();
     setState(() {});
     _bindStreams();
@@ -71,7 +73,7 @@ class _CallPageState extends State<CallPage> {
     if (_closing) return;
     _closing = true;
     if (_connectedAt != null || call.isOutgoing) {
-      FlutterRingtonePlayer().playNotification().catchError((_) {});
+      CallSounds.hangup();
     }
     setState(() {});
     await Future.delayed(const Duration(milliseconds: 1500));
