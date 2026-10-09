@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>Ласточка</title>
+<link rel="icon" href="./icon.png">
+</head>
+<body>
+<div id="titlebar" class="titlebar" hidden><div class="tb-in"><img src="./icon.png" alt=""><span>Ласточка</span></div></div>
+
+<div id="splash" class="splash" aria-live="polite">
+  <div class="sp-logo"><span class="sp-ring"></span><span class="sp-ring r2"></span><img src="./icon.png" alt=""></div>
+  <div class="sp-name">Ласточка</div>
+  <div class="sp-bar"><i></i></div>
+  <div class="sp-text" id="sp-text">Загрузка…</div>
+  <div class="sp-foot">🔒 Сквозное шифрование</div>
+</div>
+<div id="login" hidden>
+  <form class="login-card" id="login-form" autocomplete="on">
+    <div class="logo logo-img"><img src="./icon.png" alt=""></div>
+    <h1>Ласточка</h1>
+    <p>Защищённый мессенджер. Войдите в свой аккаунт Matrix</p>
+    <input class="field" id="l-server" placeholder="Адрес сервера, например matrix.org" autocapitalize="off" spellcheck="false">
+    <div class="l-hint">Подойдёт любой сервер Matrix. Можно ввести логин целиком: <code>@имя:сервер</code></div>
+    <input class="field" id="l-user" placeholder="Логин или @имя:сервер" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+    <input class="field" id="l-pass" placeholder="Пароль" type="password" autocomplete="current-password" required>
+    <div class="err" id="l-err" hidden></div>
+    <button class="btn" id="l-btn" type="submit">Войти</button>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <aside id="side">
+    <header class="side-head">
+      <button id="menu-btn" class="icon-btn" aria-label="Меню"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <label class="search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg><input id="search" placeholder="Поиск чатов и сообщений" autocomplete="off"></label>
+      <button id="lock-btn" class="icon-btn" aria-label="Заблокировать приложение" title="Заблокировать (⌘L)" hidden><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg></button>
+    </header>
+    <nav id="folders" class="folders"></nav>
+    <div id="conn" hidden>Соединение…</div>
+    <div id="cbanner" class="cbanner" hidden></div>
+    <div id="updbar" class="updbar" hidden></div>
+    <div id="list" class="list"></div>
+    <div id="menu" class="dropdown" hidden></div>
+    <button id="fab" class="fab" aria-label="Новый чат" title="Новый чат"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.8 2.8 0 00-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></button>
+    <div id="fab-menu" class="dropdown fab-menu" hidden>
+      <button class="mi" data-f="dm"><span class="fm-i" data-ico="chat"></span>Новое сообщение</button>
+      <button class="mi" data-f="group"><span class="fm-i" data-ico="users"></span>Создать группу</button>
+      <button class="mi" data-f="join"><span class="fm-i" data-ico="search"></span>Найти группу</button>
+    </div>
+  </aside>
+  <main id="chat">
+    <div id="nochat" class="nochat"><span>Выберите чат, чтобы начать общение</span></div>
+    <section id="chatview" hidden>
+      <header class="chat-head">
+        <button id="back" class="icon-btn" aria-label="Назад"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button>
+        <button class="head-click" id="head-click"><div id="chat-avatar"></div><div class="head-text"><div id="chat-title"></div><div id="chat-sub"></div></div></button>
+        <button id="call-voice" class="icon-btn" aria-label="Позвонить" title="Позвонить" hidden><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.6a1 1 0 01-.25 1z"/></svg></button>
+        <button id="call-video" class="icon-btn" aria-label="Видеозвонок" title="Видеозвонок" hidden><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="2.5" y="6" width="13" height="12" rx="2"/><path d="M15.5 10.5l6-3.5v10l-6-3.5z"/></svg></button>
+        <button id="find-btn" class="icon-btn" aria-label="Поиск в чате" title="Поиск в чате (⌘F)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
+        <button id="info-btn" class="icon-btn" aria-label="Информация о чате"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg></button>
+      </header>
+      <div id="pinbar" class="pinbar" hidden></div>
+      <div id="idbar" class="idbar" hidden></div>
+      <div id="sbar" class="sbar" hidden>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
+        <input id="sq" placeholder="Поиск в этом чате" autocomplete="off">
+        <button id="scount" class="scount"></button>
+        <button id="sup" class="icon-btn" aria-label="Предыдущее совпадение"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg></button>
+        <button id="sdown" class="icon-btn" aria-label="Следующее совпадение"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+        <button id="sclose" class="icon-btn" aria-label="Закрыть поиск"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
+      <div id="sres" class="sres" hidden></div>
+      <div id="messages" class="messages"></div>
+      <div id="fdate" class="fdate"><span></span></div>
+      <button id="down" aria-label="Вниз" hidden><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+      <div class="composer-wrap" id="cwrap">
+        <div class="composer" id="composer">
+          <div id="ac" class="ac" hidden></div>
+          <div id="bar" class="bar" hidden></div>
+          <div class="cin" id="cin">
+            <button id="emoji-btn" class="icon-btn" aria-label="Эмодзи и стикеры"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 007 0"/><circle cx="9" cy="9.5" r=".8" fill="currentColor"/><circle cx="15" cy="9.5" r=".8" fill="currentColor"/></svg></button>
+            <textarea id="input" rows="1" placeholder="Сообщение"></textarea>
+            <button id="sticker-btn" class="icon-btn" aria-label="Стикеры" title="Стикеры"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M14 3H6a3 3 0 00-3 3v12a3 3 0 003 3h8l7-7V6a3 3 0 00-3-3z"/><path d="M14 21v-4a3 3 0 013-3h4"/></svg></button>
+            <button id="attach" class="icon-btn" aria-label="Прикрепить файл"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5l-8.2 8.2a5 5 0 01-7.1-7.1l8.6-8.6a3.4 3.4 0 014.8 4.8l-8.5 8.5a1.7 1.7 0 01-2.4-2.4l7.8-7.8"/></svg></button>
+          </div>
+          <div class="rec" id="rec" hidden><span class="rec-dot"></span><span id="rec-time">0:00</span><span class="rec-hint">Идёт запись — нажмите ➤, чтобы отправить</span><button id="rec-cancel" class="btn-flat danger">Отмена</button></div>
+          <svg class="tail" viewBox="0 0 9 20"><path d="M6 17H0V0c.193 2.84.876 5.767 2.05 8.782.904 2.325 2.446 4.485 4.625 6.48A1 1 0 016 17z"/></svg>
+        </div>
+        <button id="send" class="send-btn" aria-label="Отправить"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4l17.4-7.5a1 1 0 000-1.8L3.4 3.6a.9.9 0 00-1.3 1l1.9 6.4 9 1-9 1-1.9 6.4a.9.9 0 001.3 1z"/></svg></button>
+        <div id="lockbar" class="lockbar" hidden></div>
+        <input type="file" id="file" multiple hidden>
+        <div id="picker" class="picker" hidden></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="ctx" class="ctx" hidden></div>
+<div id="lctx" class="ctx" hidden></div>
+<div id="call" class="call" hidden></div>
+<div id="lock" class="lock" hidden></div>
+<div id="vgate" class="vgate" hidden>
+  <div class="vg-card">
+    <div class="vg-ic">🔐</div>
+    <h2>Подтвердите этот вход</h2>
+    <p>Это новое устройство. Чтобы читать зашифрованную переписку и чтобы собеседники доверяли этому входу, подтвердите, что это вы.</p>
+    <button class="vg-btn primary" data-g="device"><span>📱</span><b>С другого устройства</b><small>Откройте Ласточку или Element там, где вы уже вошли, и сравните эмодзи</small></button>
+    <button class="vg-btn" data-g="key"><span>🔑</span><b>Ключом восстановления</b><small>48 символов, которые вы сохранили при настройке шифрования</small></button>
+    <div class="vg-links"><button data-g="reset">Нет доступа ни к одному из них</button><button data-g="logout">Выйти</button></div>
+  </div>
+</div>
+<div id="modal" class="overlay" hidden></div>
+<div id="lightbox" class="lightbox" hidden></div>
+<div id="toast" class="toast" hidden></div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

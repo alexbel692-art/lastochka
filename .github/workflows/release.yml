@@ -1,0 +1,65 @@
+# Сборка и публикация Ласточки.
+# Запуск: поставить метку версии, например  git tag v3.26.0 && git push origin v3.26.0
+# (или вручную: Actions → Release → Run workflow).
+# Готовые .dmg / .exe с подписями попадают в релиз этого репозитория,
+# откуда приложения сами скачивают обновления.
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия (например 3.26.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: --mac dmg --arm64 --x64
+          - os: windows-latest
+            target: --win nsis portable --x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Версия из метки
+        shell: bash
+        run: |
+          V="${{ github.event.inputs.version }}"
+          [ -z "$V" ] && V="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          npm version "$V" --no-git-tag-version --allow-same-version
+      - name: Установка зависимостей (точно по package-lock.json)
+        run: npm ci
+      - name: Проверка известных уязвимостей
+        run: npm audit --omit=dev --audit-level=critical
+      - name: Сборка
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx vite build && npx electron-builder ${{ matrix.target }} --publish never
+      - name: Подпись файлов ключом разработчика
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: node scripts/sign-release.cjs
+      - name: Публикация релиза
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Ласточка ${{ env.VERSION }}
+          fail_on_unmatched_files: false
+          files: |
+            release/*.dmg
+            release/*.exe
+            release/*.sig

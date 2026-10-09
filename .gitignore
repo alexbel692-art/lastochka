@@ -1,0 +1,9 @@
+node_modules/
+dist/
+release/
+.share/
+.DS_Store
+*.bak
+# секретный ключ подписи обновлений — никогда не в репозиторий
+*PRIVATE*
+*.pem

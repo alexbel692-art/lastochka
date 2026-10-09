@@ -1,0 +1,97 @@
+{
+  "name": "lastochka",
+  "productName": "Ласточка",
+  "description": "Ласточка — защищённый мессенджер",
+  "private": true,
+  "version": "3.26.0",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "app": "vite build && electron .",
+    "dist": "vite build && electron-builder --mac dmg && node scripts/checksums.cjs",
+    "dist:universal": "vite build && electron-builder --mac dmg --universal && node scripts/checksums.cjs",
+    "dist:win": "vite build && electron-builder --win nsis portable --x64 && node scripts/checksums.cjs",
+    "harden": "npm install --save-dev electron@latest && npm update matrix-js-sdk vite electron-builder"
+  },
+  "devDependencies": {
+    "@electron/fuses": "^1.8.0",
+    "electron": "^44.7.0",
+    "electron-builder": "^25.1.0",
+    "matrix-js-sdk": "^37.0.0",
+    "vite": "^6.0.0"
+  },
+  "build": {
+    "appId": "app.lastochka.desktop",
+    "productName": "Ласточка",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "build/icon.png",
+      "build/icon.ico",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.social-networking",
+      "icon": "build/icon.png",
+      "target": [
+        "dmg"
+      ],
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Микрофон нужен для голосовых сообщений и звонков.",
+        "NSCameraUsageDescription": "Камера нужна для видеозвонков.",
+        "NSLocalNetworkUsageDescription": "Доступ к локальной сети нужен для звонков внутри офиса и подключения к серверу звонков в вашей сети."
+      },
+      "identity": "-",
+      "artifactName": "Lastochka-${version}-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "Ласточка",
+      "contents": [
+        {
+          "x": 140,
+          "y": 190
+        },
+        {
+          "x": 400,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "Lastochka-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Ласточка",
+      "installerLanguages": [
+        "ru_RU"
+      ],
+      "language": "1049",
+      "artifactName": "Lastochka-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Lastochka-${version}-portable.${ext}"
+    },
+    "asar": true,
+    "afterPack": "scripts/fuses.cjs"
+  }
+}
