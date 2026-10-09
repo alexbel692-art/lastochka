@@ -41,7 +41,7 @@ jobs:
       - name: Платформенные папки
         run: |
           flutter --version
-          flutter create --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
+          tool/annotate.sh "create" flutter create --no-pub --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
           rm -f test/widget_test.dart
       - name: Ключ подписи
         env:
@@ -83,7 +83,7 @@ jobs:
           cache: true
       - name: Платформенные папки
         run: |
-          flutter create --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
+          tool/annotate.sh "create" flutter create --no-pub --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
           rm -f test/widget_test.dart
           python3 tool/ci_prepare.py
       - name: Зависимости
@@ -117,7 +117,7 @@ jobs:
           cache: true
       - name: Платформенные папки
         run: |
-          flutter create --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
+          tool/annotate.sh "create" flutter create --no-pub --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
           rm -f test/widget_test.dart
           python3 tool/ci_prepare.py
       - name: Зависимости
@@ -147,7 +147,7 @@ jobs:
           cache: true
       - name: Платформенные папки
         run: |
-          flutter create --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
+          tool/annotate.sh "create" flutter create --no-pub --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
           rm -f test/widget_test.dart
           python tool/ci_prepare.py
       - name: Зависимости
