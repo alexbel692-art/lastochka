@@ -22,7 +22,7 @@ String previewText(Room room) {
     body = switch (ev.messageType) {
       MessageTypes.Image => '🖼 Фото',
       MessageTypes.Video => '🎬 Видео',
-      MessageTypes.Audio => '🎤 Голосовое сообщение',
+      MessageTypes.Audio => ev.content.containsKey('org.matrix.msc3245.voice') ? '🎤 Голосовое сообщение' : '🎵 ${ev.body}',
       MessageTypes.File => '📎 ${ev.body}',
       MessageTypes.Sticker => 'Стикер',
       _ => ev.type == EventTypes.Sticker ? 'Стикер' : ev.body,

@@ -9,8 +9,8 @@ final Map<String, Uint8List> _thumbs = {};
 final Map<String, Future<Uint8List?>> _loading = {};
 
 /// Загружает миниатюру mxc:// через авторизованный доступ к медиа.
-Future<Uint8List?> loadThumb(Uri mxc, int size) {
-  final key = '$mxc@$size';
+Future<Uint8List?> loadThumb(Uri mxc, int size, {String method = 'crop'}) {
+  final key = '$mxc@$size$method';
   if (_thumbs.containsKey(key)) return Future.value(_thumbs[key]);
   return _loading[key] ??= () async {
     try {
@@ -18,7 +18,7 @@ Future<Uint8List?> loadThumb(Uri mxc, int size) {
       if (hs == null || mxc.scheme != 'mxc') return null;
       final url = hs.resolveUri(Uri(
         path: '/_matrix/client/v1/media/thumbnail/${mxc.host}${mxc.path}',
-        queryParameters: {'width': '$size', 'height': '$size', 'method': 'crop'},
+        queryParameters: {'width': '$size', 'height': '$size', 'method': method},
       ));
       final res = await client.httpClient.get(url, headers: {'authorization': 'Bearer ${client.accessToken}'});
       if (res.statusCode != 200) return null;
