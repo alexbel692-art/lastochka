@@ -44,5 +44,9 @@ class Bubbles {
   static Color out(BuildContext c) => Theme.of(c).brightness == Brightness.dark ? const Color(0xFF766AC8) : const Color(0xFFE3FEE0);
   static Color inc(BuildContext c) => Theme.of(c).brightness == Brightness.dark ? const Color(0xFF2B2B2B) : Colors.white;
   static Color wall(BuildContext c) => Theme.of(c).brightness == Brightness.dark ? const Color(0xFF101A14) : const Color(0xFFD0D8B4);
+  /// Фон чата — мягкий градиент, как обои Telegram по умолчанию.
+  static Gradient wallGradient(BuildContext c) => Theme.of(c).brightness == Brightness.dark
+      ? const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF0F1B14), Color(0xFF16201A), Color(0xFF0D1712)])
+      : const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFDCE6B8), Color(0xFFB7CF96), Color(0xFF9DC28A)]);
   static Color outText(BuildContext c) => Theme.of(c).brightness == Brightness.dark ? Colors.white : Colors.black;
 }

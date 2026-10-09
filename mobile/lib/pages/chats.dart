@@ -120,6 +120,10 @@ class _ChatsPageState extends State<ChatsPage> {
       ),
     );
     if (action == null || !mounted) return;
+    await _newChatOf(action);
+  }
+
+  Future<void> _newChatOf(String action) async {
     final hints = {
       'dm': ('Новый личный чат', 'Имя пользователя, например @ivan:сервер'),
       'group': ('Новая группа', 'Название группы'),
@@ -289,7 +293,6 @@ class _ChatsPageState extends State<ChatsPage> {
               if (!_searching) _q.clear();
             }),
           ),
-          IconButton(icon: const Icon(Icons.settings_outlined), onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage()))),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(44),
@@ -314,7 +317,8 @@ class _ChatsPageState extends State<ChatsPage> {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(onPressed: _newChat, child: const Icon(Icons.edit_outlined)),
+      drawer: _drawer(context),
+      floatingActionButton: FloatingActionButton(onPressed: _newChat, tooltip: 'Новый чат', child: const Icon(Icons.edit_outlined)),
       body: client.prevBatch == null && client.rooms.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : rooms.isEmpty
@@ -327,33 +331,89 @@ class _ChatsPageState extends State<ChatsPage> {
                     final unread = r.notificationCount;
                     final muted = r.pushRuleState != PushRuleState.notify;
                     final ts = r.lastEvent?.originServerTs;
+                    final last = r.lastEvent;
+                    final mineLast = last != null && last.senderId == client.userID && last.type == EventTypes.Message;
+                    final readLast = mineLast && r.receiptState.global.otherUsers.values.any((x) => x.ts >= last.originServerTs.millisecondsSinceEpoch);
+                    final typing = r.typingUsers.where((u) => u.id != client.userID).toList();
                     return ListTile(
                       selected: _wide && _selected?.id == r.id,
                       selectedTileColor: accent.withValues(alpha: 0.12),
                       selectedColor: Theme.of(context).textTheme.bodyLarge?.color,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                      leading: Avatar(mxc: r.avatar, name: name),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      minVerticalPadding: 6,
+                      leading: Avatar(mxc: r.avatar, name: name, size: 54),
                       title: Row(children: [
-                        Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600))),
-                        if (muted) Icon(Icons.volume_off, size: 14, color: hint),
-                        if (ts != null) Padding(padding: const EdgeInsets.only(left: 6), child: Text(shortTime(ts), style: TextStyle(fontSize: 12, color: hint))),
+                        if (r.encrypted && r.isDirectChat) Padding(padding: const EdgeInsets.only(right: 3), child: Icon(Icons.lock, size: 14, color: Colors.green.shade600)),
+                        Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16.5))),
+                        if (muted) Padding(padding: const EdgeInsets.only(left: 3), child: Icon(Icons.volume_off, size: 15, color: hint)),
+                        if (mineLast) Padding(padding: const EdgeInsets.only(left: 6), child: Icon(readLast ? Icons.done_all : Icons.done, size: 16, color: Colors.green.shade600)),
+                        if (ts != null) Padding(padding: const EdgeInsets.only(left: 4), child: Text(shortTime(ts), style: TextStyle(fontSize: 12.5, color: unread > 0 && !muted ? accent : hint))),
                       ]),
-                      subtitle: Row(children: [
-                        Expanded(child: Text(previewText(r), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: hint))),
-                        if (r.isFavourite) Icon(Icons.push_pin, size: 14, color: hint),
-                        if (unread > 0 || r.membership == Membership.invite)
-                          Container(
-                            margin: const EdgeInsets.only(left: 6),
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                            decoration: BoxDecoration(color: muted ? hint : accent, borderRadius: BorderRadius.circular(12)),
-                            child: Text(unread > 0 ? '$unread' : '•', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                      subtitle: Padding(
+                        padding: const EdgeInsets.only(top: 3),
+                        child: Row(children: [
+                          Expanded(
+                            child: typing.isNotEmpty
+                                ? Text(r.isDirectChat ? 'печатает…' : '${typing.first.calcDisplayname()} печатает…', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: accent))
+                                : Text(previewText(r), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: hint, fontSize: 15)),
                           ),
-                      ]),
+                          if (r.isFavourite && unread == 0) Icon(Icons.push_pin, size: 16, color: hint),
+                          if (unread > 0 || r.membership == Membership.invite)
+                            Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              constraints: const BoxConstraints(minWidth: 22),
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                              decoration: BoxDecoration(color: muted ? hint.withValues(alpha: 0.6) : accent, borderRadius: BorderRadius.circular(12)),
+                              child: Text(unread > 0 ? '$unread' : '•', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                            ),
+                        ]),
+                      ),
                       onTap: () => _open(r),
                       onLongPress: () => _menu(r),
                     );
                   },
                 ),
+    );
+  }
+
+  Widget _drawer(BuildContext context) {
+    final me = client.userID ?? '';
+    return Drawer(
+      child: ListView(padding: EdgeInsets.zero, children: [
+        FutureBuilder<Profile>(
+          future: client.fetchOwnProfile(),
+          builder: (_, s) {
+            final name = s.data?.displayName ?? me.localpart ?? '';
+            return DrawerHeader(
+              margin: EdgeInsets.zero,
+              decoration: BoxDecoration(color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF2B2B2B) : Theme.of(context).colorScheme.primary),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.end, children: [
+                Avatar(mxc: s.data?.avatarUrl, name: name, size: 64),
+                const SizedBox(height: 12),
+                Text(name, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+                Text(me, style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 13.5)),
+              ]),
+            );
+          },
+        ),
+        ListTile(leading: const Icon(Icons.person_add_alt_outlined), title: const Text('Новый личный чат'), onTap: () {
+          Navigator.pop(context);
+          _newChatOf('dm');
+        }),
+        ListTile(leading: const Icon(Icons.group_add_outlined), title: const Text('Создать группу'), onTap: () {
+          Navigator.pop(context);
+          _newChatOf('group');
+        }),
+        ListTile(leading: const Icon(Icons.travel_explore), title: const Text('Найти группу'), onTap: () {
+          Navigator.pop(context);
+          _newChatOf('join');
+        }),
+        const Divider(),
+        ListTile(leading: const Icon(Icons.settings_outlined), title: const Text('Настройки'), onTap: () {
+          Navigator.pop(context);
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
+        }),
+      ]),
     );
   }
 }

@@ -22,6 +22,7 @@ import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/bubble_shape.dart';
 import 'chats.dart';
+import 'room_info.dart';
 
 final bool isDesktop = Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 const quickReactions = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '👏'];
@@ -412,7 +413,9 @@ class _ChatPageState extends State<ChatPage> {
       appBar: AppBar(
         automaticallyImplyLeading: !widget.embedded,
         titleSpacing: widget.embedded ? 16 : 0,
-        title: Row(children: [
+        title: InkWell(
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => RoomInfoPage(room: room))),
+          child: Row(children: [
           Avatar(mxc: room.avatar, name: name, size: 40),
           const SizedBox(width: 10),
           Expanded(
@@ -421,7 +424,7 @@ class _ChatPageState extends State<ChatPage> {
               Text(_subtitle(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: typing ? accent : Theme.of(context).hintColor)),
             ]),
           ),
-        ]),
+        ])),
         actions: [
           if (canCall(room)) ...[
             IconButton(icon: const Icon(Icons.call_outlined), tooltip: 'Аудиозвонок', onPressed: () => startCall(context, room, video: false)),
@@ -433,7 +436,7 @@ class _ChatPageState extends State<ChatPage> {
         builder: (context, box) => _PaneWidth(
           width: box.maxWidth,
           child: Container(
-            color: Bubbles.wall(context),
+            decoration: BoxDecoration(gradient: Bubbles.wallGradient(context)),
             child: Column(children: [
               _pinBar(context),
               Expanded(
