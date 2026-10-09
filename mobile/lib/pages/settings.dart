@@ -56,7 +56,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final verified = !client.isUnknownSession;
     return Scaffold(
       appBar: AppBar(title: const Text('Настройки')),
-      body: ListView(children: [
+      body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 640), child: ListView(children: [
         const SizedBox(height: 16),
         Center(child: Avatar(mxc: _me?.avatarUrl, name: name, size: 96)),
         const SizedBox(height: 12),
@@ -68,7 +68,7 @@ class _SettingsPageState extends State<SettingsPage> {
         _row(Icons.info_outline, 'О приложении', sub: 'Ласточка для телефона, ранняя версия'),
         const Divider(),
         _row(Icons.logout, 'Выйти', color: Colors.redAccent, onTap: () => logout(context)),
-      ]),
+      ]))),
     );
   }
 }

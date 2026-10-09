@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
@@ -155,8 +156,8 @@ class _CallPageState extends State<CallPage> {
             ),
           SafeArea(
             child: Column(children: [
-              const SizedBox(height: 40),
-              if (!remoteVideo) Avatar(mxc: call.remoteUser?.avatarUrl ?? room.avatar, name: name, size: 120),
+              SizedBox(height: MediaQuery.sizeOf(context).height < 500 ? 12 : 40),
+              if (!remoteVideo) Avatar(mxc: call.remoteUser?.avatarUrl ?? room.avatar, name: name, size: min(120.0, MediaQuery.sizeOf(context).height * 0.18)),
               const SizedBox(height: 18),
               Text(name, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),

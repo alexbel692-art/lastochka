@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -14,7 +15,8 @@ import 'chats.dart';
 
 class ChatPage extends StatefulWidget {
   final Room room;
-  const ChatPage({super.key, required this.room});
+  final bool embedded; // показан справа от списка чатов (планшет)
+  const ChatPage({super.key, required this.room, this.embedded = false});
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
@@ -125,7 +127,8 @@ class _ChatPageState extends State<ChatPage> {
     final events = tl?.events.where(_visible).toList() ?? const <Event>[];
     return Scaffold(
       appBar: AppBar(
-        titleSpacing: 0,
+        automaticallyImplyLeading: !widget.embedded,
+        titleSpacing: widget.embedded ? 16 : 0,
         title: Row(children: [
           Avatar(mxc: room.avatar, name: name, size: 38),
           const SizedBox(width: 10),
@@ -144,7 +147,7 @@ class _ChatPageState extends State<ChatPage> {
           ],
         ],
       ),
-      body: Container(
+      body: LayoutBuilder(builder: (context, box) => _PaneWidth(width: box.maxWidth, child: Container(
         color: Bubbles.wall(context),
         child: Column(children: [
           Expanded(
@@ -174,7 +177,7 @@ class _ChatPageState extends State<ChatPage> {
           ),
           _composer(context),
         ]),
-      ),
+      ))),
     );
   }
 
@@ -280,7 +283,7 @@ class _Bubble extends StatelessWidget {
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.8),
+        constraints: BoxConstraints(maxWidth: min(paneWidth(context) * 0.8, 560.0)),
         margin: EdgeInsets.only(top: showName ? 6 : 2, bottom: 2),
         padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
         decoration: BoxDecoration(color: mine ? Bubbles.out(context) : Bubbles.inc(context), borderRadius: BorderRadius.circular(16)),
@@ -356,7 +359,7 @@ class _Image extends StatelessWidget {
     final info = event.content.tryGetMap<String, Object?>('info');
     final w = (info?['w'] as num?)?.toDouble();
     final h = (info?['h'] as num?)?.toDouble();
-    final maxW = sticker ? 160.0 : MediaQuery.sizeOf(context).width * 0.7;
+    final maxW = sticker ? 160.0 : min(paneWidth(context) * 0.7, 420.0);
     final ratio = (w != null && h != null && w > 0 && h > 0) ? w / h : 1.0;
     return GestureDetector(
       onTap: sticker
@@ -391,3 +394,14 @@ class _Image extends StatelessWidget {
     );
   }
 }
+
+/// Ширина области чата: на планшете чат занимает только правую часть экрана.
+class _PaneWidth extends InheritedWidget {
+  final double width;
+  const _PaneWidth({required this.width, required super.child});
+  @override
+  bool updateShouldNotify(_PaneWidth old) => old.width != width;
+}
+
+double paneWidth(BuildContext context) =>
+    context.dependOnInheritedWidgetOfExactType<_PaneWidth>()?.width ?? MediaQuery.sizeOf(context).width;

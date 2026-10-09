@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:matrix/matrix.dart';
 
 import '../main.dart';
+import '../theme.dart';
 import '../widgets/avatar.dart';
 import 'chat.dart';
 import 'settings.dart';
@@ -72,6 +73,8 @@ class ChatsPage extends StatefulWidget {
 class _ChatsPageState extends State<ChatsPage> {
   StreamSubscription? _sub;
   Folder _folder = Folder.all;
+  Room? _selected; // открытый чат справа (планшет)
+  bool _wide = false;
   bool _searching = false;
   final _q = TextEditingController();
 
@@ -187,6 +190,7 @@ class _ChatsPageState extends State<ChatsPage> {
       await room.join();
     }
     if (!mounted) return;
+    if (_wide) return setState(() => _selected = room);
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatPage(room: room)));
   }
 
@@ -216,6 +220,7 @@ class _ChatsPageState extends State<ChatsPage> {
           if (id != null) await room.setReadMarker(id, mRead: id);
         case 'leave':
           await room.leave();
+          if (_selected?.id == room.id) _selected = null;
       }
     } catch (_) {
       _toast('Не получилось');
@@ -223,8 +228,35 @@ class _ChatsPageState extends State<ChatsPage> {
     if (mounted) setState(() {});
   }
 
+  // Планшет или телефон в альбомной ориентации: список слева, чат справа (как в Telegram).
   @override
   Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, c) {
+      _wide = c.maxWidth >= 720;
+      if (!_wide) return _list(context);
+      final sel = _selected == null ? null : client.getRoomById(_selected!.id);
+      final listW = (c.maxWidth * 0.36).clamp(320.0, 420.0);
+      return Row(children: [
+        SizedBox(width: listW, child: _list(context)),
+        VerticalDivider(width: 1, thickness: 1, color: Theme.of(context).dividerColor.withValues(alpha: 0.3)),
+        Expanded(
+          child: sel == null || sel.membership != Membership.join
+              ? Container(
+                  color: Bubbles.wall(context),
+                  alignment: Alignment.center,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.25), borderRadius: BorderRadius.circular(14)),
+                    child: const Text('Выберите чат', style: TextStyle(color: Colors.white)),
+                  ),
+                )
+              : ChatPage(key: ValueKey(sel.id), room: sel, embedded: true),
+        ),
+      ]);
+    });
+  }
+
+  Widget _list(BuildContext context) {
     final rooms = _rooms;
     final hint = Theme.of(context).hintColor;
     final accent = Theme.of(context).colorScheme.primary;
@@ -289,6 +321,9 @@ class _ChatsPageState extends State<ChatsPage> {
                     final muted = r.pushRuleState != PushRuleState.notify;
                     final ts = r.lastEvent?.originServerTs;
                     return ListTile(
+                      selected: _wide && _selected?.id == r.id,
+                      selectedTileColor: accent.withValues(alpha: 0.12),
+                      selectedColor: Theme.of(context).textTheme.bodyLarge?.color,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                       leading: Avatar(mxc: r.avatar, name: name),
                       title: Row(children: [
