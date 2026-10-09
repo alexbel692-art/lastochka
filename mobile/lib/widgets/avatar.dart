@@ -1,7 +1,6 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:matrix/matrix.dart';
 
 import '../main.dart';
 

@@ -4,7 +4,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:matrix/encryption/utils/key_verification.dart';
-import 'package:matrix/matrix.dart';
 
 import '../main.dart';
 import 'settings.dart';

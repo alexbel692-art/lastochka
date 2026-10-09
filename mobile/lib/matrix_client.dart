@@ -12,9 +12,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart' as sqlcipher;
 
-const _secure = FlutterSecureStorage(
-  aOptions: AndroidOptions(encryptedSharedPreferences: true),
-);
+const _secure = FlutterSecureStorage();
 const _dbKeyName = 'lastochka.db_key';
 const clientName = 'lastochka';
 

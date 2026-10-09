@@ -269,7 +269,7 @@ class _Bubble extends StatelessWidget {
         if (edited) TextSpan(text: '  изм.', style: TextStyle(fontSize: 11, color: hint)),
       ]), style: TextStyle(fontSize: 16, color: mine ? Bubbles.outText(context) : null));
     }
-    final replyId = event.relationshipType == RelationshipTypes.reply ? event.relationshipEventId : null;
+    final replyId = event.content.tryGetMap<String, Object?>('m.relates_to')?.tryGetMap<String, Object?>('m.in_reply_to')?.tryGet<String>('event_id');
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
