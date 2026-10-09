@@ -118,6 +118,8 @@ if os.path.exists('macos/Runner/Configs/AppInfo.xcconfig'):
 # --- Windows: имя программы и заголовок окна ---
 if os.path.exists('windows/CMakeLists.txt'):
     edit('windows/CMakeLists.txt', lambda s: s.replace('set(BINARY_NAME "lastochka")', 'set(BINARY_NAME "Lastochka")'))
+    # модуль Windows Hello (local_auth) использует старые заголовки сопрограмм — новый компилятор их отвергает
+    edit('windows/CMakeLists.txt', lambda s: s if '_SILENCE_EXPERIMENTAL_COROUTINE' in s else re.sub(r'(project\([^)]*\)\n)', r'\1add_compile_definitions(_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)\n', s, count=1))
     edit('windows/runner/main.cpp', lambda s: s.replace('L"lastochka"', 'L"\\u041b\\u0430\\u0441\\u0442\\u043e\\u0447\\u043a\\u0430"'))
     def rc(s):
         for k in ('CompanyName', 'FileDescription', 'ProductName', 'InternalName'):
