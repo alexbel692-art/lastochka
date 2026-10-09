@@ -3,6 +3,7 @@ import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
+import '../matrix_client.dart';
 import 'chats.dart';
 import 'verify.dart';
 
@@ -44,7 +45,7 @@ class _LoginPageState extends State<LoginPage> {
         LoginType.mLoginPassword,
         identifier: AuthenticationUserIdentifier(user: user),
         password: _pass.text,
-        initialDeviceDisplayName: 'Ласточка (${Theme.of(context).platform == TargetPlatform.iOS ? 'iPhone' : 'Android'})',
+        initialDeviceDisplayName: deviceLabel(),
       );
       (await SharedPreferences.getInstance()).setString('server', server);
       if (!mounted) return;

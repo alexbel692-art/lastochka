@@ -174,6 +174,7 @@ class TurnProxy {
   /// поэтому посредник доступен и по ним, а не только по 127.0.0.1.
   Future<List<String>> addresses() async {
     final out = ['127.0.0.1'];
+    if (Platform.isWindows) return out; // на Windows только 127.0.0.1 — без запроса брандмауэра
     try {
       for (final i in await NetworkInterface.list(type: InternetAddressType.IPv4)) {
         for (final a in i.addresses) {
@@ -218,7 +219,7 @@ class TurnProxy {
     _ip = ips.first;
     _host = host;
     _port = port;
-    final server = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+    final server = await ServerSocket.bind(Platform.isWindows ? InternetAddress.loopbackIPv4 : InternetAddress.anyIPv4, 0);
     server.listen(_handle, onError: (_) {});
     _server = server;
     Logs().i('[Ласточка] посредник звонков: 127.0.0.1:${server.port} → $host:$port');

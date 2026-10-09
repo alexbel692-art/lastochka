@@ -51,17 +51,44 @@ print('android signing:', 'release key' if signed else 'DEBUG key (секрет 
 with open('android/app/proguard-rules.pro', 'a', encoding='utf-8') as f:
     f.write('-keep class org.webrtc.** { *; }\n-keep class com.cloudwebrtc.webrtc.** { *; }\n')
 
-# --- iOS: название и описания доступа ---
-plist = 'ios/Runner/Info.plist'
-if os.path.exists(plist):
-    KEYS = {
-        'NSCameraUsageDescription': 'Камера нужна для видеозвонков и фото',
-        'NSMicrophoneUsageDescription': 'Микрофон нужен для звонков и голосовых сообщений',
-        'NSPhotoLibraryUsageDescription': 'Доступ к фото нужен, чтобы отправлять снимки в чат',
-    }
-    def plist_fn(s):
+# --- iOS и macOS: название и описания доступа ---
+USAGE = {
+    'NSCameraUsageDescription': 'Камера нужна для видеозвонков и фото',
+    'NSMicrophoneUsageDescription': 'Микрофон нужен для звонков и голосовых сообщений',
+    'NSPhotoLibraryUsageDescription': 'Доступ к фото нужен, чтобы отправлять снимки в чат',
+}
+def plist_fn(s):
+    if '<key>CFBundleDisplayName</key>' in s:
         s = re.sub(r'(<key>CFBundleDisplayName</key>\s*<string>)[^<]*', r'\1Ласточка', s)
-        add = ''.join(f'\t<key>{k}</key>\n\t<string>{v}</string>\n' for k, v in KEYS.items() if f'<key>{k}</key>' not in s)
-        i = s.rindex('</dict>')
-        return s[:i] + add + s[i:]
-    edit(plist, plist_fn)
+    else:
+        USAGE['CFBundleDisplayName'] = 'Ласточка'
+    add = ''.join(f'\t<key>{k}</key>\n\t<string>{v}</string>\n' for k, v in USAGE.items() if f'<key>{k}</key>' not in s)
+    USAGE.pop('CFBundleDisplayName', None)
+    i = s.rindex('</dict>')
+    return s[:i] + add + s[i:]
+for plist in ('ios/Runner/Info.plist', 'macos/Runner/Info.plist'):
+    if os.path.exists(plist):
+        edit(plist, plist_fn)
+
+# --- macOS: разрешения песочницы (сеть, камера, микрофон, выбор файлов) ---
+ENT = ['com.apple.security.network.client', 'com.apple.security.network.server', 'com.apple.security.device.camera',
+       'com.apple.security.device.audio-input', 'com.apple.security.files.user-selected.read-only']
+def ent_fn(s):
+    add = ''.join(f'\t<key>{k}</key>\n\t<true/>\n' for k in ENT if f'<key>{k}</key>' not in s)
+    i = s.rindex('</dict>')
+    return s[:i] + add + s[i:]
+for e in ('macos/Runner/DebugProfile.entitlements', 'macos/Runner/Release.entitlements'):
+    if os.path.exists(e):
+        edit(e, ent_fn)
+if os.path.exists('macos/Runner/Configs/AppInfo.xcconfig'):
+    edit('macos/Runner/Configs/AppInfo.xcconfig', lambda s: re.sub(r'PRODUCT_NAME = .*', 'PRODUCT_NAME = Lastochka', s))
+
+# --- Windows: имя программы и заголовок окна ---
+if os.path.exists('windows/CMakeLists.txt'):
+    edit('windows/CMakeLists.txt', lambda s: s.replace('set(BINARY_NAME "lastochka")', 'set(BINARY_NAME "Lastochka")'))
+    edit('windows/runner/main.cpp', lambda s: s.replace('L"lastochka"', 'L"\\u041b\\u0430\\u0441\\u0442\\u043e\\u0447\\u043a\\u0430"'))
+    def rc(s):
+        for k in ('CompanyName', 'FileDescription', 'ProductName', 'InternalName'):
+            s = re.sub(r'(VALUE "%s", )"[^"]*"' % k, r'\1"Lastochka"', s)
+        return re.sub(r'(VALUE "LegalCopyright", )"[^"]*"', r'\1""', s)
+    edit('windows/runner/Runner.rc', rc)

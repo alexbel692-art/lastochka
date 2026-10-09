@@ -1,14 +1,14 @@
-name: Mobile (Android, iOS)
+name: Ласточка на Flutter (Android, iPhone, Windows, macOS)
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Версия (например 0.1.0)'
+        description: 'Версия (например 0.4.0)'
         required: true
-        default: '0.1.0'
+        default: '0.4.0'
       publish:
-        description: 'Опубликовать APK в релизах'
+        description: 'Опубликовать в релизах'
         type: boolean
         default: true
 
@@ -18,6 +18,10 @@ permissions:
 defaults:
   run:
     working-directory: mobile
+    shell: bash
+
+env:
+  V: ${{ inputs.version }}
 
 jobs:
   android:
@@ -35,7 +39,7 @@ jobs:
       - name: Платформенные папки
         run: |
           flutter --version
-          flutter create --platforms android,ios --org app.lastochka --project-name lastochka .
+          flutter create --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
           rm -f test/widget_test.dart
       - name: Ключ подписи
         env:
@@ -60,31 +64,15 @@ jobs:
         run: tool/annotate.sh "tests" flutter test
       - name: Сборка APK
         run: |
-          V="${{ inputs.version }}"
           tool/annotate.sh "build apk" flutter build apk --release --build-name="$V" --build-number="${{ github.run_number }}"
-          cp build/app/outputs/flutter-apk/app-release.apk "../Lastochka-$V.apk"
-          sha256sum "../Lastochka-$V.apk"
-          echo "::notice title=Подпись APK::$(keytool -printcert -jarfile "../Lastochka-$V.apk" | grep -m1 SHA256)"
+          mkdir -p ../dist && cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: android
-          path: Lastochka-*.apk
-      - name: Релиз
-        if: ${{ inputs.publish }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: mobile-v${{ inputs.version }}
-          name: Ласточка для Android ${{ inputs.version }}
-          prerelease: true
-          target_commitish: ${{ github.sha }}
-          body: |
-            Ранняя версия Ласточки для телефона: вход, чаты, сообщения, фото, подтверждение устройства.
-            Установка: скачайте APK на телефон и откройте его (разрешите установку из этого источника).
-          files: Lastochka-*.apk
+          path: dist/*
 
   ios:
     runs-on: macos-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
@@ -93,11 +81,119 @@ jobs:
           cache: true
       - name: Платформенные папки
         run: |
-          flutter create --platforms android,ios --org app.lastochka --project-name lastochka .
+          flutter create --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
           rm -f test/widget_test.dart
           python3 tool/ci_prepare.py
       - name: Зависимости
-        run: tool/annotate.sh "ios pub get" flutter pub get
-      # Для установки на iPhone нужна подпись Apple (аккаунт разработчика); пока проверяем, что приложение собирается.
-      - name: Сборка iOS (симулятор)
-        run: tool/annotate.sh "build ios" flutter build ios --simulator --debug
+        run: |
+          tool/annotate.sh "ios pub get" flutter pub get
+          dart run flutter_launcher_icons
+      # Без платной подписи Apple: собираем приложение без подписи и упаковываем в .ipa.
+      # Поставить на iPhone можно через Sideloadly/AltStore со своим Apple ID.
+      - name: Сборка iOS
+        run: |
+          tool/annotate.sh "ios config" flutter build ios --release --no-codesign --config-only --build-name="$V" --build-number="${{ github.run_number }}"
+          cd ios
+          ../tool/annotate.sh "build ios" xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release \
+            -sdk iphoneos -destination generic/platform=iOS -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" build -quiet
+          mkdir -p Payload ../../dist
+          cp -R build/dd/Build/Products/Release-iphoneos/Runner.app Payload/
+          zip -qry "../../dist/Lastochka-$V-iPhone-unsigned.ipa" Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: dist/*
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Платформенные папки
+        run: |
+          flutter create --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
+          rm -f test/widget_test.dart
+          python3 tool/ci_prepare.py
+      - name: Зависимости
+        run: |
+          tool/annotate.sh "macos pub get" flutter pub get
+          dart run flutter_launcher_icons
+      - name: Сборка macOS
+        run: tool/annotate.sh "build macos" flutter build macos --release --build-name="$V" --build-number="${{ github.run_number }}"
+      - name: Образ диска
+        run: |
+          APP=build/macos/Build/Products/Release/Lastochka.app
+          lipo -info "$APP/Contents/MacOS/Lastochka" || true
+          mkdir -p dmg ../dist && cp -R "$APP" dmg/ && ln -s /Applications dmg/Applications
+          hdiutil create -volname "Ласточка" -srcfolder dmg -ov -format UDZO "../dist/Lastochka-$V-Mac.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Платформенные папки
+        run: |
+          flutter create --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
+          rm -f test/widget_test.dart
+          python tool/ci_prepare.py
+      - name: Зависимости
+        run: |
+          tool/annotate.sh "windows pub get" flutter pub get
+          dart run flutter_launcher_icons
+      - name: Сборка Windows
+        run: tool/annotate.sh "build windows" flutter build windows --release --build-name="$V" --build-number="${{ github.run_number }}"
+      - name: Установщик и архив
+        run: |
+          R=build/windows/x64/runner/Release
+          # библиотеки Visual C++ — чтобы запускалось и на «чистой» Windows / RDP-сервере
+          for f in msvcp140.dll vcruntime140.dll vcruntime140_1.dll; do cp "/c/Windows/System32/$f" "$R/" || true; done
+          ls "$R"
+          ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          [ -f "$ISCC" ] || choco install innosetup -y --no-progress
+          mkdir -p ../dist
+          APP_VERSION="$V" "$ISCC" tool/lastochka.iss
+          (cd "$R" && 7z a -tzip "../../../../../../dist/Lastochka-$V-Windows-portable.zip" . > /dev/null)
+          ls -la ../dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  release:
+    if: ${{ always() && inputs.publish && needs.android.result == 'success' }}
+    needs: [android, ios, macos, windows]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: ls -la dist && cd dist && sha256sum * > SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mobile-v${{ inputs.version }}
+          name: Ласточка ${{ inputs.version }} — новая версия (Android, iPhone, Windows, macOS)
+          prerelease: true
+          target_commitish: ${{ github.sha }}
+          body: |
+            Новая Ласточка на Flutter — одна программа для всех устройств.
+            • Android (телефоны и планшеты): Lastochka-…-Android.apk
+            • Windows: Lastochka-Setup-….exe (установка для всех пользователей, подходит для RDP) или portable.zip
+            • macOS (Apple Silicon и Intel): Lastochka-…-Mac.dmg
+            • iPhone: Lastochka-…-iPhone-unsigned.ipa — без подписи Apple, ставится через Sideloadly/AltStore
+          files: dist/*
