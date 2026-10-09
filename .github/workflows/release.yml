@@ -48,7 +48,13 @@ jobs:
         shell: bash
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npx vite build && npx electron-builder ${{ matrix.target }} --publish never
+        run: |
+          set -o pipefail
+          ( npx vite build && npx electron-builder ${{ matrix.target }} --publish never ) 2>&1 | tee build.log || {
+            # последние строки ошибки — в аннотации, чтобы их было видно на странице запуска
+            tail -n 25 build.log | sed -e 's/%/%25/g' | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          }
       - name: Подпись файлов ключом разработчика
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
