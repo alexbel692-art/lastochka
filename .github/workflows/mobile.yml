@@ -62,6 +62,7 @@ jobs:
           tool/annotate.sh "build apk" flutter build apk --release --build-name="$V" --build-number="${{ github.run_number }}"
           cp build/app/outputs/flutter-apk/app-release.apk "../Lastochka-$V.apk"
           sha256sum "../Lastochka-$V.apk"
+          echo "::notice title=Подпись APK::$(keytool -printcert -jarfile "../Lastochka-$V.apk" | grep -m1 SHA256)"
       - uses: actions/upload-artifact@v4
         with:
           name: android

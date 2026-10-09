@@ -30,16 +30,18 @@ def gradle_fn(s):
     if signed and 'create("release")' not in s:
         block = '''    signingConfigs {
         create("release") {
-            val p = java.util.Properties().apply { load(rootProject.file("key.properties").inputStream()) }
-            storeFile = file(p["storeFile"] as String)
-            storePassword = p["storePassword"] as String
-            keyAlias = p["keyAlias"] as String
-            keyPassword = p["keyPassword"] as String
+            storeFile = file(keystoreProperties["storeFile"] as String)
+            storePassword = keystoreProperties["storePassword"] as String
+            keyAlias = keystoreProperties["keyAlias"] as String
+            keyPassword = keystoreProperties["keyPassword"] as String
         }
     }
 
     buildTypes {'''
         s = s.replace('    buildTypes {', block, 1)
+        header = 'import java.io.FileInputStream\nimport java.util.Properties\n\n'
+        props = '\nval keystoreProperties = Properties().apply { load(FileInputStream(rootProject.file("key.properties"))) }\n\nandroid {'
+        s = header + s.replace('\nandroid {', props, 1)
         s = s.replace('signingConfig = signingConfigs.getByName("debug")', 'signingConfig = signingConfigs.getByName("release")')
     return s
 edit(gradle, gradle_fn)
