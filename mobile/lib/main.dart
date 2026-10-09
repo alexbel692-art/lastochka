@@ -79,6 +79,7 @@ Future<void> main(List<String> args) async {
   await AppLock.instance.init();
   await initPrivacy();
   await Trust.instance.init();
+  Trust.instance.onOwnIdentityReset = () => showSecurityNotification('Ключи вашего аккаунта сброшены', 'Если вы этого не делали — срочно смените пароль и проверьте «Мои сеансы». Устройства нужно будет подтвердить заново.');
   Trust.instance.onNewLogin = (name) => showSecurityNotification('Новый вход в ваш аккаунт', '$name. Если это не вы — завершите сеанс в «Настройки → Мои сеансы» и смените пароль.');
   startAutodeleteSweeper();
   autoAcceptDirectInvites();

@@ -58,24 +58,41 @@ void _windowsAffinity(bool on) {
   final title = 'Ласточка'.toNativeUtf16();
   try {
     final hwnd = find(cls, title);
-    if (hwnd != 0) aff(hwnd, on ? 0x11 : 0x0);
+    // 0x11 — исключить из захвата (Windows 10 2004+); на старых — 0x1 (чёрный прямоугольник вместо окна)
+    if (hwnd != 0 && aff(hwnd, on ? 0x11 : 0x0) == 0 && on) aff(hwnd, 0x1);
   } finally {
     calloc.free(cls);
     calloc.free(title);
   }
 }
 
-/// Папка для расшифрованных временных файлов — только внутри приложения.
+/// Папка для расшифрованных временных файлов — только внутри приложения
+/// (на телефоне — в кэше приложения, откуда их может открыть просмотрщик).
+Future<Directory> _privateBase() async => Platform.isAndroid || Platform.isIOS ? await getTemporaryDirectory() : await getApplicationSupportDirectory();
+
 Future<Directory> privateTemp() async {
-  final base = await getApplicationSupportDirectory();
+  final base = await _privateBase();
   return Directory(p.join(base.path, 'tmp-open')).create(recursive: true);
 }
 
 /// Удалить все расшифрованные временные файлы (голосовые, открытые вложения, записи).
 Future<void> purgeDecryptedFiles() async {
   try {
-    final d = Directory(p.join((await getApplicationSupportDirectory()).path, 'tmp-open'));
+    final d = Directory(p.join((await _privateBase()).path, 'tmp-open'));
     if (await d.exists()) await d.delete(recursive: true);
+  } catch (_) {}
+  // незавершённые отправки: SDK держит здесь открытую копию файла до успешной отправки
+  try {
+    final c = Directory(p.join((await getTemporaryDirectory()).path, 'lastochka_files'));
+    if (await c.exists()) {
+      await for (final f in c.list()) {
+        if (p.basename(f.path).startsWith('cache_')) {
+          try {
+            await f.delete();
+          } catch (_) {}
+        }
+      }
+    }
   } catch (_) {}
   try {
     final t = await getTemporaryDirectory();

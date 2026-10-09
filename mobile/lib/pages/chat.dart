@@ -75,6 +75,7 @@ class _ChatPageState extends State<ChatPage> {
     clearRoomNotification(room.id);
     visibility.addListener(_onVisible);
     Trust.instance.changed.addListener(_onTrust);
+    Trust.instance.senderChecks.addListener(_onTrust);
     _init();
     // исчезающие сообщения: раз в секунду обновляем таймеры и скрываем истёкшие
     _ttlTick = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -159,6 +160,7 @@ class _ChatPageState extends State<ChatPage> {
     if (openRoomId == room.id) openRoomId = null;
     visibility.removeListener(_onVisible);
     Trust.instance.changed.removeListener(_onTrust);
+    Trust.instance.senderChecks.removeListener(_onTrust);
     openTimelines.remove(_tl);
     _tl?.cancelSubscriptions();
     _syncSub?.cancel();
@@ -1128,7 +1130,8 @@ class _Bubble extends StatelessWidget {
     }
 
     final exp = expiryOf(event);
-    final warn = event.redacted ? null : Trust.instance.senderWarning(event);
+    // проверяем и исходное сообщение, и показанную правку (её мог прислать другой отправитель-устройство)
+    final warn = event.redacted ? null : (Trust.instance.senderWarning(event) ?? (e.eventId != event.eventId ? Trust.instance.senderWarning(e) : null));
     final meta = Row(mainAxisSize: MainAxisSize.min, children: [
       if (warn != null)
         Tooltip(

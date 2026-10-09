@@ -1,8 +1,9 @@
 // Доверие к собеседникам и своим устройствам — как в Element, только строже:
 // • ключ личности (master key) каждого собеседника запоминается при первой встрече;
-//   если он сменился — предупреждение и запрет отправки, пока вы не подтвердите;
-// • сообщения с устройств, которые владелец не подтвердил, помечаются;
-// • новый вход в ваш аккаунт — уведомление «Это вы?».
+//   если он сменился или исчез — предупреждение и запрет отправки, пока вы не подтвердите;
+// • сообщения с устройств, которые владелец не подтвердил, помечаются. Устройство определяется
+//   по ключу сеанса шифрования (его не подделать на сервере), а не по полям конверта;
+// • новый вход в ваш аккаунт (любой, даже без шифрования) — уведомление «Это вы?».
 import 'dart:async';
 import 'dart:convert';
 
@@ -22,31 +23,42 @@ class Trust {
   /// Новые входы в ваш аккаунт, которые вы ещё не подтвердили («Это я»).
   final newLogins = ValueNotifier<List<String>>([]);
 
+  /// Обновляется, когда проверены устройства-отправители (перерисовать чат).
+  final senderChecks = ValueNotifier<int>(0);
+
   void Function(String deviceName)? onNewLogin;
+  void Function()? onOwnIdentityReset;
 
   SharedPreferences? _p;
   Map<String, String> _pins = {};
   Map<String, bool> _pinVerified = {};
-  Set<String> _myDevices = {};
+  Set<String> _mySessions = {};
   bool _seeded = false;
+  DateTime _lastSessionsCheck = DateTime(2000);
+  bool _sessionsBusy = false;
 
   Future<void> init() async {
     _p = await SharedPreferences.getInstance();
     _pins = Map<String, String>.from(jsonDecode(_p!.getString('trust.pins') ?? '{}') as Map);
     _pinVerified = Map<String, bool>.from(jsonDecode(_p!.getString('trust.pinVerified') ?? '{}') as Map);
     changed.value = Map<String, bool>.from(jsonDecode(_p!.getString('trust.changed') ?? '{}') as Map);
-    final my = _p!.getStringList('trust.myDevices');
+    final my = _p!.getStringList('trust.mySessions');
     _seeded = my != null;
-    _myDevices = (my ?? []).toSet();
+    _mySessions = (my ?? []).toSet();
     newLogins.value = _p!.getStringList('trust.newLogins') ?? [];
-    client.onSync.stream.listen((_) => _check());
+    client.onSync.stream.listen((s) {
+      _check();
+      // список своих сеансов: при изменении своих устройств и раз в минуту
+      final mineChanged = s.deviceLists?.changed?.contains(client.userID) == true;
+      if (mineChanged || DateTime.now().difference(_lastSessionsCheck).inSeconds > 60) _checkSessions();
+    });
   }
 
   Future<void> _save() async {
     await _p!.setString('trust.pins', jsonEncode(_pins));
     await _p!.setString('trust.pinVerified', jsonEncode(_pinVerified));
     await _p!.setString('trust.changed', jsonEncode(changed.value));
-    await _p!.setStringList('trust.myDevices', _myDevices.toList());
+    await _p!.setStringList('trust.mySessions', _mySessions.toList());
     await _p!.setStringList('trust.newLogins', newLogins.value);
   }
 
@@ -55,19 +67,29 @@ class Trust {
     var dirty = false;
     final ch = Map<String, bool>.of(changed.value);
     for (final MapEntry(key: uid, value: list) in client.userDeviceKeys.entries) {
+      if (list.outdated) continue; // ключи ещё не загружены — не судим
       final mk = list.masterKey?.publicKey;
-      if (mk == null) continue;
       final pinned = _pins[uid];
+      if (mk == null) {
+        // ключ личности был — и исчез: сервер мог его убрать, чтобы обойти проверку
+        if (pinned != null && uid != client.userID && !ch.containsKey(uid)) {
+          ch[uid] = _pinVerified[uid] == true;
+          dirty = true;
+        }
+        continue;
+      }
       if (pinned == null) {
         _pins[uid] = mk; // первая встреча — запоминаем
         _pinVerified[uid] = list.masterKey!.verified;
         dirty = true;
       } else if (pinned != mk) {
-        // ключ личности сменился: сброс аккаунта, новый вход без ключа восстановления — или подмена
-        if (uid != client.userID && !ch.containsKey(uid)) ch[uid] = _pinVerified[uid] == true;
         if (uid == client.userID) {
-          _pins[uid] = mk; // свой сброс делаем сами — запоминаем новый
+          // ключ вашего аккаунта сброшен (вами в другом приложении — или кем-то ещё)
+          _pins[uid] = mk;
           _pinVerified[uid] = true;
+          onOwnIdentityReset?.call();
+        } else if (!ch.containsKey(uid)) {
+          ch[uid] = _pinVerified[uid] == true;
         }
         dirty = true;
       } else if (list.masterKey!.verified && _pinVerified[uid] != true) {
@@ -75,43 +97,49 @@ class Trust {
         dirty = true;
       }
     }
-    if (dirty || ch.length != changed.value.length) changed.value = ch;
-
-    // новые входы в свой аккаунт
-    final mine = client.userDeviceKeys[client.userID]?.deviceKeys;
-    if (mine != null && mine.isNotEmpty) {
-      final ids = mine.keys.toSet();
-      if (!_seeded) {
-        _myDevices = ids; // первый запуск — все текущие считаем своими
-        _seeded = true;
-        dirty = true;
-      } else {
-        final fresh = ids.difference(_myDevices).where((id) => id != client.deviceID).toList();
-        if (fresh.isNotEmpty) {
-          _myDevices.addAll(fresh);
-          newLogins.value = [...newLogins.value, ...fresh];
-          for (final id in fresh) {
-            onNewLogin?.call(mine[id]?.deviceDisplayName ?? id);
-          }
-          dirty = true;
-        }
-        // удалённые сеансы убираем из списка «новых»
-        final still = newLogins.value.where(ids.contains).toList();
-        if (still.length != newLogins.value.length) {
-          newLogins.value = still;
-          dirty = true;
-        }
-      }
+    if (dirty) {
+      changed.value = ch;
+      unawaited(_save());
     }
-    if (dirty) unawaited(_save());
   }
 
-  /// После выхода из аккаунта: список своих устройств начнётся заново.
+  /// Новые входы в аккаунт — по списку сеансов сервера (видны и входы без шифрования).
+  Future<void> _checkSessions() async {
+    if (_sessionsBusy || !client.isLogged()) return;
+    _sessionsBusy = true;
+    _lastSessionsCheck = DateTime.now();
+    try {
+      final devices = await client.getDevices() ?? [];
+      final ids = devices.map((d) => d.deviceId).toSet();
+      if (!_seeded) {
+        _mySessions = ids; // первый запуск — все текущие считаем своими
+        _seeded = true;
+      } else {
+        final fresh = ids.difference(_mySessions).where((id) => id != client.deviceID).toList();
+        _mySessions.addAll(fresh);
+        if (fresh.isNotEmpty) {
+          newLogins.value = [...newLogins.value, ...fresh];
+          for (final id in fresh) {
+            final d = devices.firstWhere((x) => x.deviceId == id);
+            onNewLogin?.call(d.displayName ?? id);
+          }
+        }
+        final still = newLogins.value.where(ids.contains).toList();
+        if (still.length != newLogins.value.length) newLogins.value = still;
+      }
+      await _save();
+    } catch (_) {
+    } finally {
+      _sessionsBusy = false;
+    }
+  }
+
+  /// После выхода из аккаунта: список своих сеансов начнётся заново.
   Future<void> resetOwnDevices() async {
-    _myDevices = {};
+    _mySessions = {};
     _seeded = false;
     newLogins.value = [];
-    await _p?.remove('trust.myDevices');
+    await _p?.remove('trust.mySessions');
     await _p?.remove('trust.newLogins');
   }
 
@@ -121,6 +149,9 @@ class Trust {
     if (mk?.publicKey != null) {
       _pins[userId] = mk!.publicKey!;
       _pinVerified[userId] = mk.verified;
+    } else {
+      _pins.remove(userId);
+      _pinVerified.remove(userId);
     }
     changed.value = Map.of(changed.value)..remove(userId);
     await _save();
@@ -138,25 +169,54 @@ class Trust {
     return room.getParticipants([Membership.join, Membership.invite]).map((u) => u.id).where(c.containsKey).toList();
   }
 
+  // результат проверки по сеансу шифрования: sessionId → предупреждение ('' — всё в порядке)
+  final Map<String, String> _bySession = {};
+  final Set<String> _loading = {};
+
   /// Проверка устройства, с которого пришло зашифрованное сообщение.
-  /// null — всё в порядке; иначе текст предупреждения.
+  /// null — всё в порядке (или ещё проверяется); иначе текст предупреждения.
   String? senderWarning(Event e) {
     final src = e.originalSource;
     if (src == null || src.type != EventTypes.Encrypted) return null;
     if (e.type == EventTypes.Encrypted) return null; // ещё не расшифровано — отдельная надпись
-    final senderKey = src.content['sender_key'];
-    final deviceId = src.content['device_id'];
-    final list = client.userDeviceKeys[e.senderId];
-    if (list == null) return null;
-    DeviceKeys? dk;
-    if (deviceId is String) dk = list.deviceKeys[deviceId];
-    if (dk == null && senderKey is String) {
-      dk = list.deviceKeys.values.where((d) => d.curve25519Key == senderKey).firstOrNull;
+    final sessionId = src.content['session_id'];
+    if (sessionId is! String) return null;
+    final key = '${e.room.id}|$sessionId|${e.senderId}';
+    final cached = _bySession[key];
+    if (cached != null) return cached.isEmpty ? null : cached;
+    final enc = client.encryption;
+    if (enc == null) return null;
+    final sess = enc.keyManager.getInboundGroupSession(e.room.id, sessionId);
+    if (sess != null) {
+      final w = _judge(e.senderId, sess.senderKey, sess.senderClaimedKeys['ed25519']);
+      _bySession[key] = w ?? '';
+      return w;
     }
+    if (_loading.add(key)) {
+      enc.keyManager.loadInboundGroupSession(e.room.id, sessionId).then((s) {
+        if (s != null) {
+          _bySession[key] = _judge(e.senderId, s.senderKey, s.senderClaimedKeys['ed25519']) ?? '';
+          senderChecks.value++;
+        }
+      }).whenComplete(() => _loading.remove(key));
+    }
+    return null;
+  }
+
+  String? _judge(String senderId, String senderKey, String? claimedEd25519) {
+    final list = client.userDeviceKeys[senderId];
+    if (list == null) return null;
+    final dk = list.deviceKeys.values.where((d) => d.curve25519Key == senderKey).firstOrNull;
     if (dk == null) return 'Отправлено с устройства, которое уже удалено или неизвестно';
-    if (senderKey is String && dk.curve25519Key != senderKey) return 'Ключ устройства не совпадает — подлинность не подтверждена';
-    if (e.senderId == client.userID && dk.deviceId == client.deviceID) return null;
-    if (list.masterKey != null && !dk.signed) return 'Отправлено с устройства, которое владелец не подтвердил';
+    if (claimedEd25519 != null && dk.ed25519Key != claimedEd25519) return 'Ключ устройства не совпадает — подлинность не подтверждена';
+    if (senderId == client.userID && dk.deviceId == client.deviceID) return null;
+    if (list.masterKey == null) {
+      // ключа личности нет: если раньше был — это подозрительно (см. changed), иначе просто нет защиты
+      return _pins.containsKey(senderId) ? 'Ключ личности отправителя пропал — подлинность не подтверждена' : null;
+    }
+    if (!dk.hasValidSignatureChain(verifiedByTheirMasterKey: true)) {
+      return 'Отправлено с устройства, которое владелец не подтвердил';
+    }
     return null;
   }
 

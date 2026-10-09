@@ -22,7 +22,7 @@ def manifest(s):
     # приложение и окно: движок живёт после закрытия окна, звонок показывается поверх блокировки
     # данные Ласточки не попадают в резервные копии Android (облако, adb backup)
     if 'android:allowBackup' not in s:
-        s = s.replace('<application', '<application\n        android:allowBackup="false"\n        android:fullBackupContent="false"', 1)
+        s = s.replace('<application', '<application\n        android:allowBackup="false"\n        android:fullBackupContent="false"\n        android:dataExtractionRules="@xml/data_extraction_rules"', 1)
     if 'android:name=".MainApplication"' not in s:
         if 'android:name="${applicationName}"' in s:
             s = s.replace('android:name="${applicationName}"', 'android:name=".MainApplication"', 1)
@@ -199,3 +199,18 @@ if os.path.exists(mw):
     }"""
         return s.replace(anchor, code, 1)
     edit(mw, mw_fn)
+
+# --- Android 12+: не переносить данные ни в облако, ни на новый телефон ---
+if os.path.isdir('android/app/src/main/res'):
+    os.makedirs('android/app/src/main/res/xml', exist_ok=True)
+    with open('android/app/src/main/res/xml/data_extraction_rules.xml', 'w', encoding='utf-8') as f:
+        f.write("""<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root"/><exclude domain="file"/><exclude domain="database"/><exclude domain="sharedpref"/><exclude domain="external"/>
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root"/><exclude domain="file"/><exclude domain="database"/><exclude domain="sharedpref"/><exclude domain="external"/>
+    </device-transfer>
+</data-extraction-rules>
+""")
