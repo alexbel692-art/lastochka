@@ -6,6 +6,7 @@ import 'package:matrix/matrix.dart';
 
 import '../main.dart';
 import '../calls/voip.dart';
+import '../chat/autodelete.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import 'chat.dart';
@@ -15,6 +16,7 @@ String previewText(Room room) {
   final ev = room.lastEvent;
   if (room.membership == Membership.invite) return 'Приглашение в чат';
   if (ev == null) return '';
+  if (isExpired(ev)) return '🔥 Сообщение исчезло';
   if (ev.type == EventTypes.Encrypted) return '🔒 Зашифрованное сообщение';
   if (ev.redacted) return 'Сообщение удалено';
   String body;

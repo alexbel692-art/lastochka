@@ -46,7 +46,6 @@ class _PasscodePageState extends State<PasscodePage> {
         builder: (c, set) => Scaffold(
           appBar: AppBar(),
           body: PinPad(
-            key: ValueKey(first == null),
             title: first == null ? 'Придумайте код-пароль' : 'Повторите код-пароль',
             onDone: (pin) async {
               if (first == null) {

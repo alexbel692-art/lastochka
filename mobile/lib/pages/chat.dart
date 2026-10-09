@@ -246,14 +246,19 @@ class _ChatPageState extends State<ChatPage> {
       );
 
   // ---------- поиск по чату ----------
-  void _runSearch(String q) {
+  List<String> _collectHits(String q) {
     final s = q.trim().toLowerCase();
     final tl = _tl;
-    if (s.length < 2 || tl == null) return setState(() => _hits = []);
-    final hits = <String>[
-      for (final e in _events)
-        if (memberText(e) == null && !e.redacted && eventPreview(e, tl).toLowerCase().contains(s)) e.eventId,
+    if (s.length < 2 || tl == null) return [];
+    final events = tl.events.where(_visible);
+    return [
+      for (final e in events)
+        if (memberText(e) == null && ttlChangeText(e) == null && !e.redacted && eventPreview(e, tl).toLowerCase().contains(s)) e.eventId,
     ];
+  }
+
+  void _runSearch(String q) {
+    final hits = _collectHits(q);
     setState(() {
       _hits = hits;
       _hitIdx = 0;
@@ -276,9 +281,7 @@ class _ChatPageState extends State<ChatPage> {
         if (!mounted) return;
         setState(() {});
         await Future.delayed(const Duration(milliseconds: 50));
-        final keep = _hitIdx;
-        _runSearch(_searchCtl.text);
-        _hitIdx = keep;
+        _hits = _collectHits(_searchCtl.text);
       }
       setState(() => _searchingMore = false);
       if (_hits.length == before) return;

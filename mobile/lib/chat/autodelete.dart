@@ -84,8 +84,12 @@ void startAutodeleteSweeper() {
   _sweeper ??= Timer.periodic(const Duration(seconds: 5), (_) => _sweep());
 }
 
+int _tick = 0;
+
 void _sweep() {
   if (!client.isLogged()) return;
+  // раз в минуту просматриваем последние сообщения чатов с автоудалением целиком (не только последнее)
+  if (++_tick % 12 == 1) _deepSweep();
   final candidates = <Event>[
     for (final r in client.rooms)
       if (r.membership == Membership.join && r.lastEvent != null) r.lastEvent!,
@@ -112,8 +116,31 @@ Future<void> _drain() async {
         await Future.delayed(Duration(milliseconds: err.retryAfterMs!.clamp(1000, 30000)));
         continue;
       }
+      _queued.remove(e.eventId); // нет сети и т.п. — попробуем при следующей проверке
     }
     await Future.delayed(const Duration(milliseconds: 300));
   }
   _draining = false;
+}
+
+bool _deep = false;
+Future<void> _deepSweep() async {
+  if (_deep) return;
+  _deep = true;
+  try {
+    for (final r in client.rooms.where((r) => r.membership == Membership.join && roomTtl(r) > 0)) {
+      try {
+        final tl = await r.getTimeline();
+        for (final e in tl.events) {
+          if (e.senderId != client.userID || e.redacted || !isExpired(e)) continue;
+          if (e.status.isSending || e.status.isError || e.eventId.startsWith('~')) continue;
+          if (_queued.add(e.eventId)) _queue.add(e);
+        }
+        tl.cancelSubscriptions();
+      } catch (_) {}
+    }
+    _drain();
+  } finally {
+    _deep = false;
+  }
 }

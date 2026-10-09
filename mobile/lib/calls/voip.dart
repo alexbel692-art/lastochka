@@ -42,6 +42,7 @@ class LastochkaVoip implements WebRTCDelegate {
   @override
   Future<void> handleNewCall(CallSession session) async {
     ringing = session;
+    callActive.value = true;
     await setCallMode(true);
     navKey.currentState?.push(MaterialPageRoute(builder: (_) => CallPage(session: session)));
     // приложение свёрнуто или закрыто — полноэкранное уведомление; на компьютере — показать окно
@@ -62,6 +63,7 @@ class LastochkaVoip implements WebRTCDelegate {
     await stopRingtone();
     // звук окончания — для любого завершения: сбросили вы, собеседник, отклонили или не дозвонились
     CallSounds.hangup();
+    callActive.value = voip.currentCID != null && voip.currentCID?.callId != session.callId;
     await clearCallNotification();
     await setCallMode(false);
     if (ringing == session) ringing = null;
@@ -95,6 +97,9 @@ class LastochkaVoip implements WebRTCDelegate {
 /// Входящий звонок, который сейчас звонит.
 CallSession? ringing;
 
+/// Идёт звонок (входящий или исходящий) — экран блокировки его не закрывает.
+final callActive = ValueNotifier<bool>(false);
+
 void initVoip() {
   voip = VoIP(client, LastochkaVoip());
   // кнопки «Ответить» / «Отклонить» в уведомлении
@@ -122,6 +127,7 @@ Future<void> startCall(BuildContext context, Room room, {required bool video}) a
   }
   try {
     final session = await voip.inviteToCall(room, video ? CallType.kVideo : CallType.kVoice);
+    callActive.value = true;
     if (!context.mounted) return;
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => CallPage(session: session)));
   } catch (e) {

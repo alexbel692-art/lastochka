@@ -179,7 +179,7 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-            child: Text('Новые сообщения будут исчезать у всех участников через выбранное время после отправки. Уже отправленные не изменятся.',
+            child: Text('Новые сообщения будут исчезать у всех участников через выбранное время после отправки. Если на сервере включён срок хранения, он тоже будет стирать историю чата старше этого времени.',
                 style: TextStyle(color: Theme.of(context).hintColor, fontSize: 13.5)),
           ),
           for (final (ms, t) in ttlOptions)

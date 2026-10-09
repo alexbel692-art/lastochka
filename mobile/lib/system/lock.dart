@@ -84,7 +84,10 @@ class AppLock {
     return ok;
   }
 
-  void unlock() => locked.value = false;
+  void unlock() {
+    _hiddenAt = null; // окно отпечатка/Face ID ненадолго «прячет» приложение — это не повод снова блокировать
+    locked.value = false;
+  }
 
   final _auth = LocalAuthentication();
 
@@ -127,7 +130,10 @@ class _PinPadState extends State<PinPad> with SingleTickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    if (widget.showBiometric) WidgetsBinding.instance.addPostFrameCallback((_) => _bio());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _keys.requestFocus();
+      if (widget.showBiometric) _bio();
+    });
   }
 
   @override
@@ -262,7 +268,7 @@ class LockScreen extends StatefulWidget {
 }
 
 class _LockScreenState extends State<LockScreen> {
-  bool _bio = false;
+  bool _bio = false, _forgot = false;
 
   @override
   void initState() {
@@ -273,6 +279,37 @@ class _LockScreenState extends State<LockScreen> {
   @override
   Widget build(BuildContext context) {
     final lock = AppLock.instance;
+    if (_forgot) {
+      return Material(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.lock_reset, size: 56, color: Colors.redAccent),
+                  const SizedBox(height: 14),
+                  const Text('Забыли код-пароль?', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 10),
+                  Text('Сбросить код можно только выходом из аккаунта на этом устройстве. Потом войдите снова и подтвердите устройство ключом восстановления.',
+                      textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).hintColor)),
+                  const SizedBox(height: 22),
+                  FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: Colors.redAccent, minimumSize: const Size.fromHeight(48)),
+                    onPressed: widget.onForgot,
+                    child: const Text('Выйти из аккаунта'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(onPressed: () => setState(() => _forgot = false), child: const Text('Назад к вводу кода')),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Material(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: SafeArea(
@@ -292,7 +329,7 @@ class _LockScreenState extends State<LockScreen> {
             }
             return 'Неверный код';
           },
-          footer: TextButton(onPressed: widget.onForgot, child: const Text('Забыли код?')),
+          footer: TextButton(onPressed: () => setState(() => _forgot = true), child: const Text('Забыли код?')),
         ),
       ),
     );

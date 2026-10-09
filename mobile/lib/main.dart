@@ -167,32 +167,22 @@ class _LastochkaAppState extends State<LastochkaApp> {
       ],
       home: client.isLogged() ? const VerifyGate(child: ChatsPage()) : const LoginPage(),
       // код-пароль поверх всего приложения
-      builder: (context, child) => ValueListenableBuilder<bool>(
-        valueListenable: AppLock.instance.locked,
-        builder: (context, locked, _) => Stack(children: [
-          child ?? const SizedBox.shrink(),
-          if (locked && client.isLogged())
-            Positioned.fill(
-              child: LockScreen(onForgot: () async {
-                final ctx = navKey.currentContext;
-                if (ctx == null) return;
-                final ok = await showDialog<bool>(
-                  context: ctx,
-                  builder: (d) => AlertDialog(
-                    title: const Text('Забыли код-пароль?'),
-                    content: const Text('Сбросить код можно только выходом из аккаунта на этом устройстве. Потом войдите снова и подтвердите устройство ключом восстановления.'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
-                      TextButton(onPressed: () => Navigator.pop(d, true), child: const Text('Выйти', style: TextStyle(color: Colors.redAccent))),
-                    ],
-                  ),
-                );
-                if (ok != true) return;
-                await AppLock.instance.disable();
-                await logoutNow();
-              }),
-            ),
-        ]),
+      builder: (context, child) => ListenableBuilder(
+        listenable: Listenable.merge([AppLock.instance.locked, callActive]),
+        builder: (context, _) {
+          // во время звонка экран звонка не закрываем блокировкой — иначе нельзя ответить
+          final locked = AppLock.instance.locked.value && client.isLogged() && !callActive.value;
+          return Stack(children: [
+            ExcludeFocus(excluding: locked, child: child ?? const SizedBox.shrink()),
+            if (locked)
+              Positioned.fill(
+                child: LockScreen(onForgot: () async {
+                  await AppLock.instance.disable();
+                  await logoutNow();
+                }),
+              ),
+          ]);
+        },
       ),
     );
   }
@@ -214,7 +204,9 @@ void autoAcceptDirectInvites() {
       if (!isDirect || inviter == null || inviter.domain != myDomain) continue;
       try {
         await r.join();
-      } catch (_) {}
+      } catch (_) {
+        seen.remove(r.id); // попробуем при следующей синхронизации
+      }
     }
   });
 }
