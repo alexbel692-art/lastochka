@@ -3,6 +3,8 @@ import 'package:matrix/matrix.dart';
 
 import '../calls/voip.dart';
 import '../chat/autodelete.dart';
+import '../system/trust.dart';
+import 'verify.dart';
 import '../main.dart';
 import '../widgets/avatar.dart';
 
@@ -86,6 +88,24 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
               const Divider(),
               ListTile(leading: Icon(Icons.info_outline, color: hint), title: Text(topic), subtitle: const Text('Описание')),
             ],
+            if (room.isDirectChat && room.directChatMatrixID != null)
+              Builder(builder: (context) {
+                final uid = room.directChatMatrixID!;
+                final ok = Trust.instance.userVerified(uid);
+                return ListTile(
+                  leading: Icon(ok ? Icons.verified_user : Icons.shield_outlined, color: ok ? Colors.green : hint),
+                  title: Text(ok ? 'Собеседник подтверждён' : 'Подтвердить собеседника'),
+                  subtitle: Text(ok
+                      ? 'Вы сравнили эмодзи — переписку не подменить незаметно'
+                      : 'Сравните эмодзи на ваших устройствах — так вы убедитесь, что переписываетесь именно с ним'),
+                  onTap: ok
+                      ? null
+                      : () async {
+                          await verifyUser(context, uid);
+                          if (mounted) setState(() {});
+                        },
+                );
+              }),
             ListTile(
               leading: Icon(Icons.local_fire_department_outlined, color: roomTtl(room) > 0 ? Colors.deepOrange : hint),
               title: const Text('Автоудаление сообщений'),
@@ -109,7 +129,17 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
               for (final u in members)
                 ListTile(
                   leading: Avatar(mxc: u.avatarUrl, name: u.calcDisplayname(), size: 42),
-                  title: Text(u.calcDisplayname() + (u.id == client.userID ? ' (вы)' : '')),
+                  title: Row(children: [
+                    Flexible(child: Text(u.calcDisplayname() + (u.id == client.userID ? ' (вы)' : ''))),
+                    if (Trust.instance.userVerified(u.id)) const Padding(padding: EdgeInsets.only(left: 4), child: Icon(Icons.verified_user, size: 15, color: Colors.green)),
+                    if (Trust.instance.changed.value.containsKey(u.id)) const Padding(padding: EdgeInsets.only(left: 4), child: Icon(Icons.gpp_bad, size: 15, color: Colors.red)),
+                  ]),
+                  onTap: u.id == client.userID || Trust.instance.userVerified(u.id)
+                      ? null
+                      : () async {
+                          await verifyUser(context, u.id);
+                          if (mounted) setState(() {});
+                        },
                   subtitle: u.powerLevel.level >= 100 ? const Text('администратор') : u.powerLevel.level >= 50 ? const Text('модератор') : null,
                 ),
             ],

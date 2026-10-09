@@ -20,6 +20,9 @@ def manifest(s):
             s = s.replace('<application', line + '\n    <application', 1)
     s = re.sub(r'android:label="[^"]*"', 'android:label="Ласточка"', s)
     # приложение и окно: движок живёт после закрытия окна, звонок показывается поверх блокировки
+    # данные Ласточки не попадают в резервные копии Android (облако, adb backup)
+    if 'android:allowBackup' not in s:
+        s = s.replace('<application', '<application\n        android:allowBackup="false"\n        android:fullBackupContent="false"', 1)
     if 'android:name=".MainApplication"' not in s:
         if 'android:name="${applicationName}"' in s:
             s = s.replace('android:name="${applicationName}"', 'android:name=".MainApplication"', 1)
@@ -176,3 +179,23 @@ for st in ('android/app/src/main/res/values/styles.xml', 'android/app/src/main/r
             s = s.replace('@android:style/Theme.Black.NoTitleBar', 'Theme.AppCompat.NoActionBar')
             return s
         edit(st, st_fn)
+
+# --- macOS: защита окна от снимков экрана (настройка «Запретить снимки экрана») ---
+mw = 'macos/Runner/MainFlutterWindow.swift'
+if os.path.exists(mw):
+    def mw_fn(s):
+        if 'lastochka/window' in s:
+            return s
+        anchor = 'RegisterGeneratedPlugins(registry: flutterViewController)'
+        code = anchor + """
+    let lastochkaWindow = FlutterMethodChannel(name: "lastochka/window", binaryMessenger: flutterViewController.engine.binaryMessenger)
+    lastochkaWindow.setMethodCallHandler { [weak self] call, result in
+      if call.method == "protect" {
+        self?.sharingType = (call.arguments as? Bool ?? false) ? .none : .readOnly
+        result(true)
+      } else {
+        result(FlutterMethodNotImplemented)
+      }
+    }"""
+        return s.replace(anchor, code, 1)
+    edit(mw, mw_fn)

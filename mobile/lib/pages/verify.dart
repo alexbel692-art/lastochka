@@ -8,6 +8,7 @@ import 'package:matrix/encryption.dart';
 import 'package:matrix/encryption/utils/key_verification.dart';
 
 import '../main.dart';
+import '../system/trust.dart';
 import 'settings.dart';
 
 bool needsVerification() =>
@@ -334,5 +335,22 @@ class _VerificationDialogState extends State<_VerificationDialog> {
       }
     }
     return AlertDialog(title: const Text('Подтверждение'), content: body, actions: actions);
+  }
+}
+
+/// Подтвердить собеседника сравнением эмодзи (оба должны быть в сети).
+Future<void> verifyUser(BuildContext context, String userId) async {
+  try {
+    await client.updateUserDeviceKeys(additionalUsers: {userId});
+    final list = client.userDeviceKeys[userId];
+    if (list == null) throw StateError('no keys');
+    final req = await list.startVerification();
+    if (!context.mounted) return;
+    await showVerificationDialog(context, req);
+    if (Trust.instance.userVerified(userId)) await Trust.instance.acceptChange(userId);
+  } catch (_) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось начать подтверждение — собеседник должен быть в сети')));
+    }
   }
 }

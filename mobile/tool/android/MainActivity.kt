@@ -18,6 +18,7 @@ class MainActivity : FlutterFragmentActivity() {
         super.onCreate(savedInstanceState)
         current = this
         applyCallMode()
+        applySecure()
         if (savedInstanceState == null) MainApplication.forwardTap(intent)
     }
 
@@ -39,6 +40,12 @@ class MainActivity : FlutterFragmentActivity() {
         super.onDestroy()
     }
 
+    /** Запрет снимков экрана и превью в «недавних» (настройка «Запретить снимки экрана»). */
+    fun applySecure() {
+        if (secure) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    }
+
     /** Поверх экрана блокировки — только во время входящего звонка, а не всегда. */
     fun applyCallMode() {
         if (Build.VERSION.SDK_INT >= 27) {
@@ -54,5 +61,6 @@ class MainActivity : FlutterFragmentActivity() {
     companion object {
         var current: MainActivity? = null
         var callMode = false
+        var secure = false
     }
 }

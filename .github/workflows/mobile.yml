@@ -60,6 +60,18 @@ jobs:
         run: tool/annotate.sh "pub get" flutter pub get
       - name: Иконки
         run: tool/annotate.sh "icons" dart run flutter_launcher_icons
+      # известные уязвимости в библиотеках (база OSV) — предупреждение в сборке
+      - name: Проверка зависимостей на уязвимости
+        continue-on-error: true
+        run: |
+          curl -sSL -o /tmp/osv https://github.com/google/osv-scanner/releases/download/v1.9.2/osv-scanner_linux_amd64 && chmod +x /tmp/osv
+          if /tmp/osv --lockfile=pubspec.lock > /tmp/osv.txt 2>&1; then
+            echo "::notice title=Зависимости::Известных уязвимостей не найдено"
+          else
+            msg=$(grep -E '\|' /tmp/osv.txt | head -40); [ -z "$msg" ] && msg=$(tail -20 /tmp/osv.txt)
+            msg="${msg//'%'/'%25'}"; msg="${msg//$'\n'/'%0A'}"
+            echo "::warning title=Уязвимости в зависимостях::$msg"
+          fi
       - name: Проверка кода
         run: tool/annotate.sh "analyze" flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Тесты

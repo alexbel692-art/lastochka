@@ -11,7 +11,6 @@ import 'package:intl/intl.dart';
 import 'package:matrix/matrix.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
 import '../calls/voip.dart';
 import '../chat/autodelete.dart';
@@ -19,6 +18,9 @@ import '../chat/stickers.dart';
 import '../chat/voice.dart';
 import '../main.dart';
 import '../system/notify.dart';
+import '../system/privacy.dart';
+import '../system/trust.dart';
+import 'verify.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/bubble_shape.dart';
@@ -72,6 +74,7 @@ class _ChatPageState extends State<ChatPage> {
     openRoomId = room.id;
     clearRoomNotification(room.id);
     visibility.addListener(_onVisible);
+    Trust.instance.changed.addListener(_onTrust);
     _init();
     // исчезающие сообщения: раз в секунду обновляем таймеры и скрываем истёкшие
     _ttlTick = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -99,6 +102,10 @@ class _ChatPageState extends State<ChatPage> {
     openTimelines.add(tl);
     if (tl.events.length < 30) await _more();
     _markRead();
+  }
+
+  void _onTrust() {
+    if (mounted) setState(() {});
   }
 
   void _onVisible() {
@@ -151,6 +158,7 @@ class _ChatPageState extends State<ChatPage> {
   void dispose() {
     if (openRoomId == room.id) openRoomId = null;
     visibility.removeListener(_onVisible);
+    Trust.instance.changed.removeListener(_onTrust);
     openTimelines.remove(_tl);
     _tl?.cancelSubscriptions();
     _syncSub?.cancel();
@@ -585,7 +593,13 @@ class _ChatPageState extends State<ChatPage> {
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+              Row(children: [
+                Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600))),
+                if (room.isDirectChat && room.directChatMatrixID != null && Trust.instance.userVerified(room.directChatMatrixID!))
+                  const Padding(padding: EdgeInsets.only(left: 4), child: Icon(Icons.verified_user, size: 16, color: Colors.green)),
+                if (Trust.instance.changedIn(room).isNotEmpty)
+                  const Padding(padding: EdgeInsets.only(left: 4), child: Icon(Icons.gpp_bad, size: 16, color: Colors.red)),
+              ]),
               Text(_subtitle(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: typing ? accent : Theme.of(context).hintColor)),
             ]),
           ),
@@ -764,12 +778,61 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  /// Ключи собеседника сменились — предупреждаем и не даём писать, пока вы не решите, как быть.
+  Widget? _identityBanner(BuildContext context) {
+    final who = Trust.instance.changedIn(room);
+    if (who.isEmpty) return null;
+    final uid = who.first;
+    final wasVerified = Trust.instance.changed.value[uid] == true;
+    final name = room.unsafeGetUserFromMemoryOrFallback(uid).calcDisplayname();
+    final color = wasVerified ? Colors.red : Colors.orange.shade800;
+    return Material(
+      color: color.withValues(alpha: 0.12),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+            Row(children: [
+              Icon(Icons.gpp_bad_outlined, color: color),
+              const SizedBox(width: 10),
+              Expanded(child: Text('У $name сменились ключи безопасности', style: TextStyle(fontWeight: FontWeight.w700, color: color))),
+            ]),
+            const SizedBox(height: 4),
+            Text(
+              wasVerified
+                  ? 'Вы подтверждали этого собеседника, а теперь его ключи другие. Так бывает после сброса аккаунта — или при попытке перехвата переписки. Уточните у него лично или подтвердите заново.'
+                  : 'Так бывает после сброса аккаунта или входа без ключа восстановления — или при попытке перехвата. Если сомневаетесь, уточните у собеседника лично и подтвердите его.',
+              style: const TextStyle(fontSize: 13.5),
+            ),
+            const SizedBox(height: 6),
+            Wrap(spacing: 8, alignment: WrapAlignment.end, children: [
+              TextButton(
+                onPressed: () async {
+                  await Trust.instance.acceptChange(uid);
+                  if (mounted) setState(() {});
+                },
+                child: const Text('Понятно, продолжить'),
+              ),
+              FilledButton(
+                onPressed: () => verifyUser(context, uid),
+                child: const Text('Подтвердить'),
+              ),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+
   Widget _composer(BuildContext context) {
     final bg = Theme.of(context).scaffoldBackgroundColor;
     final accent = Theme.of(context).colorScheme.primary;
     final hint = Theme.of(context).hintColor;
     final bar = _editing ?? _replyTo;
     final empty = _text.text.trim().isEmpty;
+    final blocked = _identityBanner(context);
+    if (blocked != null) return blocked;
     return Material(
       color: bg,
       child: SafeArea(
@@ -904,13 +967,14 @@ Future<void> openAttachment(Event e, void Function(String) toast) async {
   try {
     toast('Загрузка…');
     final f = await e.downloadAndDecryptAttachment();
-    final dir = isDesktop ? (await getDownloadsDirectory() ?? await getTemporaryDirectory()) : await getTemporaryDirectory();
+    // расшифрованная копия — во внутренней папке приложения; удаляется при следующем запуске
+    final dir = await privateTemp();
     var name = (e.content.tryGet<String>('filename') ?? e.body).replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
     if (name.isEmpty) name = 'файл';
     final path = p.join(dir.path, name);
     await File(path).writeAsBytes(f.bytes, flush: true);
     final r = await OpenFilex.open(path);
-    if (r.type != ResultType.done) toast(isDesktop ? 'Сохранено в «Загрузки»: $name' : 'Нет программы, чтобы открыть этот файл');
+    if (r.type != ResultType.done) toast('Нет программы, чтобы открыть этот файл');
   } catch (_) {
     toast('Не удалось скачать файл');
   }
@@ -1064,7 +1128,14 @@ class _Bubble extends StatelessWidget {
     }
 
     final exp = expiryOf(event);
+    final warn = event.redacted ? null : Trust.instance.senderWarning(event);
     final meta = Row(mainAxisSize: MainAxisSize.min, children: [
+      if (warn != null)
+        Tooltip(
+          message: warn,
+          triggerMode: TooltipTriggerMode.tap,
+          child: Padding(padding: const EdgeInsets.only(right: 3), child: Icon(Icons.gpp_maybe, size: 15, color: Colors.orange.shade700)),
+        ),
       if (exp > 0) Text('🔥${fmtLeft(exp - DateTime.now().millisecondsSinceEpoch)} ', style: TextStyle(fontSize: 11.5, color: metaColor)),
       if (edited) Text('изм. ', style: TextStyle(fontSize: 11.5, color: metaColor)),
       Text(time, style: TextStyle(fontSize: 11.5, color: metaColor)),

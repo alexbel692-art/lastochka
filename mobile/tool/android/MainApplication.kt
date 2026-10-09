@@ -57,6 +57,11 @@ class MainApplication : Application() {
                         pendingTaps.clear()
                         result.success(true)
                     }
+                    "secure" -> {
+                        MainActivity.secure = call.arguments == true
+                        MainActivity.current?.applySecure()
+                        result.success(true)
+                    }
                     "callMode" -> {
                         MainActivity.callMode = call.arguments == true
                         MainActivity.current?.applyCallMode()

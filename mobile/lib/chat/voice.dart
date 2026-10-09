@@ -8,8 +8,9 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+
+import '../system/privacy.dart';
 
 String fmtDur(int ms) {
   final s = (ms / 1000).round();
@@ -42,7 +43,7 @@ class VoiceRecorder {
 
   Future<bool> start() async {
     if (!await _rec.hasPermission()) return false;
-    final dir = await getTemporaryDirectory();
+    final dir = await privateTemp();
     _path = p.join(dir.path, 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a');
     levels.clear();
     await _rec.start(const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 48000, sampleRate: 44100, numChannels: 1), path: _path!);
@@ -126,6 +127,13 @@ class VoicePlayback extends ChangeNotifier {
       return;
     }
     await _player.stop();
+    // расшифрованная копия предыдущего голосового больше не нужна
+    for (final old in _files.entries.where((x) => x.key != e.eventId).toList()) {
+      try {
+        await File(old.value).delete();
+      } catch (_) {}
+      _files.remove(old.key);
+    }
     current = e.eventId;
     position = Duration.zero;
     loading = true;
@@ -136,7 +144,7 @@ class VoicePlayback extends ChangeNotifier {
         final f = await e.downloadAndDecryptAttachment();
         final mime = e.content.tryGetMap<String, Object?>('info')?['mimetype']?.toString() ?? '';
         final ext = mime.contains('ogg') ? 'ogg' : mime.contains('webm') ? 'webm' : mime.contains('mpeg') ? 'mp3' : 'm4a';
-        path = p.join((await getTemporaryDirectory()).path, 'play_${e.eventId.hashCode.abs()}.$ext');
+        path = p.join((await privateTemp()).path, 'play_${e.eventId.hashCode.abs()}.$ext');
         await File(path).writeAsBytes(f.bytes, flush: true);
         _files[e.eventId] = path;
       }

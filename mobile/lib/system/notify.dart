@@ -250,3 +250,19 @@ Future<void> clearCallNotification() async {
     await _fln.cancel(id: _callId);
   } catch (_) {}
 }
+
+/// Важное уведомление безопасности (новый вход в аккаунт).
+Future<void> showSecurityNotification(String title, String body) async {
+  try {
+    await _fln.show(
+      id: 9001,
+      title: title,
+      body: body,
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails('security', 'Безопасность', channelDescription: 'Новые входы в аккаунт', importance: Importance.high, priority: Priority.high),
+        iOS: DarwinNotificationDetails(),
+        macOS: DarwinNotificationDetails(),
+      ),
+    );
+  } catch (_) {}
+}

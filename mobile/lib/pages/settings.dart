@@ -9,6 +9,9 @@ import '../system/desktop.dart';
 import '../system/notify.dart';
 import '../system/updater.dart';
 import 'passcode.dart';
+import 'sessions.dart';
+import '../system/privacy.dart';
+import '../system/trust.dart';
 import '../widgets/avatar.dart';
 import 'login.dart';
 
@@ -30,6 +33,8 @@ Future<void> logout(BuildContext context) async {
 
 /// Выйти без вопросов (после подтверждения).
 Future<void> logoutNow() async {
+  await purgeDecryptedFiles();
+  await Trust.instance.resetOwnDevices();
   try {
     await client.logout();
   } catch (_) {
@@ -104,6 +109,12 @@ class _SettingsPageState extends State<SettingsPage> {
         _header('Конфиденциальность'),
         _row(Icons.lock_outline, 'Код-пароль', sub: _p?.getString('lock.hash')?.isNotEmpty == true ? 'Включён' : 'Выключен', onTap: () async {
           await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PasscodePage()));
+          setState(() {});
+        }),
+        _row(Icons.devices_other_outlined, 'Мои сеансы', sub: 'Где выполнен вход; завершить чужой вход', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SessionsPage()))),
+        _switch(Icons.screenshot_monitor_outlined, 'Запретить снимки экрана',
+            Platform.isIOS ? 'Скрывать переписку в переключателе приложений' : 'Переписку нельзя сфотографировать или записать с экрана', screenProtect.value, (v) async {
+          await setScreenProtect(v);
           setState(() {});
         }),
         _switch(Icons.how_to_reg_outlined, 'Принимать личные чаты автоматически', 'От коллег с вашего сервера — без нажатия «Вступить»', _pref('invites.autoAccept'), (v) => _set('invites.autoAccept', v)),

@@ -9,6 +9,7 @@ import '../calls/voip.dart';
 import '../chat/autodelete.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
+import '../widgets/login_banner.dart';
 import '../widgets/update_banner.dart';
 import 'chat.dart';
 import 'settings.dart';
@@ -371,6 +372,7 @@ class _ChatsPageState extends State<ChatsPage> {
       floatingActionButton: FloatingActionButton(onPressed: _newChat, tooltip: 'Новый чат', child: const Icon(Icons.edit_outlined)),
       body: Column(children: [
         const UpdateBanner(),
+        const NewLoginBanner(),
         Expanded(child: client.prevBatch == null && client.rooms.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : rooms.isEmpty && _people.isEmpty

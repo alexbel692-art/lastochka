@@ -12,6 +12,8 @@ import 'calls/voip.dart';
 import 'chat/autodelete.dart';
 import 'pages/settings.dart';
 import 'system/lock.dart';
+import 'system/privacy.dart';
+import 'system/trust.dart';
 import 'system/updater.dart';
 import 'system/desktop.dart';
 import 'system/notify.dart';
@@ -22,6 +24,7 @@ import 'pages/verify.dart';
 import 'theme.dart';
 
 late Client client;
+final _switcherCover = ValueNotifier<bool>(false);
 final navKey = GlobalKey<NavigatorState>();
 
 Future<void> main(List<String> args) async {
@@ -74,6 +77,9 @@ Future<void> main(List<String> args) async {
   initVoip();
   await initNotifications();
   await AppLock.instance.init();
+  await initPrivacy();
+  await Trust.instance.init();
+  Trust.instance.onNewLogin = (name) => showSecurityNotification('Новый вход в ваш аккаунт', '$name. Если это не вы — завершите сеанс в «Настройки → Мои сеансы» и смените пароль.');
   startAutodeleteSweeper();
   autoAcceptDirectInvites();
   handlePasswordConfirmations();
@@ -100,6 +106,7 @@ class _LastochkaAppState extends State<LastochkaApp> {
   void initState() {
     super.initState();
     _life = AppLifecycleListener(onStateChange: (s) {
+      if (Platform.isIOS) _switcherCover.value = s != AppLifecycleState.resumed;
       if (!isDesktopOS) appVisible = s == AppLifecycleState.resumed;
     });
     if (client.isLogged()) WidgetsBinding.instance.addPostFrameCallback((_) => _afterLogin());
@@ -171,12 +178,15 @@ class _LastochkaAppState extends State<LastochkaApp> {
       home: client.isLogged() ? const VerifyGate(child: ChatsPage()) : const LoginPage(),
       // код-пароль поверх всего приложения
       builder: (context, child) => ListenableBuilder(
-        listenable: Listenable.merge([AppLock.instance.locked, callActive]),
+        listenable: Listenable.merge([AppLock.instance.locked, callActive, screenProtect, _switcherCover]),
         builder: (context, _) {
           // во время звонка экран звонка не закрываем блокировкой — иначе нельзя ответить
           final locked = AppLock.instance.locked.value && client.isLogged() && !callActive.value;
           return Stack(children: [
             ExcludeFocus(excluding: locked, child: child ?? const SizedBox.shrink()),
+            // iPhone: в переключателе приложений вместо переписки — заставка
+            if (_switcherCover.value && screenProtect.value && !locked)
+              Positioned.fill(child: ColoredBox(color: Theme.of(context).scaffoldBackgroundColor, child: Center(child: Image.asset('assets/icon.png', width: 96)))),
             if (locked)
               Positioned.fill(
                 child: LockScreen(onForgot: () async {
