@@ -1705,14 +1705,21 @@ async function onIncomingVerification(req){
   const ok = await modal({title:'Запрос на подтверждение', html:`<p>${self ? 'Другое ваше устройство' : esc(S.client.getUser(req.otherUserId)?.displayName || localpart(req.otherUserId))} хочет подтвердить этот вход сравнением эмодзи.</p>`, buttons:[{label:'Отклонить', value:'no'}, {label:'Принять', value:true}]});
   if (ok === true) verifyFlow(req); else req.cancel?.().catch(() => {});
 }
+// Защищённая рассылка ключей (по умолчанию включена): ключи от сообщений получают только устройства,
+// которые их владелец подтвердил (подписал). Вошедший по украденному паролю без ключа восстановления
+// и без подтверждения с другого устройства переписку не прочитает. Выключить можно в «Шифрование».
 const LS_STRICT = 'mxtg.strict';
+const strictOn = () => { try { return localStorage.getItem(LS_STRICT) !== '0'; } catch { return true; } };
 function applyStrict(){
   const c = crypto_(); if (!c) return;
-  try { c.globalBlacklistUnverifiedDevices = localStorage.getItem(LS_STRICT) === '1'; } catch {}
+  try {
+    c.globalBlacklistUnverifiedDevices = false;
+    c.setDeviceIsolationMode?.(strictOn() ? new CA.OnlySignedDevicesIsolationMode() : new CA.AllDevicesIsolationMode(false));
+  } catch (e) { console.warn('isolation mode', e); }
 }
 async function cryptoDialog(){
   await refreshCryptoState();
-  const st = S.cstate, strict = localStorage.getItem(LS_STRICT) === '1';
+  const st = S.cstate, strict = strictOn();
   const status = !st.ready ? 'Шифрование не запустилось в этом браузере.'
     : !st.hasCS ? 'Шифрование для аккаунта ещё не настроено.'
     : st.verified ? 'Этот вход подтверждён ✓' : 'Этот вход не подтверждён — старые зашифрованные сообщения не читаются.';
@@ -1724,9 +1731,9 @@ async function cryptoDialog(){
     if (!st.verified) buttons.push({label:'Подтвердить с другого устройства', value:'device'});
     else buttons.push({label:'Восстановить ключи из копии', value:'backup'});
   }
-  if (st.ready) buttons.push({label:strict ? 'Строгий режим: выключить' : 'Строгий режим: включить', value:'strict'});
+  if (st.ready) buttons.push({label:strict ? 'Защищённый режим: выключить' : 'Защищённый режим: включить', value:'strict'});
   const v = await modal({title:'Шифрование', html:`<p>${esc(status)}</p>
-    <p style="font-size:13px">Строгий режим ${strict ? '<b>включён</b>' : 'выключен'}: ${strict ? 'ключи от ваших сообщений получают только подтверждённые устройства собеседников' : 'ключи получают все устройства собеседников, как в Element по умолчанию'}.</p>
+    <p style="font-size:13px">Защищённый режим ${strict ? '<b>включён</b>' : 'выключен'}: ${strict ? 'ключи от сообщений получают только устройства, подтверждённые их владельцами. Вход по украденному паролю переписку не откроет' : 'ключи получают все устройства собеседников, в том числе неподтверждённые, как в Element по умолчанию'}.</p>
     <p style="font-size:13px">Это устройство: <code>${esc(S.deviceId)}</code></p>`, buttons});
   if (v === 'setup') setupEncryption();
   else if (v === 'key') recoveryKeyFlow();
@@ -1738,12 +1745,12 @@ async function cryptoDialog(){
   else if (v === 'import') importKeys();
   else if (v === 'strict') {
     const on = !strict;
-    if (on) {
-      const ok = await modal({title:'Включить строгий режим?', html:'<p>Ваши новые сообщения смогут расшифровать только устройства, которые их владельцы подтвердили. Собеседники с неподтверждёнными входами перестанут видеть ваши сообщения, пока не подтвердят их.</p>', buttons:[{label:'Отмена'}, {label:'Включить', value:true}]});
+    if (!on) {
+      const ok = await modal({title:'Выключить защищённый режим?', html:'<p>Ключи от ваших новых сообщений начнут получать и неподтверждённые устройства — например, вошедшие по украденному паролю. Рекомендуем оставить режим включённым.</p>', buttons:[{label:'Отмена'}, {label:'Выключить', value:true}]});
       if (!ok) return;
     }
     localStorage.setItem(LS_STRICT, on ? '1' : '0'); applyStrict();
-    toast(on ? 'Строгий режим включён' : 'Строгий режим выключен');
+    toast(on ? 'Защищённый режим включён' : 'Защищённый режим выключен');
   }
 }
 async function myDevices(){
@@ -1776,7 +1783,7 @@ async function securityCheck(){
     add(ssReady ? 'ok' : 'warn', ssReady ? 'Ключ восстановления настроен' : 'Ключ восстановления не настроен или недоступен');
     const bv = await c.getActiveSessionBackupVersion?.().catch(() => null);
     add(bv ? 'ok' : 'warn', bv ? `Резервная копия ключей включена (версия ${esc(bv)})` : 'Резервная копия ключей не включена: при потере всех устройств старая переписка пропадёт');
-    add(c.globalBlacklistUnverifiedDevices ? 'ok' : 'warn', c.globalBlacklistUnverifiedDevices ? 'Строгий режим: ключи получают только подтверждённые устройства' : 'Ключи получают и неподтверждённые устройства собеседников (как в Element). Строже — включить строгий режим');
+    add(strictOn() ? 'ok' : 'warn', strictOn() ? 'Защищённый режим: ключи получают только подтверждённые владельцами устройства' : 'Ключи получают и неподтверждённые устройства (как в Element). Включите защищённый режим');
   }
   const joined = S.client.getRooms().filter(r => membership(r) === 'join' && !r.isSpaceRoom());
   const plain = joined.filter(r => !isEncrypted(r));

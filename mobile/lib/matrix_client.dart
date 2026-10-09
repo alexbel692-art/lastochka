@@ -108,9 +108,11 @@ Future<Client> createClient() async {
     verificationMethods: {KeyVerificationMethod.emoji, KeyVerificationMethod.numbers},
     importantStateEvents: {'im.ponies.room_emotes'},
     supportedLoginTypes: {AuthenticationTypes.password},
-    // ключи сообщений получают все устройства участников (кроме заблокированных) — иначе в группах,
-    // как в Element, появляются «не удалось расшифровать», если кто-то не подтвердил новое устройство
-    shareKeysWith: ShareKeysWith.all,
+    // ключи сообщений получают только устройства, подтверждённые их владельцем (подписанные).
+    // Вошедший по украденному паролю без ключа восстановления и без подтверждения
+    // с другого устройства ключей не получит. Ласточка требует подтверждать каждый вход,
+    // поэтому у своих в группах «не удалось расшифровать» не возникает.
+    shareKeysWith: ShareKeysWith.crossVerifiedIfEnabled,
     nativeImplementations: NativeImplementationsIsolate(compute, vodozemacInit: () => vod.init()),
     logLevel: kReleaseMode ? Level.warning : Level.info,
   );

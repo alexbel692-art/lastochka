@@ -75,6 +75,7 @@ Future<void> main(List<String> args) async {
   await AppLock.instance.init();
   startAutodeleteSweeper();
   autoAcceptDirectInvites();
+  handlePasswordConfirmations();
   runApp(const LastochkaApp());
   // Android может запустить Ласточку в фоне (после перезагрузки, фоновой службой) — окна нет
   if (!isDesktopOS) appVisible = WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
@@ -208,5 +209,34 @@ void autoAcceptDirectInvites() {
         seen.remove(r.id); // попробуем при следующей синхронизации
       }
     }
+  });
+}
+
+/// Сервер иногда просит подтвердить важное действие паролем (например, настройку защиты).
+void handlePasswordConfirmations() {
+  client.onUiaRequest.stream.listen((uia) async {
+    if (uia.state != UiaRequestState.waitForUser) return;
+    if (!uia.nextStages.contains(AuthenticationTypes.password)) return uia.cancel();
+    final ctx = navKey.currentContext;
+    if (ctx == null) return uia.cancel();
+    final c = TextEditingController();
+    final pw = await showDialog<String>(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (d) => AlertDialog(
+        title: const Text('Подтвердите паролем'),
+        content: TextField(controller: c, obscureText: true, autofocus: true, decoration: const InputDecoration(hintText: 'Пароль от аккаунта'), onSubmitted: (v) => Navigator.pop(d, v)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(d, c.text), child: const Text('Подтвердить')),
+        ],
+      ),
+    );
+    if (pw == null || pw.isEmpty) return uia.cancel();
+    await uia.completeStage(AuthenticationPassword(
+      session: uia.session,
+      password: pw,
+      identifier: AuthenticationUserIdentifier(user: client.userID!),
+    ));
   });
 }

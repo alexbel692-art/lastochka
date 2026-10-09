@@ -3,6 +3,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:matrix/encryption.dart';
 import 'package:matrix/encryption/utils/key_verification.dart';
 
 import '../main.dart';
@@ -10,6 +12,13 @@ import 'settings.dart';
 
 bool needsVerification() =>
     client.encryption?.crossSigning.enabled == true && client.isUnknownSession;
+
+/// У аккаунта ещё нет подписи устройств (новый аккаунт, ни разу не входили в Element/Ласточку).
+/// Без неё любое новое устройство с паролем получало бы ключи — поэтому настраиваем сразу.
+bool needsSecuritySetup() {
+  final enc = client.encryption;
+  return enc != null && client.prevBatch != null && !enc.crossSigning.enabled && enc.ssss.defaultKeyId == null;
+}
 
 class VerifyGate extends StatefulWidget {
   final Widget child;
@@ -66,8 +75,124 @@ class _VerifyGateState extends State<VerifyGate> {
     if (mounted) setState(() {});
   }
 
+  String? _newKey; // показываем созданный ключ восстановления, пока пользователь его не сохранит
+  bool _setupRunning = false;
+  String? _setupError;
+
+  /// Первичная настройка защиты: ключ восстановления, подпись устройств, резервная копия ключей.
+  Future<void> _runSetup() async {
+    if (_setupRunning) return;
+    setState(() {
+      _setupRunning = true;
+      _setupError = null;
+    });
+    final done = Completer<void>();
+    late Bootstrap b;
+    b = client.encryption!.bootstrap(onUpdate: (bs) async {
+      try {
+        switch (bs.state) {
+          case BootstrapState.askWipeSsss:
+            bs.wipeSsss(false);
+          case BootstrapState.askUseExistingSsss:
+            bs.useExistingSsss(false);
+          case BootstrapState.askBadSsss:
+            bs.ignoreBadSecrets(true);
+          case BootstrapState.askNewSsss:
+            await bs.newSsss();
+          case BootstrapState.askWipeCrossSigning:
+            await bs.wipeCrossSigning(true);
+          case BootstrapState.askSetupCrossSigning:
+            await bs.askSetupCrossSigning(setupMasterKey: true, setupSelfSigningKey: true, setupUserSigningKey: true);
+          case BootstrapState.askWipeOnlineKeyBackup:
+            bs.wipeOnlineKeyBackup(false);
+          case BootstrapState.askSetupOnlineKeyBackup:
+            await bs.askSetupOnlineKeyBackup(true);
+          case BootstrapState.done:
+            if (!done.isCompleted) done.complete();
+          case BootstrapState.error:
+            if (!done.isCompleted) done.completeError(StateError('bootstrap'));
+          case BootstrapState.askUnlockSsss:
+            if (!done.isCompleted) done.completeError(StateError('ssss'));
+          default:
+            break;
+        }
+      } catch (e) {
+        if (!done.isCompleted) done.completeError(e);
+      }
+    });
+    try {
+      await done.future.timeout(const Duration(minutes: 3));
+      final key = b.newSsssKey?.recoveryKey;
+      setState(() => _newKey = key ?? '');
+    } catch (e) {
+      setState(() => _setupError = 'Не удалось настроить защиту. Проверьте подключение и попробуйте ещё раз.');
+    } finally {
+      if (mounted) setState(() => _setupRunning = false);
+    }
+  }
+
+  Widget _setupScreen(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    final key = _newKey;
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Icon(Icons.vpn_key_outlined, size: 64, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(height: 14),
+                Text(key == null ? 'Защита аккаунта' : 'Ваш ключ восстановления',
+                    textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 10),
+                Text(
+                  key == null
+                      ? 'Ласточка создаст ключ восстановления и подпись ваших устройств. После этого ключи от переписки будут получать только подтверждённые вами входы — даже зная пароль, посторонний не прочитает сообщения.'
+                      : 'Сохраните ключ в надёжном месте (менеджер паролей, бумага в сейфе). Он нужен, чтобы подтвердить новое устройство и вернуть переписку, если потеряете все устройства. Восстановить его нельзя.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: hint),
+                ),
+                const SizedBox(height: 20),
+                if (key != null && key.isNotEmpty) ...[
+                  SelectableText(key, textAlign: TextAlign.center, style: const TextStyle(fontFamily: 'monospace', fontSize: 17, height: 1.5, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.copy),
+                    label: const Text('Скопировать'),
+                    onPressed: () async {
+                      await Clipboard.setData(ClipboardData(text: key));
+                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ключ скопирован')));
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  FilledButton(
+                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+                    onPressed: () => setState(() => _newKey = null),
+                    child: const Text('Я сохранил(а) ключ'),
+                  ),
+                ] else ...[
+                  if (_setupError != null) Padding(padding: const EdgeInsets.only(bottom: 10), child: Text(_setupError!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.redAccent))),
+                  FilledButton(
+                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+                    onPressed: _setupRunning ? null : _runSetup,
+                    child: _setupRunning ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)) : const Text('Настроить защиту'),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                TextButton(onPressed: () => logout(context), child: const Text('Выйти из аккаунта', style: TextStyle(color: Colors.redAccent))),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_newKey != null || needsSecuritySetup()) return _setupScreen(context);
     if (!needsVerification()) return widget.child;
     final hint = Theme.of(context).hintColor;
     return Scaffold(
