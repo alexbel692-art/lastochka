@@ -17,7 +17,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 const _secure = FlutterSecureStorage(
   // на macOS без платной подписи Apple «новая» связка ключей недоступна — используем обычную
-  mOptions: MacOsOptions(useDataProtectionKeyChain: false),
+  mOptions: MacOsOptions(usesDataProtectionKeychain: false),
 );
 const _dbKeyName = 'lastochka.db_key';
 const clientName = 'lastochka';
