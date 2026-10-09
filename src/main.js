@@ -3274,6 +3274,20 @@ function ringtone(kind){
     CALL.ring = {ctx, iv:setInterval(beat, kind === 'in' ? 2000 : 4000)};
   } catch {}
 }
+// короткий сигнал завершения звонка: два мягких тона вниз (как в мессенджерах)
+function hangupSound(){
+  try {
+    const ctx = new AudioContext(), t0 = ctx.currentTime + 0.02;
+    [[660, 0], [440, 0.22]].forEach(([f, dt]) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f; o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0, t0 + dt); g.gain.linearRampToValueAtTime(0.18, t0 + dt + 0.02);
+      g.gain.setValueAtTime(0.18, t0 + dt + 0.16); g.gain.linearRampToValueAtTime(0, t0 + dt + 0.2);
+      o.start(t0 + dt); o.stop(t0 + dt + 0.22);
+    });
+    setTimeout(() => ctx.close().catch(() => {}), 800);
+  } catch {}
+}
 function stopRing(){ if (CALL.ring) { clearInterval(CALL.ring.iv); CALL.ring.ctx.close().catch(() => {}); CALL.ring = null; } }
 function callPeer(call){
   const room = S.client.getRoom(call.roomId);
@@ -3375,6 +3389,7 @@ function bindCall(call){
 function endCall(call){
   if (CALL.call !== call || call.__lastochkaEnded) return;
   call.__lastochkaEnded = true;
+  hangupSound();
   window.desktop?.clearNotify?.('call');
   stopRing(); clearInterval(CALL.timer);
   const reason = call.hangupReason;
