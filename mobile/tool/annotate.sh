@@ -6,7 +6,7 @@ log=$(mktemp)
 "$@" 2>&1 | tee "$log"
 code=${PIPESTATUS[0]}
 if [ "$code" != "0" ] || grep -qE '^\s*error •' "$log"; then
-  msg=$(grep -E 'error •|Error:|error:|FAILURE|What went wrong|Exception|^e: |\.dart:[0-9]+:[0-9]+' "$log" | grep -v '^\s*info •' | head -60)
+  msg=$( (grep -A6 'What went wrong' "$log"; grep -E 'error •|Error:|error:|^e: |\.dart:[0-9]+:[0-9]+|ERROR:' "$log" | grep -v '^\s*info •') | head -60)
   [ -z "$msg" ] && msg=$(tail -40 "$log")
   msg="${msg//'%'/'%25'}"; msg="${msg//$'\r'/}"; msg="${msg//$'\n'/'%0A'}"
   echo "::error title=$title::$msg"
