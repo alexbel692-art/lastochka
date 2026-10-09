@@ -18,6 +18,23 @@ final navKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Вместо серого экрана при ошибке — понятное сообщение и кнопка «Назад».
+  ErrorWidget.builder = (details) => Material(
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
+              const SizedBox(height: 12),
+              const Text('Что-то пошло не так', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Text(details.exceptionAsString(), textAlign: TextAlign.center, maxLines: 6, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 16),
+              FilledButton(onPressed: () => navKey.currentState?.maybePop(), child: const Text('Назад')),
+            ]),
+          ),
+        ),
+      );
   await initializeDateFormatting('ru');
   client = await createClient();
   initVoip();

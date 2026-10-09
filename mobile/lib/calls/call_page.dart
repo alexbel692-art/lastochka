@@ -34,12 +34,16 @@ class _CallPageState extends State<CallPage> {
   DateTime? _connectedAt;
   bool _speaker = false;
   bool _closing = false;
+  bool _renderers = false; // видео можно подключать только после initialize()
 
   @override
   void initState() {
     super.initState();
     _speaker = call.type == CallType.kVideo;
-    Future.wait([_remote.initialize(), _local.initialize()]).then((_) => _bindStreams());
+    Future.wait([_remote.initialize(), _local.initialize()]).then((_) {
+      _renderers = true;
+      _bindStreams();
+    }).catchError((Object e) => Logs().w('[Ласточка] видео недоступно', e));
     _subs.add(call.onCallStateChanged.stream.listen(_onState));
     _subs.add(call.onCallStreamsChanged.stream.listen((_) => _bindStreams()));
     _subs.add(call.onStreamAdd.stream.listen((_) => _bindStreams()));
@@ -47,13 +51,19 @@ class _CallPageState extends State<CallPage> {
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _connectedAt != null) setState(() {});
     });
-    _onState(call.state);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onState(call.state));
   }
 
   void _bindStreams() {
     if (!mounted) return;
-    _remote.srcObject = call.remoteUserMediaStream?.stream;
-    _local.srcObject = call.localUserMediaStream?.stream;
+    if (_renderers) {
+      try {
+        _remote.srcObject = call.remoteUserMediaStream?.stream;
+        _local.srcObject = call.localUserMediaStream?.stream;
+      } catch (e) {
+        Logs().w('[Ласточка] видео', e);
+      }
+    }
     setState(() {});
   }
 
@@ -87,8 +97,12 @@ class _CallPageState extends State<CallPage> {
       s.cancel();
     }
     _ticker?.cancel();
-    _remote.srcObject = null;
-    _local.srcObject = null;
+    if (_renderers) {
+      try {
+        _remote.srcObject = null;
+        _local.srcObject = null;
+      } catch (_) {}
+    }
     _remote.dispose();
     _local.dispose();
     if (!call.callHasEnded) call.hangup(reason: CallErrorCode.userHangup).catchError((_) {});
@@ -133,14 +147,14 @@ class _CallPageState extends State<CallPage> {
     final room = call.room;
     final name = call.remoteUser?.calcDisplayname() ?? room.getLocalizedDisplayname();
     final ringing = call.state == CallState.kRinging && !call.isOutgoing && !_closing;
-    final remoteVideo = call.remoteUserMediaStream != null && !(call.remoteUserMediaStream!.isVideoMuted()) &&
+    final remoteVideo = _renderers && call.remoteUserMediaStream != null && !(call.remoteUserMediaStream!.isVideoMuted()) &&
         (call.remoteUserMediaStream!.stream?.getVideoTracks().isNotEmpty ?? false);
-    final localVideo = call.localUserMediaStream != null && !call.isLocalVideoMuted &&
+    final localVideo = _renderers && call.localUserMediaStream != null && !call.isLocalVideoMuted &&
         (call.localUserMediaStream!.stream?.getVideoTracks().isNotEmpty ?? false);
     final ended = _closing || call.callHasEnded;
 
     return PopScope(
-      canPop: ended,
+      canPop: true,
       child: Scaffold(
         backgroundColor: const Color(0xFF1C2733),
         body: Stack(children: [
