@@ -10,6 +10,7 @@ import 'package:crypto/crypto.dart' as hash;
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -17,6 +18,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'desktop.dart';
+import 'pinning.dart';
 import 'notify.dart';
 
 const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '0.0.0');
@@ -55,6 +57,10 @@ class UpdateInfo {
 class Updater {
   Updater._();
   static final instance = Updater._();
+
+  // GitHub — с тем же расширенным набором корневых сертификатов (на старых Android иначе
+  // «unable to get local issuer certificate»); подлинность файла всё равно проверяет наша подпись
+  final _http = IOClient(HttpClient(context: CertPinning.trustContext)..connectionTimeout = const Duration(seconds: 30));
 
   final available = ValueNotifier<UpdateInfo?>(null);
   final progress = ValueNotifier<double?>(null); // 0..1 во время скачивания
@@ -102,7 +108,7 @@ class Updater {
     final re = _assetPattern;
     if (re == null) return false;
     try {
-      final r = await http.get(Uri.parse('https://api.github.com/repos/$_repo/releases/latest'),
+      final r = await _http.get(Uri.parse('https://api.github.com/repos/$_repo/releases/latest'),
           headers: {'accept': 'application/vnd.github+json', 'user-agent': 'Lastochka-Updater'});
       if (r.statusCode != 200) return false;
       final rel = jsonDecode(r.body) as Map<String, dynamic>;
@@ -133,7 +139,7 @@ class Updater {
     progress.value = 0;
     try {
       // 1. подпись: какой файл, какая версия, какой SHA-256
-      final sr = await http.get(Uri.parse(u.sigUrl), headers: {'user-agent': 'Lastochka-Updater'});
+      final sr = await _http.get(Uri.parse(u.sigUrl), headers: {'user-agent': 'Lastochka-Updater'});
       if (sr.statusCode != 200) throw 'Не удалось скачать подпись';
       final s = jsonDecode(sr.body) as Map<String, dynamic>;
       if (!await verifyUpdateSignature(s)) throw 'Подпись обновления неверна — установка отменена';
@@ -144,7 +150,7 @@ class Updater {
       final dir = await Directory(p.join((await getTemporaryDirectory()).path, 'lastochka-update')).create(recursive: true);
       final target = File(p.join(dir.path, u.fileName));
       final req = http.Request('GET', Uri.parse(u.fileUrl))..headers['user-agent'] = 'Lastochka-Updater';
-      final resp = await http.Client().send(req);
+      final resp = await _http.send(req);
       if (resp.statusCode != 200) throw 'Не удалось скачать обновление (${resp.statusCode})';
       final total = resp.contentLength ?? u.size;
       final out = target.openWrite();

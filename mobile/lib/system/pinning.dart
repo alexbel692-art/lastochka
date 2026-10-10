@@ -77,11 +77,17 @@ class CertPinning {
   /// HTTP-клиент для всего общения с сервером Matrix: сертификат проверяется сразу после
   /// TLS-рукопожатия, до того как в соединение будет записан хотя бы байт запроса.
   /// Системные корневые сертификаты + Let's Encrypt (для старых Android).
-  static final SecurityContext _ctx = () {
+  static SecurityContext get _ctx => trustContext;
+
+  /// Системные корневые сертификаты + те, которых нет в старых Android. Каждый добавляется отдельно:
+  /// если какой-то уже есть в системе, остальные всё равно добавятся.
+  static final SecurityContext trustContext = () {
     final c = SecurityContext(withTrustedRoots: true);
-    try {
-      c.setTrustedCertificatesBytes(utf8.encode(extraRootsPem));
-    } catch (_) {}
+    for (final pem in extraRoots) {
+      try {
+        c.setTrustedCertificatesBytes(utf8.encode(pem));
+      } catch (_) {}
+    }
     return c;
   }();
 

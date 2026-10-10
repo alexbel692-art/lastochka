@@ -6,6 +6,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 import 'package:matrix/matrix.dart';
 
 import '../widgets/avatar.dart';
+import '../system/diag.dart';
 import 'sounds.dart';
 
 const _reasons = {
@@ -40,10 +41,16 @@ class _CallPageState extends State<CallPage> {
   void initState() {
     super.initState();
     _speaker = call.type == CallType.kVideo;
-    Future.wait([_remote.initialize(), _local.initialize()]).then((_) {
-      _renderers = true;
-      _bindStreams();
-    }).catchError((Object e) => Logs().w('[Ласточка] видео недоступно', e));
+    Diag.mark('звонок: экран открыт (${call.type == CallType.kVideo ? 'видео' : 'аудио'}, ${call.isOutgoing ? 'исходящий' : 'входящий'})', start: true);
+    // окна видео — только для видеозвонков: на аудиозвонке они не нужны, а их освобождение
+    // на старых Android могло подвесить приложение при завершении
+    if (call.type == CallType.kVideo) {
+      Future.wait([_remote.initialize(), _local.initialize()]).then((_) {
+        if (!mounted || _closing) return;
+        _renderers = true;
+        _bindStreams();
+      }).catchError((Object e) => Logs().w('[Ласточка] видео недоступно', e));
+    }
     _subs.add(call.onCallStateChanged.stream.listen(_onState));
     _subs.add(call.onCallStreamsChanged.stream.listen((_) => _bindStreams()));
     _subs.add(call.onStreamAdd.stream.listen((_) => _bindStreams()));
@@ -75,7 +82,11 @@ class _CallPageState extends State<CallPage> {
     }
     if (s == CallState.kInviteSent && call.isOutgoing) CallSounds.outgoing();
     if (s == CallState.kConnecting || s == CallState.kConnected) CallSounds.stop();
-    if (s == CallState.kEnded) _finish();
+    if (s == CallState.kEnded) {
+      Diag.mark('звонок: завершён (${call.hangupReason})');
+      _detach();
+      _finish();
+    }
     setState(() {});
     _bindStreams();
   }
@@ -102,12 +113,23 @@ class _CallPageState extends State<CallPage> {
     }
   }
 
+  /// Отвязать видео от потоков сразу, пока модуль звонков их освобождает.
+  void _detach() {
+    if (!_renderers) return;
+    _renderers = false;
+    try {
+      _remote.srcObject = null;
+      _local.srcObject = null;
+    } catch (_) {}
+  }
+
   Future<void> _finish() async {
     if (_closing) return;
     _closing = true;
     CallSounds.hangup();
     setState(() {});
-    await Future.delayed(const Duration(milliseconds: 1500));
+    await Future.delayed(const Duration(milliseconds: 1200));
+    Diag.mark('звонок: закрываем экран');
     if (mounted) Navigator.of(context).maybePop();
   }
 
@@ -117,15 +139,18 @@ class _CallPageState extends State<CallPage> {
       s.cancel();
     }
     _ticker?.cancel();
-    if (_renderers) {
-      try {
-        _remote.srcObject = null;
-        _local.srcObject = null;
-      } catch (_) {}
-    }
-    _remote.dispose();
-    _local.dispose();
+    final hadVideo = call.type == CallType.kVideo;
+    _detach();
     if (!call.callHasEnded) call.hangup(reason: CallErrorCode.userHangup).catchError((_) {});
+    // окна видео освобождаем чуть позже — когда модуль звонков закончит со своими потоками
+    if (hadVideo) {
+      final r = _remote, l = _local;
+      Future.delayed(const Duration(seconds: 2), () {
+        r.dispose().catchError((_) {});
+        l.dispose().catchError((_) {});
+      });
+    }
+    Diag.mark('звонок: экран закрыт — готово');
     super.dispose();
   }
 
@@ -226,7 +251,10 @@ class _CallPageState extends State<CallPage> {
                       }, active: call.isMicrophoneMuted),
                     ]),
                     const SizedBox(height: 22),
-                    _btn(Icons.call_end, 'Завершить', () => call.hangup(reason: CallErrorCode.userHangup), bg: const Color(0xFFE53935)),
+                    _btn(Icons.call_end, 'Завершить', () {
+                      Diag.mark('звонок: нажато «Завершить»');
+                      call.hangup(reason: CallErrorCode.userHangup);
+                    }, bg: const Color(0xFFE53935)),
                   ]),
                 )
               else

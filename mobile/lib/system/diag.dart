@@ -3,6 +3,9 @@
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 
@@ -16,6 +19,34 @@ class Diag {
   static void add(String s) {
     _buf.add('${DateTime.now().toIso8601String().substring(0, 19)} $s');
     if (_buf.length > 200) _buf.removeRange(0, _buf.length - 200);
+  }
+
+  // «Следы» важных шагов (звонок и т. п.) пишутся в файл сразу: если приложение зависнет и его
+  // перезапустят, в следующем отчёте будет видно, на каком шаге это случилось.
+  static File? _trail;
+
+  static Future<void> initTrail() async {
+    try {
+      final f = File(p.join((await getApplicationSupportDirectory()).path, 'diag_trail.txt'));
+      _trail = f;
+      if (await f.exists()) {
+        final lines = (await f.readAsString()).trim().split('\n');
+        if (lines.isNotEmpty && lines.last.isNotEmpty && !lines.last.endsWith('— готово')) {
+          add('Прошлый запуск оборвался после шага: ${lines.last}');
+          for (final l in lines.reversed.take(12).toList().reversed) {
+            add('  след: $l');
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Записать шаг. [start] — начать новую цепочку (например, новый звонок).
+  static void mark(String step, {bool start = false}) {
+    final line = '${DateTime.now().toIso8601String().substring(11, 23)} $step';
+    try {
+      _trail?.writeAsStringSync('$line\n', mode: start ? FileMode.write : FileMode.append, flush: true);
+    } catch (_) {}
   }
 
   /// Перехват ошибок приложения (сами ошибки по-прежнему обрабатываются как раньше).

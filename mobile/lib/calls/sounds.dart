@@ -113,15 +113,14 @@ class CallSounds {
       await _loop.stop();
     } catch (_) {}
     await Future.delayed(const Duration(milliseconds: 350));
+    // один и тот же проигрыватель, без создания и уничтожения: на старых Android освобождение
+    // проигрывателя сразу после звонка могло подвесить приложение
     for (var attempt = 0; attempt < 2; attempt++) {
-      final pl = AudioPlayer();
       try {
-        await pl.setReleaseMode(ReleaseMode.release);
-        await pl.play(await _src('hangup', _hangup), volume: 1.0);
-        Future.delayed(const Duration(seconds: 2), pl.dispose);
+        await _once.stop();
+        await _once.play(await _src('hangup', _hangup), volume: 1.0);
         return;
       } catch (_) {
-        pl.dispose();
         await Future.delayed(const Duration(milliseconds: 300));
       }
     }
