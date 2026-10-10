@@ -10,9 +10,13 @@ import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../main.dart';
 import 'notify.dart';
 
-const lockTimeouts = [(0, 'Сразу'), (60, 'Через 1 минуту'), (300, 'Через 5 минут'), (3600, 'Через 1 час')];
+const lockTimeouts = [(0, 'Сразу'), (60, 'Через 1 минуту'), (300, 'Через 5 минут'), (900, 'Через 15 минут'), (3600, 'Через 1 час')];
+
+/// После стольких неверных попыток подряд данные удаляются (если включено).
+const wipeAfterFails = 10;
 
 class AppLock {
   AppLock._();
@@ -21,14 +25,23 @@ class AppLock {
   final locked = ValueNotifier<bool>(false);
   SharedPreferences? _p;
   DateTime? _hiddenAt;
-  int _fails = 0;
-  DateTime? _blockedUntil;
+  /// Удалить все данные Ласточки на устройстве (задаётся при запуске).
+  Future<void> Function()? onWipe;
 
   bool get enabled => (_p?.getString('lock.hash') ?? '').isNotEmpty;
   int get timeout => _p?.getInt('lock.timeout') ?? 60;
   bool get biometric => _p?.getBool('lock.bio') ?? true;
   int get pinLength => _p?.getInt('lock.len') ?? 4;
-  DateTime? get blockedUntil => _blockedUntil;
+  // неудачные попытки хранятся на диске — перезапуск приложения счётчик не сбрасывает
+  int get fails => _p?.getInt('lock.fails') ?? 0;
+  DateTime? get blockedUntil {
+    final ms = _p?.getInt('lock.blockedUntil');
+    return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  bool get wipeEnabled => _p?.getBool('lock.wipe') ?? false;
+  bool get duressEnabled => (_p?.getString('lock.duress') ?? '').isNotEmpty;
+  Future<void> setWipe(bool v) => _p!.setBool('lock.wipe', v);
 
   Future<void> init() async {
     _p = await SharedPreferences.getInstance();
@@ -61,27 +74,58 @@ class AppLock {
     await _p!.setString('lock.salt', salt);
     await _p!.setString('lock.hash', _hash(pin, salt));
     await _p!.setInt('lock.len', pin.length);
+    await _p!.remove('lock.duress'); // код экстренного удаления привязан к прежней «соли» — задаётся заново
   }
 
   Future<void> disable() async {
-    await _p!.remove('lock.hash');
-    await _p!.remove('lock.salt');
+    for (final k in ['lock.hash', 'lock.salt', 'lock.duress', 'lock.fails', 'lock.blockedUntil', 'lock.wipe']) {
+      await _p!.remove(k);
+    }
     locked.value = false;
   }
+
+  /// Код для экстренного удаления: при его вводе Ласточка тихо стирает все данные на устройстве.
+  Future<bool> setDuress(String pin) async {
+    final salt = _p!.getString('lock.salt') ?? '';
+    final h = _hash(pin, salt);
+    if (h == _p!.getString('lock.hash')) return false; // совпадает с обычным кодом
+    await _p!.setString('lock.duress', h);
+    return true;
+  }
+
+  Future<void> removeDuress() => _p!.remove('lock.duress');
 
   Future<void> setTimeout(int s) => _p!.setInt('lock.timeout', s);
   Future<void> setBiometric(bool v) => _p!.setBool('lock.bio', v);
 
-  bool check(String pin) {
-    if (_blockedUntil != null && DateTime.now().isBefore(_blockedUntil!)) return false;
-    final ok = _hash(pin, _p!.getString('lock.salt') ?? '') == _p!.getString('lock.hash');
-    if (ok) {
-      _fails = 0;
-      _blockedUntil = null;
-    } else if (++_fails >= 5) {
-      _blockedUntil = DateTime.now().add(Duration(seconds: 30 * (_fails - 4)));
+  /// Проверить код. true — верный. Неверный — растущая пауза (30 с, 1, 2, 5, 15 минут…),
+  /// а с включённым удалением после $wipeAfterFails ошибок подряд данные стираются.
+  Future<bool> check(String pin, {bool allowDuress = true}) async {
+    final until = blockedUntil;
+    if (until != null && DateTime.now().isBefore(until)) return false;
+    final h = _hash(pin, _p!.getString('lock.salt') ?? '');
+    if (allowDuress && duressEnabled && h == _p!.getString('lock.duress')) {
+      await onWipe?.call();
+      return false;
     }
-    return ok;
+    final ok = h == _p!.getString('lock.hash');
+    if (ok) {
+      await _p!.remove('lock.fails');
+      await _p!.remove('lock.blockedUntil');
+      return true;
+    }
+    final n = fails + 1;
+    await _p!.setInt('lock.fails', n);
+    if (wipeEnabled && n >= wipeAfterFails) {
+      await onWipe?.call();
+      return false;
+    }
+    if (n >= 5) {
+      const steps = [30, 60, 120, 300, 900];
+      final sec = steps[(n - 5).clamp(0, steps.length - 1)];
+      await _p!.setInt('lock.blockedUntil', DateTime.now().add(Duration(seconds: sec)).millisecondsSinceEpoch);
+    }
+    return false;
   }
 
   void unlock() {
@@ -323,10 +367,15 @@ class _LockScreenState extends State<LockScreen> {
             if (until != null && DateTime.now().isBefore(until)) {
               return 'Слишком много попыток. Подождите ${until.difference(DateTime.now()).inSeconds + 1} с';
             }
-            if (lock.check(pin)) {
+            if (await lock.check(pin)) {
               lock.unlock();
               return null;
             }
+            if (!client.isLogged()) return null; // данные удалены
+            final left = wipeAfterFails - lock.fails;
+            if (lock.wipeEnabled && left <= 3) return 'Неверный код. Ещё $left — и данные будут удалены';
+            final u = lock.blockedUntil;
+            if (u != null && DateTime.now().isBefore(u)) return 'Неверный код. Следующая попытка через ${u.difference(DateTime.now()).inSeconds + 1} с';
             return 'Неверный код';
           },
           footer: TextButton(onPressed: () => setState(() => _forgot = true), child: const Text('Забыли код?')),

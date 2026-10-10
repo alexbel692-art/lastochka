@@ -13,7 +13,10 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'desktop.dart';
+import 'notify.dart';
 
 const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '0.0.0');
 const _repo = 'alexbel692-art/lastochka';
@@ -63,6 +66,20 @@ class Updater {
     if (!supported || appVersion == '0.0.0') return;
     Future.delayed(const Duration(seconds: 20), check);
     _timer ??= Timer.periodic(const Duration(hours: 6), (_) => check());
+  }
+
+  /// Защита от отката: если на устройстве вдруг оказалась версия старее, чем уже стояла
+  /// (её могли поставить, чтобы вернуть исправленную уязвимость), — предупреждаем.
+  Future<void> checkDowngrade() async {
+    if (appVersion == '0.0.0') return;
+    final prefs = await SharedPreferences.getInstance();
+    final highest = prefs.getString('update.highest');
+    if (highest != null && cmpVer(appVersion, highest) < 0) {
+      await showSecurityNotification('Установлена старая версия Ласточки',
+          'Сейчас $appVersion, а раньше стояла $highest. Если вы этого не делали — установите последнюю версию с официальной страницы.');
+      return;
+    }
+    await prefs.setString('update.highest', appVersion);
   }
 
   RegExp? get _assetPattern {

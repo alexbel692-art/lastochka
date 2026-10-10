@@ -24,6 +24,9 @@ const _secure = FlutterSecureStorage(
 const _dbKeyName = 'lastochka.db_key';
 const clientName = 'lastochka';
 
+/// Секрет устройства (ключ базы) — из него выводится ключ для черновиков и отложенных сообщений.
+String? deviceSecret;
+
 Future<Directory> _dataDir() async {
   final d = Platform.isMacOS || Platform.isIOS ? await getLibraryDirectory() : await getApplicationSupportDirectory();
   return d.create(recursive: true);
@@ -68,6 +71,7 @@ Future<DatabaseApi> _openDatabase() async {
   databaseFactory = factory;
   final dbFile = File(path);
   final cipher = await _databaseKey(await dbFile.exists());
+  deviceSecret = cipher;
 
   Future<Database> open() async {
     final helper = SQfLiteEncryptionHelper(factory: factory, path: path, cipher: cipher);

@@ -9,6 +9,9 @@ import '../system/desktop.dart';
 import '../system/notify.dart';
 import '../system/updater.dart';
 import 'passcode.dart';
+import 'appearance.dart';
+import '../chat/drafts.dart';
+import '../system/lock.dart';
 import 'sessions.dart';
 import '../system/privacy.dart';
 import '../system/trust.dart';
@@ -35,11 +38,36 @@ Future<void> logout(BuildContext context) async {
 Future<void> logoutNow() async {
   await purgeDecryptedFiles();
   await Trust.instance.resetOwnDevices();
+  await Drafts.instance.clearAll().catchError((_) {});
+  await Scheduler.instance.clearAll().catchError((_) {});
   try {
     await client.logout();
   } catch (_) {
     await client.clear();
   }
+  navKey.currentState?.pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginPage()), (_) => false);
+}
+
+/// Экстренное удаление: всё, что Ласточка хранит на устройстве, стирается без вопросов.
+/// Сеанс на сервере тоже завершается (если есть связь) — ключи этого устройства становятся бесполезны.
+Future<void> wipeDevice() async {
+  try {
+    await AppLock.instance.disable();
+    await purgeDecryptedFiles();
+    await Drafts.instance.clearAll().catchError((_) {});
+    await Scheduler.instance.clearAll().catchError((_) {});
+    await Trust.instance.resetOwnDevices();
+  } catch (_) {}
+  try {
+    await client.logout().timeout(const Duration(seconds: 5));
+  } catch (_) {
+    try {
+      await client.clear();
+    } catch (_) {}
+  }
+  try {
+    await (await SharedPreferences.getInstance()).clear();
+  } catch (_) {}
   navKey.currentState?.pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginPage()), (_) => false);
 }
 
@@ -118,6 +146,8 @@ class _SettingsPageState extends State<SettingsPage> {
           setState(() {});
         }),
         _switch(Icons.how_to_reg_outlined, 'Принимать личные чаты автоматически', 'От коллег с вашего сервера — без нажатия «Вступить»', _pref('invites.autoAccept'), (v) => _set('invites.autoAccept', v)),
+        _header('Оформление'),
+        _row(Icons.palette_outlined, 'Оформление', sub: 'Тема, размер текста, обои чатов', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AppearancePage()))),
         _header('Уведомления'),
         _switch(Icons.notifications_outlined, 'Уведомления', 'О новых сообщениях и звонках', _pref('notify.enabled'), (v) => _set('notify.enabled', v)),
         _switch(Icons.short_text, 'Текст сообщения', 'Показывать текст в уведомлении (иначе — «Новое сообщение»)', _pref('notify.text'), (v) => _set('notify.text', v)),

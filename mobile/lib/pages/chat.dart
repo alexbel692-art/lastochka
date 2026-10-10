@@ -14,6 +14,13 @@ import 'package:path/path.dart' as p;
 
 import '../calls/voip.dart';
 import '../chat/autodelete.dart';
+import '../chat/drafts.dart';
+import '../chat/formatting.dart';
+import '../chat/forward.dart';
+import '../chat/polls.dart';
+import '../chat/video.dart';
+import '../system/clipboard.dart';
+import '../system/media_clean.dart';
 import '../chat/stickers.dart';
 import '../chat/voice.dart';
 import '../main.dart';
@@ -67,6 +74,11 @@ class _ChatPageState extends State<ChatPage> {
   DateTime? _floatDate;
   bool _floatShow = false;
   List<Event> _events = const [];
+  // упоминания в сообщении: имя → @id
+  final Map<String, String> _mentions = {};
+  List<User> _mentionHits = [];
+  // выбор нескольких сообщений
+  Set<String>? _sel;
 
   @override
   void initState() {
@@ -87,6 +99,8 @@ class _ChatPageState extends State<ChatPage> {
       final down = _scroll.position.pixels > 400;
       if (down != _showDown) setState(() => _showDown = down);
     });
+    final draft = Drafts.instance.of(room.id);
+    if (draft != null) _text.text = draft;
     _text.addListener(_onText);
     _syncSub = client.onSync.stream.where((s) => s.rooms?.join?.containsKey(room.id) == true).listen((_) {
       if (mounted) setState(() {});
@@ -134,6 +148,8 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _onText() {
+    if (_editing == null) Drafts.instance.set(room.id, _text.text);
+    _updateMentionHits();
     setState(() {});
     if (_text.text.isNotEmpty && DateTime.now().difference(_typingSent).inSeconds > 4) {
       _typingSent = DateTime.now();
@@ -185,26 +201,155 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _send() async {
     final t = _text.text.trim();
     if (t.isEmpty) return;
+    final mentions = _activeMentions(t);
     _text.clear();
+    Drafts.instance.set(room.id, '');
     final reply = _replyTo, edit = _editing;
     setState(() {
       _replyTo = null;
       _editing = null;
+      _mentionHits = [];
     });
     room.setTyping(false).catchError((_) {});
     try {
-      final ttl = ttlExtra(room);
+      final content = textContent(t, mentions: mentions);
       if (edit != null) {
-        await room.sendTextEvent(t, editEventId: edit.eventId);
-      } else if (ttl.isNotEmpty) {
-        await room.sendEvent({'msgtype': MessageTypes.Text, 'body': t, ...ttl}, inReplyTo: reply);
+        await room.sendEvent(content, editEventId: edit.eventId);
       } else {
-        await room.sendTextEvent(t, inReplyTo: reply);
+        await room.sendEvent({...content, ...ttlExtra(room)}, inReplyTo: reply);
       }
     } catch (_) {
       _toast('Сообщение не отправлено');
     }
     _toBottom();
+  }
+
+  Map<String, String> _activeMentions(String t) {
+    final m = Map.fromEntries(_mentions.entries.where((e) => t.contains(e.key)));
+    _mentions.clear();
+    return m;
+  }
+
+  // ---------- упоминания @ ----------
+  void _updateMentionHits() {
+    if (room.isDirectChat) return;
+    final sel = _text.selection;
+    final pos = sel.isValid ? sel.baseOffset : _text.text.length;
+    final before = _text.text.substring(0, pos.clamp(0, _text.text.length));
+    final m = RegExp(r'(?:^|\s)@([^\s@]{0,30})$').firstMatch(before);
+    if (m == null) {
+      if (_mentionHits.isNotEmpty) _mentionHits = [];
+      return;
+    }
+    final q = m[1]!.toLowerCase();
+    _mentionHits = room
+        .getParticipants([Membership.join])
+        .where((u) => u.id != client.userID && (u.calcDisplayname().toLowerCase().contains(q) || u.id.toLowerCase().contains(q)))
+        .take(6)
+        .toList();
+  }
+
+  void _insertMention(User u) {
+    final name = u.calcDisplayname();
+    final sel = _text.selection;
+    final pos = sel.isValid ? sel.baseOffset : _text.text.length;
+    final t = _text.text;
+    final at = t.substring(0, pos).lastIndexOf('@');
+    if (at < 0) return;
+    final next = '${t.substring(0, at)}$name ${t.substring(pos)}';
+    _mentions[name] = u.id;
+    _text.value = TextEditingValue(text: next, selection: TextSelection.collapsed(offset: at + name.length + 1));
+    setState(() => _mentionHits = []);
+  }
+
+  // ---------- отложенная отправка ----------
+  Future<void> _schedule() async {
+    final t = _text.text.trim();
+    if (t.isEmpty || _editing != null) return;
+    final now = DateTime.now();
+    final day = await showDatePicker(context: context, initialDate: now, firstDate: now, lastDate: now.add(const Duration(days: 365)), helpText: 'Когда отправить');
+    if (day == null || !mounted) return;
+    final tm = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))), helpText: 'Во сколько');
+    if (tm == null || !mounted) return;
+    final at = DateTime(day.year, day.month, day.day, tm.hour, tm.minute);
+    if (!at.isAfter(DateTime.now())) return _toast('Выберите время в будущем');
+    await Scheduler.instance.add(room, t, at, _activeMentions(t));
+    _text.clear();
+    Drafts.instance.set(room.id, '');
+    _toast('Отправится ${DateFormat('d MMMM в HH:mm', 'ru').format(at)}. Ласточка должна быть запущена (можно свёрнутой)');
+  }
+
+  Future<void> _showScheduled() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => ValueListenableBuilder(
+        valueListenable: Scheduler.instance.items,
+        builder: (c, _, __) {
+          final list = Scheduler.instance.forRoom(room.id);
+          if (list.isEmpty) return const SizedBox(height: 120, child: Center(child: Text('Отложенных сообщений нет')));
+          return SafeArea(
+            child: ListView(shrinkWrap: true, children: [
+              const Padding(padding: EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text('Отложенные сообщения', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600))),
+              for (final s in list)
+                ListTile(
+                  leading: const Icon(Icons.schedule_send_outlined),
+                  title: Text(stripMarkdown(s.text), maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(DateFormat('d MMMM, HH:mm', 'ru').format(s.at)),
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    IconButton(tooltip: 'Отправить сейчас', icon: const Icon(Icons.send), onPressed: () => Scheduler.instance.sendNow(s.id).catchError((_) => _toast('Не отправлено'))),
+                    IconButton(tooltip: 'Удалить', icon: const Icon(Icons.delete_outline), onPressed: () => Scheduler.instance.remove(s.id)),
+                  ]),
+                ),
+            ]),
+          );
+        },
+      ),
+    );
+  }
+
+  // ---------- выбор нескольких сообщений ----------
+  void _toggleSel(Event e) {
+    final s = _sel ?? <String>{};
+    s.contains(e.eventId) ? s.remove(e.eventId) : s.add(e.eventId);
+    setState(() => _sel = s.isEmpty ? null : s);
+  }
+
+  List<Event> get _selectedEvents => _events.where((e) => _sel?.contains(e.eventId) == true).toList();
+
+  Future<void> _selCopy() async {
+    final tl = _tl;
+    final list = _selectedEvents..sort((a, b) => a.originServerTs.compareTo(b.originServerTs));
+    final text = list.map((e) {
+      final d = tl == null ? e : e.getDisplayEvent(tl);
+      return '${e.senderFromMemoryOrFallback.calcDisplayname()}, ${DateFormat('d.MM HH:mm').format(e.originServerTs)}:\n${d.calcUnlocalizedBody(hideReply: true)}';
+    }).join('\n\n');
+    await copySensitive(text);
+    setState(() => _sel = null);
+    _toast('Скопировано (буфер очистится через минуту)');
+  }
+
+  Future<void> _selDelete() async {
+    final list = _selectedEvents.where((e) => e.canRedact && !e.redacted).toList();
+    if (list.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: Text('Удалить ${list.length} ${_plural(list.length, 'сообщение', 'сообщения', 'сообщений')}?'),
+        content: const Text('Сообщения удалятся у всех участников чата.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
+          TextButton(onPressed: () => Navigator.pop(d, true), child: const Text('Удалить', style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _sel = null);
+    for (final e in list) {
+      try {
+        await e.redactEvent();
+      } catch (_) {}
+    }
   }
 
   void _toBottom() {
@@ -220,16 +365,30 @@ class _ChatPageState extends State<ChatPage> {
           _attachBtn(c, Icons.photo_outlined, 'Фото', 'photo', Colors.blue),
           if (!isDesktop) _attachBtn(c, Icons.photo_camera_outlined, 'Камера', 'camera', Colors.pink),
           _attachBtn(c, Icons.insert_drive_file_outlined, 'Файл', 'file', Colors.teal),
+          if (canRecordRound) _attachBtn(c, Icons.radio_button_checked, 'Кружок', 'round', Colors.deepPurple),
+          _attachBtn(c, Icons.poll_outlined, 'Опрос', 'poll', Colors.orange),
         ]),
       ),
     );
     final reply = _replyTo;
     try {
       if (a == 'photo' || a == 'camera') {
-        final x = await ImagePicker().pickImage(source: a == 'camera' ? ImageSource.camera : ImageSource.gallery, imageQuality: 85, maxWidth: 2560);
+        final x = await ImagePicker().pickImage(source: a == 'camera' ? ImageSource.camera : ImageSource.gallery, requestFullMetadata: false);
         if (x == null) return;
         setState(() => _replyTo = null);
-        await room.sendFileEvent(MatrixImageFile(bytes: await x.readAsBytes(), name: x.name), inReplyTo: reply, extraContent: ttlExtra(room));
+        // без места съёмки, модели телефона и прочих скрытых сведений
+        final clean = await cleanPhoto(await x.readAsBytes(), x.name);
+        await room.sendFileEvent(
+          MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height),
+          inReplyTo: reply,
+          extraContent: ttlExtra(room),
+        );
+      } else if (a == 'round') {
+        setState(() => _replyTo = null);
+        final err = await recordRound(room, inReplyTo: reply);
+        if (err != null) _toast(err);
+      } else if (a == 'poll') {
+        await createPoll(context, room);
       } else if (a == 'file') {
         final f = await FilePicker.pickFile();
         if (f == null) return;
@@ -491,6 +650,10 @@ class _ChatPageState extends State<ChatPage> {
             ),
           const Divider(height: 1),
           ListTile(leading: const Icon(Icons.reply), title: const Text('Ответить'), onTap: () => Navigator.pop(c, 'reply')),
+          if (canForward(e)) ListTile(leading: const Icon(Icons.forward_outlined), title: const Text('Переслать'), onTap: () => Navigator.pop(c, 'forward')),
+          ListTile(leading: const Icon(Icons.check_circle_outline), title: const Text('Выбрать'), onTap: () => Navigator.pop(c, 'select')),
+          if (isPollStart(e) && !e.redacted && (mine || room.ownPowerLevel >= 50) && pollStateOf(e, tl) == null)
+            ListTile(leading: const Icon(Icons.stop_circle_outlined), title: const Text('Завершить опрос'), onTap: () => Navigator.pop(c, 'endpoll')),
           if (mine && isText && !e.redacted) ListTile(leading: const Icon(Icons.edit_outlined), title: const Text('Изменить'), onTap: () => Navigator.pop(c, 'edit')),
           if (isText && !e.redacted) ListTile(leading: const Icon(Icons.copy), title: const Text('Копировать текст'), onTap: () => Navigator.pop(c, 'copy')),
           if (_canPin && !e.redacted)
@@ -523,8 +686,18 @@ class _ChatPageState extends State<ChatPage> {
         });
         _focus.requestFocus();
       case 'copy':
-        await Clipboard.setData(ClipboardData(text: disp.calcUnlocalizedBody(hideReply: true)));
-        _toast('Текст скопирован');
+        await copySensitive(disp.calcUnlocalizedBody(hideReply: true));
+        _toast('Текст скопирован (буфер очистится через минуту)');
+      case 'forward':
+        await forwardEvents(context, [e], tl);
+      case 'select':
+        _toggleSel(e);
+      case 'endpoll':
+        try {
+          await endPoll(room, e);
+        } catch (_) {
+          _toast('Не получилось');
+        }
       case 'pin':
         await _togglePin(e);
       case 'sticker':
@@ -553,6 +726,7 @@ class _ChatPageState extends State<ChatPage> {
     if (ttlChangeText(e) != null) return true;
     if (e.relationshipType == RelationshipTypes.edit) return false;
     if (e.type == EventTypes.Message || e.type == EventTypes.Sticker || e.type == EventTypes.Encrypted) return true;
+    if (isPollStart(e)) return true;
     if (e.type == EventTypes.CallInvite) return true;
     return memberText(e) != null;
   }
@@ -575,12 +749,17 @@ class _ChatPageState extends State<ChatPage> {
     _events = events;
     final typing = room.typingUsers.any((u) => u.id != client.userID);
     final accent = Theme.of(context).colorScheme.primary;
-    return Scaffold(
-      appBar: AppBar(
+    return PopScope(
+      canPop: _sel == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _sel != null) setState(() => _sel = null);
+      },
+      child: Scaffold(
+      appBar: _sel != null ? _selBar(context) : AppBar(
         automaticallyImplyLeading: !widget.embedded,
         titleSpacing: widget.embedded ? 16 : 0,
         title: _searching
-            ? TextField(
+            ? TextField(enableIMEPersonalizedLearning: false, 
                 controller: _searchCtl,
                 autofocus: true,
                 textInputAction: TextInputAction.search,
@@ -670,6 +849,29 @@ class _ChatPageState extends State<ChatPage> {
           ),
         ),
       ),
+    ),
+    );
+  }
+
+  PreferredSizeWidget _selBar(BuildContext context) {
+    final list = _selectedEvents;
+    final canDel = list.isNotEmpty && list.every((e) => e.canRedact && !e.redacted);
+    return AppBar(
+      leading: IconButton(tooltip: 'Отмена', icon: const Icon(Icons.close), onPressed: () => setState(() => _sel = null)),
+      title: Text('Выбрано: ${list.length}'),
+      actions: [
+        if (list.any(canForward))
+          IconButton(
+            tooltip: 'Переслать',
+            icon: const Icon(Icons.forward_outlined),
+            onPressed: () async {
+              await forwardEvents(context, list, _tl);
+              if (mounted) setState(() => _sel = null);
+            },
+          ),
+        IconButton(tooltip: 'Копировать', icon: const Icon(Icons.copy), onPressed: _selCopy),
+        if (canDel) IconButton(tooltip: 'Удалить', icon: const Icon(Icons.delete_outline), onPressed: _selDelete),
+      ],
     );
   }
 
@@ -699,12 +901,15 @@ class _ChatPageState extends State<ChatPage> {
             _focus.requestFocus();
           },
           child: GestureDetector(
-            onLongPress: () => _actions(e),
+            onTap: _sel != null ? () => _toggleSel(e) : null,
+            onLongPress: () => _sel != null ? _toggleSel(e) : _actions(e),
             onSecondaryTap: () => _actions(e),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 400),
-              color: _flash == e.eventId ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.18) : Colors.transparent,
-              child: _Bubble(
+              color: _flash == e.eventId || _sel?.contains(e.eventId) == true ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.18) : Colors.transparent,
+              child: AbsorbPointer(
+                absorbing: _sel != null,
+                child: _Bubble(
                 event: e,
                 timeline: tl,
                 room: room,
@@ -714,6 +919,7 @@ class _ChatPageState extends State<ChatPage> {
                 avatarSpace: !room.isDirectChat,
                 onReact: (k) => _react(e, k),
                 onReplyTap: _jumpTo,
+              ),
               ),
             ),
           ),
@@ -827,6 +1033,31 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  /// Меню выделенного текста: оформление, как в Telegram.
+  Widget _formatMenu(BuildContext context, EditableTextState st) {
+    final sel = _text.selection;
+    void wrap(String l, [String? r]) {
+      final t = _text.text;
+      final s0 = sel.start, s1 = sel.end;
+      final inner = t.substring(s0, s1);
+      final next = '${t.substring(0, s0)}$l$inner${r ?? l}${t.substring(s1)}';
+      _text.value = TextEditingValue(text: next, selection: TextSelection(baseOffset: s0 + l.length, extentOffset: s1 + l.length));
+      st.hideToolbar();
+    }
+
+    final items = [
+      ...st.contextMenuButtonItems,
+      if (sel.isValid && !sel.isCollapsed) ...[
+        ContextMenuButtonItem(label: 'Жирный', onPressed: () => wrap('**')),
+        ContextMenuButtonItem(label: 'Курсив', onPressed: () => wrap('__')),
+        ContextMenuButtonItem(label: 'Зачёркнутый', onPressed: () => wrap('~~')),
+        ContextMenuButtonItem(label: 'Моноширинный', onPressed: () => wrap('`')),
+        ContextMenuButtonItem(label: 'Скрытый', onPressed: () => wrap('||')),
+      ],
+    ];
+    return AdaptiveTextSelectionToolbar.buttonItems(anchors: st.contextMenuAnchors, buttonItems: items);
+  }
+
   Widget _composer(BuildContext context) {
     final bg = Theme.of(context).scaffoldBackgroundColor;
     final accent = Theme.of(context).colorScheme.primary;
@@ -840,6 +1071,38 @@ class _ChatPageState extends State<ChatPage> {
       child: SafeArea(
         top: false,
         child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (_mentionHits.isNotEmpty)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 220),
+              child: ListView(shrinkWrap: true, padding: EdgeInsets.zero, children: [
+                for (final u in _mentionHits)
+                  ListTile(
+                    dense: true,
+                    leading: Avatar(mxc: u.avatarUrl, name: u.calcDisplayname(), size: 32),
+                    title: Text(u.calcDisplayname()),
+                    subtitle: Text(u.id, style: TextStyle(color: hint, fontSize: 12)),
+                    onTap: () => _insertMention(u),
+                  ),
+              ]),
+            ),
+          ValueListenableBuilder(
+            valueListenable: Scheduler.instance.items,
+            builder: (_, __, ___) {
+              final n = Scheduler.instance.forRoom(room.id).length;
+              if (n == 0) return const SizedBox.shrink();
+              return InkWell(
+                onTap: _showScheduled,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 6, 14, 2),
+                  child: Row(children: [
+                    Icon(Icons.schedule_send_outlined, size: 18, color: accent),
+                    const SizedBox(width: 8),
+                    Text('Отложенных сообщений: $n', style: TextStyle(color: accent, fontSize: 13.5)),
+                  ]),
+                ),
+              );
+            },
+          ),
           if (bar != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 6, 4, 0),
@@ -890,7 +1153,7 @@ class _ChatPageState extends State<ChatPage> {
                 },
               ),
               Expanded(
-                child: TextField(
+                child: TextField(enableIMEPersonalizedLearning: false, 
                   controller: _text,
                   focusNode: _focus,
                   minLines: 1,
@@ -898,6 +1161,7 @@ class _ChatPageState extends State<ChatPage> {
                   onTap: () => _panel ? setState(() => _panel = false) : null,
                   textCapitalization: TextCapitalization.sentences,
                   keyboardType: TextInputType.multiline,
+                  contextMenuBuilder: _formatMenu,
                   decoration: InputDecoration(
                     hintText: roomTtl(room) > 0 ? '🔥 Исчезнет через ${ttlText(roomTtl(room)).replaceFirst('1 ', '')}' : 'Сообщение',
                     filled: false,
@@ -910,7 +1174,16 @@ class _ChatPageState extends State<ChatPage> {
               if (empty && _editing == null)
                 IconButton(tooltip: 'Голосовое сообщение', icon: Icon(Icons.mic_none, color: hint), onPressed: _startRec)
               else
-                IconButton(tooltip: _editing != null ? 'Сохранить' : 'Отправить', icon: Icon(_editing != null ? Icons.check_circle : Icons.send, color: accent), onPressed: _send),
+                GestureDetector(
+                  // долгое нажатие — отправить позже
+                  onLongPress: _editing == null ? _schedule : null,
+                  onSecondaryTap: _editing == null ? _schedule : null,
+                  child: IconButton(
+                    tooltip: _editing != null ? 'Сохранить' : 'Отправить (удерживайте — отправить позже)',
+                    icon: Icon(_editing != null ? Icons.check_circle : Icons.send, color: accent),
+                    onPressed: _send,
+                  ),
+                ),
             ]),
           if (_panel && !_recording)
             EmojiStickerPanel(
@@ -955,12 +1228,14 @@ String eventPreview(Event e, Timeline? tl) {
   if (d.redacted) return 'Сообщение удалено';
   if (d.type == EventTypes.Encrypted) return '🔒 Зашифрованное сообщение';
   if (d.type == EventTypes.Sticker) return 'Стикер';
+  if (isPollStart(d)) return pollPreview(d);
+  if (isRound(d)) return '⏺ Видеосообщение';
   return switch (d.messageType) {
     MessageTypes.Image => '🖼 Фото',
     MessageTypes.Video => '🎬 Видео',
     MessageTypes.Audio => d.content.containsKey('org.matrix.msc3245.voice') ? '🎤 Голосовое сообщение' : '🎵 ${d.body}',
     MessageTypes.File => '📎 ${d.body}',
-    _ => d.calcUnlocalizedBody(hideReply: true).replaceAll('\n', ' '),
+    _ => stripMarkdown(d.calcUnlocalizedBody(hideReply: true)).replaceAll('\n', ' '),
   };
 }
 
@@ -1185,6 +1460,10 @@ class _Bubble extends StatelessWidget {
         const SizedBox(width: 6),
         Text(mine ? 'Исходящий звонок' : 'Входящий звонок'),
       ]);
+    } else if (isPollStart(e)) {
+      content = PollView(event: event, timeline: timeline, accent: mine ? const Color(0xFF4FAE4E) : accent);
+    } else if (isRound(e)) {
+      content = RoundVideo(event: e, openExternally: () => openAttachment(e, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)))));
     } else if (isImage || isSticker) {
       content = _Image(e, sticker: isSticker);
     } else if (e.messageType == MessageTypes.Audio) {
@@ -1192,7 +1471,10 @@ class _Bubble extends StatelessWidget {
     } else if (e.messageType == MessageTypes.File || e.messageType == MessageTypes.Video) {
       final size = (e.content.tryGetMap<String, Object?>('info')?['size'] as num?)?.toInt();
       content = InkWell(
-        onTap: () => openAttachment(e, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)))),
+        onTap: () {
+          void ext() => openAttachment(e, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s))));
+          e.messageType == MessageTypes.Video ? openVideo(context, e, ext) : ext();
+        },
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           CircleAvatar(
             radius: 22,
@@ -1209,13 +1491,14 @@ class _Bubble extends StatelessWidget {
         ]),
       );
     } else {
-      content = Text(e.calcUnlocalizedBody(hideReply: true), style: TextStyle(fontSize: 16, height: 1.3, color: mine ? Bubbles.outText(context) : null));
+      content = RichMessage(event: e, style: TextStyle(fontSize: 16, height: 1.3, color: mine ? Bubbles.outText(context) : Theme.of(context).textTheme.bodyLarge?.color));
     }
 
     final replyId = event.content.tryGetMap<String, Object?>('m.relates_to')?.tryGetMap<String, Object?>('m.in_reply_to')?.tryGet<String>('event_id');
     final maxW = min(paneWidth(context) * (avatarSpace ? 0.74 : 0.8), 520.0);
-    final bareMedia = isSticker; // стикер без пузыря, как в Telegram
-    final isText = !isImage && !isSticker && e.messageType != MessageTypes.Audio && e.messageType != MessageTypes.File;
+    final bareMedia = isSticker || (isRound(e) && !event.redacted); // стикер и «кружок» без пузыря, как в Telegram
+    final isText = !isImage && !isSticker && !isPollStart(e) && e.messageType != MessageTypes.Audio && e.messageType != MessageTypes.File && e.messageType != MessageTypes.Video;
+    final fwd = event.redacted ? null : forwardedFrom(e);
 
     final reactRow = reactions.isEmpty
         ? null
@@ -1257,6 +1540,11 @@ class _Bubble extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 2),
             child: Text(name, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: nameColor(event.senderId))),
+          ),
+        if (fwd != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Text('Переслано от $fwd', style: TextStyle(fontSize: 13, color: accent, fontStyle: FontStyle.italic)),
           ),
         if (replyId != null) _ReplyPreview(room: room, timeline: timeline, eventId: replyId, onTap: onReplyTap),
         if (isText)

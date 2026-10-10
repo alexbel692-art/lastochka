@@ -27,8 +27,8 @@ class _PasscodePageState extends State<PasscodePage> {
           title: 'Текущий код-пароль',
           length: lock.pinLength,
           onDone: (pin) async {
-            if (lock.check(pin)) {
-              Navigator.pop(c, true);
+            if (await lock.check(pin)) {
+              if (c.mounted) Navigator.pop(c, true);
               return null;
             }
             return 'Неверный код';
@@ -67,6 +67,29 @@ class _PasscodePageState extends State<PasscodePage> {
     if (ok == true && mounted) {
       setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Код-пароль установлен')));
+    }
+  }
+
+  Future<void> _setDuress() async {
+    if (!await _confirmCurrent()) return;
+    if (!mounted) return;
+    final ok = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (c) => Scaffold(
+        appBar: AppBar(),
+        body: PinPad(
+          title: 'Код для экстренного удаления',
+          length: lock.pinLength,
+          onDone: (pin) async {
+            if (!await lock.setDuress(pin)) return 'Должен отличаться от обычного кода';
+            if (c.mounted) Navigator.pop(c, true);
+            return null;
+          },
+        ),
+      ),
+    ));
+    if (ok == true && mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Код для экстренного удаления задан')));
     }
   }
 
@@ -127,6 +150,32 @@ class _PasscodePageState extends State<PasscodePage> {
                     setState(() {});
                   },
                 ),
+              SwitchListTile(
+                secondary: const Icon(Icons.delete_forever_outlined),
+                title: const Text('Удалять данные после $wipeAfterFails ошибок'),
+                subtitle: const Text('Если кто-то подбирает код — переписка на этом устройстве будет стёрта. На сервере и других устройствах она останется'),
+                value: lock.wipeEnabled,
+                onChanged: (v) async {
+                  await lock.setWipe(v);
+                  setState(() {});
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.crisis_alert_outlined),
+                title: Text(lock.duressEnabled ? 'Код для экстренного удаления — задан' : 'Код для экстренного удаления'),
+                subtitle: const Text('Если вас заставят открыть Ласточку — введите этот код вместо обычного: данные на устройстве тихо удалятся, откроется экран входа'),
+                trailing: lock.duressEnabled
+                    ? IconButton(
+                        tooltip: 'Убрать',
+                        icon: const Icon(Icons.close),
+                        onPressed: () async {
+                          await lock.removeDuress();
+                          setState(() {});
+                        },
+                      )
+                    : null,
+                onTap: _setDuress,
+              ),
               ListTile(
                 leading: const Icon(Icons.lock_reset, color: Colors.redAccent),
                 title: const Text('Выключить код-пароль', style: TextStyle(color: Colors.redAccent)),

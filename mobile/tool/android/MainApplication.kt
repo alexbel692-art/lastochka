@@ -1,6 +1,11 @@
 package app.lastochka.lastochka
 
 import android.app.Application
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.os.Build
+import android.os.PersistableBundle
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -36,6 +41,7 @@ class MainApplication : Application() {
 
         private var channel: MethodChannel? = null
         private var dartReady = false
+        private var clipStamp = 0L
         private val pendingTaps = mutableListOf<Map<String, String>>()
 
         /** Нажатие на уведомление: передать в Dart (если Ласточка ещё запускается — после готовности). */
@@ -66,6 +72,30 @@ class MainApplication : Application() {
                         MainActivity.callMode = call.arguments == true
                         MainActivity.current?.applyCallMode()
                         result.success(true)
+                    }
+                    "copySensitive" -> {
+                        // текст помечается секретным: Android 13+ не показывает его в подсказках и превью
+                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val clip = ClipData.newPlainText("Ласточка", call.arguments as? String ?: "")
+                        if (Build.VERSION.SDK_INT >= 24) {
+                            clip.description.extras = PersistableBundle().apply {
+                                putBoolean(if (Build.VERSION.SDK_INT >= 33) ClipDescription.EXTRA_IS_SENSITIVE else "android.content.extra.IS_SENSITIVE", true)
+                            }
+                        }
+                        cm.setPrimaryClip(clip)
+                        clipStamp = System.currentTimeMillis()
+                        result.success(clipStamp)
+                    }
+                    "clearClip" -> {
+                        // очищаем, только если в буфере всё ещё наш текст (никто ничего не копировал после)
+                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val stamp = (call.arguments as? Number)?.toLong() ?: 0L
+                        val label = cm.primaryClipDescription?.label?.toString()
+                        val ours = stamp == clipStamp && (label == null || label == "Ласточка")
+                        if (ours) {
+                            if (Build.VERSION.SDK_INT >= 28) cm.clearPrimaryClip() else cm.setPrimaryClip(ClipData.newPlainText("", ""))
+                        }
+                        result.success(ours)
                     }
                     "startService" -> { SyncService.start(ctx); result.success(true) }
                     "stopService" -> { ctx.stopService(Intent(ctx, SyncService::class.java)); result.success(true) }

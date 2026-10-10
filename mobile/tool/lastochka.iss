@@ -47,6 +47,26 @@ Filename: "{app}\Lastochka.exe"; Description: "{cm:LaunchProgram,Ласточк�
 Filename: "{app}\Lastochka.exe"; Flags: nowait runasoriginaluser skipifnotsilent
 
 [Code]
+// Защита от отката: более старую версию поверх новой не ставим (её могли подсунуть, чтобы вернуть
+// исправленную уязвимость). Осознанно откатиться можно с ключом /ALLOWDOWNGRADE.
+function InitializeSetup(): Boolean;
+var
+  Installed: String;
+  Cur, Old: Int64;
+begin
+  Result := True;
+  if Pos('/ALLOWDOWNGRADE', UpperCase(GetCmdTail)) > 0 then Exit;
+  if not RegQueryStringValue(HKLM64, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{5E0C2B7A-3D4F-4B8E-9C1A-7F2D6E8B4A10}_is1', 'DisplayVersion', Installed) then Exit;
+  if not StrToVersion('{#AppVer}', Cur) then Exit;
+  if not StrToVersion(Installed, Old) then Exit;
+  if ComparePackedVersion(Cur, Old) < 0 then
+  begin
+    if not WizardSilent then
+      MsgBox('Уже установлена более новая Ласточка (' + Installed + '). Установка старой версии ({#AppVer}) отменена.', mbError, MB_OK);
+    Result := False;
+  end;
+end;
+
 // Прежняя версия Ласточки (3.x) установлена отдельной программой — после установки новой удаляем её тихо.
 procedure RemoveOldFrom(RootKey: Integer);
 var

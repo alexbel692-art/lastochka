@@ -8,6 +8,7 @@ import 'package:matrix/encryption.dart';
 import 'package:matrix/encryption/utils/key_verification.dart';
 
 import '../main.dart';
+import '../system/clipboard.dart';
 import '../system/trust.dart';
 import 'settings.dart';
 
@@ -163,8 +164,8 @@ class _VerifyGateState extends State<VerifyGate> {
                     icon: const Icon(Icons.copy),
                     label: const Text('Скопировать'),
                     onPressed: () async {
-                      await Clipboard.setData(ClipboardData(text: key));
-                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ключ скопирован')));
+                      await copySensitive(key, clearAfter: const Duration(minutes: 2));
+                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ключ скопирован — сохраните его, буфер очистится через 2 минуты')));
                     },
                   ),
                   const SizedBox(height: 10),
@@ -213,7 +214,7 @@ class _VerifyGateState extends State<VerifyGate> {
                   Text('Чтобы читать зашифрованные сообщения, подтвердите это устройство ключом восстановления или с другого своего устройства.',
                       textAlign: TextAlign.center, style: TextStyle(color: hint)),
                   const SizedBox(height: 24),
-                  TextField(
+                  TextField(enableIMEPersonalizedLearning: false, 
                     controller: _key,
                     autocorrect: false,
                     obscureText: true,

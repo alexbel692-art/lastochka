@@ -10,6 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'calls/voip.dart';
 import 'chat/autodelete.dart';
+import 'chat/drafts.dart';
+import 'system/appearance.dart';
 import 'pages/settings.dart';
 import 'system/lock.dart';
 import 'system/pinning.dart';
@@ -51,6 +53,7 @@ Future<void> main(List<String> args) async {
   final hidden = args.contains('--hidden');
   await initDesktop(hidden: hidden);
   await CertPinning.instance.init();
+  await Appearance.instance.init();
   try {
     client = await createClient();
   } catch (e) {
@@ -79,6 +82,7 @@ Future<void> main(List<String> args) async {
   initVoip();
   await initNotifications();
   await AppLock.instance.init();
+  AppLock.instance.onWipe = wipeDevice;
   await initPrivacy();
   await Trust.instance.init();
   Trust.instance.onOwnIdentityReset = () => showSecurityNotification('Ключи вашего аккаунта сброшены', 'Если вы этого не делали — срочно смените пароль и проверьте «Мои сеансы». Устройства нужно будет подтвердить заново.');
@@ -87,6 +91,9 @@ Future<void> main(List<String> args) async {
   autoAcceptDirectInvites();
   handlePasswordConfirmations();
   Updater.instance.start();
+  unawaited(Updater.instance.checkDowngrade());
+  await Drafts.instance.init();
+  unawaited(Scheduler.instance.init());
   runApp(const LastochkaApp());
   // Android может запустить Ласточку в фоне (после перезагрузки, фоновой службой) — окна нет
   if (!isDesktopOS) appVisible = WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
@@ -164,13 +171,20 @@ class _LastochkaAppState extends State<LastochkaApp> {
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: Appearance.instance.all,
+      builder: (context, _) => _app(context),
+    );
+  }
+
+  Widget _app(BuildContext context) {
     return MaterialApp(
       title: 'Ласточка',
       debugShowCheckedModeBanner: false,
       navigatorKey: navKey,
       theme: lightTheme,
       darkTheme: darkTheme,
-      themeMode: ThemeMode.system,
+      themeMode: Appearance.instance.themeMode.value,
       locale: const Locale('ru'),
       supportedLocales: const [Locale('ru'), Locale('en')],
       localizationsDelegates: const [
@@ -180,7 +194,10 @@ class _LastochkaAppState extends State<LastochkaApp> {
       ],
       home: client.isLogged() ? const VerifyGate(child: ChatsPage()) : const LoginPage(),
       // код-пароль поверх всего приложения
-      builder: (context, child) => ListenableBuilder(
+      builder: (context, child) => MediaQuery(
+        // размер текста из «Оформления» поверх системного
+        data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(MediaQuery.textScalerOf(context).scale(1) * Appearance.instance.textScale.value)),
+        child: ListenableBuilder(
         listenable: Listenable.merge([AppLock.instance.locked, callActive, screenProtect, _switcherCover, CertPinning.instance.alert]),
         builder: (context, _) {
           // во время звонка экран звонка не закрываем блокировкой — иначе нельзя ответить
@@ -200,6 +217,7 @@ class _LastochkaAppState extends State<LastochkaApp> {
               ),
           ]);
         },
+      ),
       ),
     );
   }
@@ -241,7 +259,7 @@ void handlePasswordConfirmations() {
       barrierDismissible: false,
       builder: (d) => AlertDialog(
         title: const Text('Подтвердите паролем'),
-        content: TextField(controller: c, obscureText: true, autofocus: true, decoration: const InputDecoration(hintText: 'Пароль от аккаунта'), onSubmitted: (v) => Navigator.pop(d, v)),
+        content: TextField(enableIMEPersonalizedLearning: false, controller: c, obscureText: true, autofocus: true, decoration: const InputDecoration(hintText: 'Пароль от аккаунта'), onSubmitted: (v) => Navigator.pop(d, v)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(d), child: const Text('Отмена')),
           FilledButton(onPressed: () => Navigator.pop(d, c.text), child: const Text('Подтвердить')),

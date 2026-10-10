@@ -11,10 +11,11 @@ on:
         description: 'Опубликовать в релизах'
         type: boolean
         default: true
-      update_deps:
-        description: 'Обновить библиотеки (иначе — строго версии из pubspec.lock)'
-        type: boolean
-        default: false
+      deps:
+        description: 'Библиотеки: locked — строго по pubspec.lock; add — добавить новые (остальные не трогать); upgrade — обновить все'
+        type: choice
+        options: [locked, add, upgrade]
+        default: locked
 
 permissions:
   contents: read
@@ -65,17 +66,17 @@ jobs:
       # библиотеки строго по зафиксированным версиям: подменённое обновление чужой библиотеки само не попадёт
       - name: Зависимости
         run: |
-          if [ "${{ inputs.update_deps }}" = "true" ]; then
+          if [ "${{ inputs.deps }}" = "upgrade" ]; then
             tool/annotate.sh "pub upgrade" flutter pub upgrade
-          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then
+          elif [ "${{ inputs.deps }}" = "add" ] || ! git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then
+            tool/annotate.sh "pub get" flutter pub get
+          else
             tool/annotate.sh "pub get" flutter pub get
             # версии должны совпасть с зафиксированными до байта
             if ! git diff --quiet -- pubspec.lock; then
               echo "::error::pubspec.lock изменился: $(git diff -- pubspec.lock | grep '^[-+] ' | head -20 | tr '\n' ' ')"
               exit 1
             fi
-          else
-            tool/annotate.sh "pub get" flutter pub get
           fi
       # pubspec.lock сохраняет отдельное задание без чужого кода (у сборки нет прав на запись)
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -124,7 +125,8 @@ jobs:
           python3 tool/ci_prepare.py
       - name: Зависимости
         run: |
-          if [ "${{ inputs.update_deps }}" = "true" ]; then tool/annotate.sh "ios pub upgrade" flutter pub upgrade
+          if [ "${{ inputs.deps }}" = "upgrade" ]; then tool/annotate.sh "ios pub upgrade" flutter pub upgrade
+          elif [ "${{ inputs.deps }}" = "add" ]; then tool/annotate.sh "ios pub get" flutter pub get
           elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "ios pub get" flutter pub get; git diff --exit-code --stat -- pubspec.lock || { echo "::error::pubspec.lock изменился"; exit 1; }
           else tool/annotate.sh "ios pub get" flutter pub get; fi
           dart run flutter_launcher_icons
@@ -160,7 +162,8 @@ jobs:
           python3 tool/ci_prepare.py
       - name: Зависимости
         run: |
-          if [ "${{ inputs.update_deps }}" = "true" ]; then tool/annotate.sh "macos pub upgrade" flutter pub upgrade
+          if [ "${{ inputs.deps }}" = "upgrade" ]; then tool/annotate.sh "macos pub upgrade" flutter pub upgrade
+          elif [ "${{ inputs.deps }}" = "add" ]; then tool/annotate.sh "macos pub get" flutter pub get
           elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "macos pub get" flutter pub get; git diff --exit-code --stat -- pubspec.lock || { echo "::error::pubspec.lock изменился"; exit 1; }
           else tool/annotate.sh "macos pub get" flutter pub get; fi
           dart run flutter_launcher_icons
@@ -194,7 +197,8 @@ jobs:
           python tool/ci_prepare.py
       - name: Зависимости
         run: |
-          if [ "${{ inputs.update_deps }}" = "true" ]; then tool/annotate.sh "windows pub upgrade" flutter pub upgrade
+          if [ "${{ inputs.deps }}" = "upgrade" ]; then tool/annotate.sh "windows pub upgrade" flutter pub upgrade
+          elif [ "${{ inputs.deps }}" = "add" ]; then tool/annotate.sh "windows pub get" flutter pub get
           elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "windows pub get" flutter pub get; git diff --exit-code --stat -- pubspec.lock || { echo "::error::pubspec.lock изменился"; exit 1; }
           else tool/annotate.sh "windows pub get" flutter pub get; fi
           dart run flutter_launcher_icons

@@ -180,7 +180,7 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
       context: context,
       builder: (d) => AlertDialog(
         title: const Text('Пригласить'),
-        content: TextField(controller: c, autofocus: true, decoration: const InputDecoration(hintText: '@имя:сервер или имя')),
+        content: TextField(enableIMEPersonalizedLearning: false, controller: c, autofocus: true, decoration: const InputDecoration(hintText: '@имя:сервер или имя')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(d), child: const Text('Отмена')),
           FilledButton(onPressed: () => Navigator.pop(d, c.text.trim()), child: const Text('Пригласить')),

@@ -7,6 +7,9 @@ import 'package:matrix/matrix.dart';
 import '../main.dart';
 import '../calls/voip.dart';
 import '../chat/autodelete.dart';
+import '../chat/drafts.dart';
+import '../chat/formatting.dart';
+import '../chat/polls.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/login_banner.dart';
@@ -29,8 +32,10 @@ String previewText(Room room) {
       MessageTypes.Audio => ev.content.containsKey('org.matrix.msc3245.voice') ? '🎤 Голосовое сообщение' : '🎵 ${ev.body}',
       MessageTypes.File => '📎 ${ev.body}',
       MessageTypes.Sticker => 'Стикер',
-      _ => ev.type == EventTypes.Sticker ? 'Стикер' : ev.body,
+      _ => ev.type == EventTypes.Sticker ? 'Стикер' : stripMarkdown(ev.body),
     };
+  } else if (isPollStart(ev)) {
+    body = pollPreview(ev);
   } else if (ev.type == EventTypes.CallInvite) {
     body = '📞 Звонок';
   } else {
@@ -65,9 +70,31 @@ String shortTime(DateTime t) {
   return DateFormat('dd.MM.yy').format(t);
 }
 
-enum Folder { all, direct, groups, unread }
+const archiveTag = 'ru.lastochka.archive';
+const foldersType = 'ru.lastochka.folders';
+const builtinFolders = [('all', 'Все'), ('direct', 'Личные'), ('groups', 'Группы'), ('unread', 'Непрочитанные')];
 
-const folderNames = {Folder.all: 'Все', Folder.direct: 'Личные', Folder.groups: 'Группы', Folder.unread: 'Непрочитанные'};
+bool isArchived(Room r) => r.tags.containsKey(archiveTag);
+
+/// Свои папки — в данных аккаунта, поэтому одинаковые на всех ваших устройствах.
+class UserFolder {
+  final String id, name;
+  final List<String> rooms;
+  UserFolder(this.id, this.name, this.rooms);
+  Map<String, Object?> toJson() => {'id': id, 'name': name, 'rooms': rooms};
+}
+
+List<UserFolder> userFolders() {
+  final list = client.accountData[foldersType]?.content['folders'];
+  if (list is! List) return [];
+  return [
+    for (final f in list)
+      if (f is Map && f['id'] is String && f['name'] is String)
+        UserFolder(f['id'] as String, f['name'] as String, (f['rooms'] is List ? (f['rooms'] as List).whereType<String>().toList() : <String>[])),
+  ];
+}
+
+Future<void> saveFolders(List<UserFolder> f) => client.setAccountData(client.userID!, foldersType, {'folders': f.map((x) => x.toJson()).toList()});
 
 class ChatsPage extends StatefulWidget {
   const ChatsPage({super.key});
@@ -77,7 +104,7 @@ class ChatsPage extends StatefulWidget {
 
 class _ChatsPageState extends State<ChatsPage> {
   StreamSubscription? _sub;
-  Folder _folder = Folder.all;
+  String _folder = 'all';
   Room? _selected; // открытый чат справа (планшет)
   bool _wide = false;
   bool _searching = false;
@@ -130,10 +157,16 @@ class _ChatsPageState extends State<ChatsPage> {
     _sub = client.onSync.stream.listen((_) {
       if (mounted) setState(() {});
     });
+    Drafts.instance.changed.addListener(_redraw);
+  }
+
+  void _redraw() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    Drafts.instance.changed.removeListener(_redraw);
     _sub?.cancel();
     super.dispose();
   }
@@ -143,13 +176,103 @@ class _ChatsPageState extends State<ChatsPage> {
     return client.rooms.where((r) {
       if (r.membership == Membership.leave || r.membership == Membership.ban) return false;
       if (q.isNotEmpty && !r.getLocalizedDisplayname().toLowerCase().contains(q)) return false;
+      // в поиске видны и архивные чаты
+      if (_folder == 'archive') return isArchived(r);
+      if (isArchived(r) && q.isEmpty) return false;
+      if (_folder.startsWith('f:')) {
+        final f = userFolders().where((x) => 'f:${x.id}' == _folder).firstOrNull;
+        return f != null && f.rooms.contains(r.id);
+      }
       return switch (_folder) {
-        Folder.all => true,
-        Folder.direct => r.isDirectChat,
-        Folder.groups => !r.isDirectChat,
-        Folder.unread => r.isUnreadOrInvited,
+        'direct' => r.isDirectChat,
+        'groups' => !r.isDirectChat,
+        'unread' => r.isUnreadOrInvited,
+        _ => true,
       };
     }).toList();
+  }
+
+  // ---------- папки ----------
+  Future<void> _editFolder([UserFolder? f]) async {
+    final name = TextEditingController(text: f?.name ?? '');
+    final sel = <String>{...?f?.rooms};
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => StatefulBuilder(
+        builder: (d, set) => AlertDialog(
+          title: Text(f == null ? 'Новая папка' : 'Папка'),
+          content: SizedBox(
+            width: 420,
+            height: 460,
+            child: Column(children: [
+              TextField(enableIMEPersonalizedLearning: false, controller: name, autofocus: f == null, maxLength: 24, decoration: const InputDecoration(hintText: 'Название, например «Работа»')),
+              Expanded(
+                child: ListView(children: [
+                  for (final r in client.rooms.where((r) => r.membership == Membership.join))
+                    CheckboxListTile(
+                      value: sel.contains(r.id),
+                      onChanged: (v) => set(() => v == true ? sel.add(r.id) : sel.remove(r.id)),
+                      secondary: Avatar(mxc: r.avatar, name: r.getLocalizedDisplayname(), size: 36),
+                      title: Text(r.getLocalizedDisplayname(), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                ]),
+              ),
+            ]),
+          ),
+          actions: [
+            if (f != null) TextButton(onPressed: () => Navigator.pop(d, null), child: const Text('Отмена')),
+            if (f != null)
+              TextButton(
+                onPressed: () async {
+                  Navigator.pop(d, false);
+                  await saveFolders(userFolders().where((x) => x.id != f.id).toList());
+                  if (_folder == 'f:${f.id}') setState(() => _folder = 'all');
+                },
+                child: const Text('Удалить папку', style: TextStyle(color: Colors.redAccent)),
+              )
+            else
+              TextButton(onPressed: () => Navigator.pop(d, null), child: const Text('Отмена')),
+            FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Сохранить')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || name.text.trim().isEmpty) return;
+    final list = userFolders();
+    final id = f?.id ?? DateTime.now().millisecondsSinceEpoch.toRadixString(36);
+    final nf = UserFolder(id, name.text.trim(), sel.toList());
+    final i = list.indexWhere((x) => x.id == id);
+    i >= 0 ? list[i] = nf : list.add(nf);
+    try {
+      await saveFolders(list);
+      setState(() => _folder = 'f:$id');
+    } catch (_) {
+      _toast('Не удалось сохранить папку');
+    }
+  }
+
+  Future<void> _addToFolder(Room room) async {
+    final list = userFolders();
+    final pick = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final f in list)
+            CheckboxListTile(
+              value: f.rooms.contains(room.id),
+              title: Text(f.name),
+              onChanged: (_) => Navigator.pop(c, f.id),
+            ),
+          ListTile(leading: const Icon(Icons.create_new_folder_outlined), title: const Text('Новая папка'), onTap: () => Navigator.pop(c, '+')),
+        ]),
+      ),
+    );
+    if (pick == null) return;
+    if (pick == '+') return _editFolder(UserFolder('${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}', '', [room.id]));
+    final f = list.firstWhere((x) => x.id == pick);
+    f.rooms.contains(room.id) ? f.rooms.remove(room.id) : f.rooms.add(room.id);
+    await saveFolders(list);
   }
 
   Future<void> _newChat() async {
@@ -211,7 +334,7 @@ class _ChatsPageState extends State<ChatsPage> {
       context: context,
       builder: (d) => AlertDialog(
         title: Text(title),
-        content: TextField(controller: c, autofocus: true, autocorrect: false, decoration: InputDecoration(hintText: hint), onSubmitted: (v) => Navigator.pop(d, v.trim())),
+        content: TextField(enableIMEPersonalizedLearning: false, controller: c, autofocus: true, autocorrect: false, decoration: InputDecoration(hintText: hint), onSubmitted: (v) => Navigator.pop(d, v.trim())),
         actions: [
           TextButton(onPressed: () => Navigator.pop(d), child: const Text('Отмена')),
           FilledButton(onPressed: () => Navigator.pop(d, c.text.trim()), child: const Text('Готово')),
@@ -259,6 +382,12 @@ class _ChatsPageState extends State<ChatsPage> {
           ListTile(leading: Icon(fav ? Icons.push_pin : Icons.push_pin_outlined), title: Text(fav ? 'Открепить' : 'Закрепить'), onTap: () => Navigator.pop(c, 'fav')),
           ListTile(leading: Icon(muted ? Icons.notifications_outlined : Icons.notifications_off_outlined), title: Text(muted ? 'Включить уведомления' : 'Без звука'), onTap: () => Navigator.pop(c, 'mute')),
           ListTile(leading: const Icon(Icons.mark_chat_read_outlined), title: const Text('Отметить прочитанным'), onTap: () => Navigator.pop(c, 'read')),
+          ListTile(leading: const Icon(Icons.folder_outlined), title: const Text('Папки…'), onTap: () => Navigator.pop(c, 'folder')),
+          ListTile(
+            leading: Icon(isArchived(room) ? Icons.unarchive_outlined : Icons.archive_outlined),
+            title: Text(isArchived(room) ? 'Вернуть из архива' : 'В архив'),
+            onTap: () => Navigator.pop(c, 'archive'),
+          ),
           ListTile(leading: const Icon(Icons.logout, color: Colors.redAccent), title: const Text('Покинуть чат', style: TextStyle(color: Colors.redAccent)), onTap: () => Navigator.pop(c, 'leave')),
         ]),
       ),
@@ -271,6 +400,12 @@ class _ChatsPageState extends State<ChatsPage> {
           await room.setFavourite(!fav);
         case 'mute':
           await room.setPushRuleState(muted ? PushRuleState.notify : PushRuleState.mentionsOnly);
+        case 'folder':
+          await _addToFolder(room);
+        case 'archive':
+          final was = isArchived(room);
+          was ? await room.removeTag(archiveTag) : await room.addTag(archiveTag);
+          if (mounted) _toast(was ? 'Чат возвращён из архива' : 'Чат в архиве');
         case 'read':
           final id = room.lastEvent?.eventId;
           if (id != null) await room.setReadMarker(id, mRead: id);
@@ -319,7 +454,7 @@ class _ChatsPageState extends State<ChatsPage> {
     return Scaffold(
       appBar: AppBar(
         title: _searching
-            ? TextField(
+            ? TextField(enableIMEPersonalizedLearning: false, 
                 controller: _q,
                 autofocus: true,
                 onChanged: (_) {
@@ -353,16 +488,27 @@ class _ChatsPageState extends State<ChatsPage> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 8),
               children: [
-                for (final f in Folder.values)
+                for (final (id, name) in [
+                  ...builtinFolders,
+                  for (final f in userFolders()) ('f:${f.id}', f.name),
+                  if (client.rooms.any(isArchived)) ('archive', '🗄 Архив'),
+                ])
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                    child: ChoiceChip(
-                      label: Text(folderNames[f]!),
-                      selected: _folder == f,
-                      showCheckmark: false,
-                      onSelected: (_) => setState(() => _folder = f),
+                    child: GestureDetector(
+                      onLongPress: id.startsWith('f:') ? () => _editFolder(userFolders().firstWhere((f) => 'f:${f.id}' == id)) : null,
+                      child: ChoiceChip(
+                        label: Text(name),
+                        selected: _folder == id,
+                        showCheckmark: false,
+                        onSelected: (_) => setState(() => _folder = id),
+                      ),
                     ),
                   ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                  child: ActionChip(avatar: const Icon(Icons.add, size: 18), label: const Text('Папка'), tooltip: 'Новая папка (удерживайте папку, чтобы изменить)', onPressed: () => _editFolder()),
+                ),
               ],
             ),
           ),
@@ -423,7 +569,17 @@ class _ChatsPageState extends State<ChatsPage> {
                         padding: const EdgeInsets.only(top: 3),
                         child: Row(children: [
                           Expanded(
-                            child: typing.isNotEmpty
+                            child: typing.isEmpty && Drafts.instance.of(r.id) != null && (!_wide || _selected?.id != r.id)
+                                ? Text.rich(
+                                    TextSpan(children: [
+                                      const TextSpan(text: 'Черновик: ', style: TextStyle(color: Colors.redAccent)),
+                                      TextSpan(text: stripMarkdown(Drafts.instance.of(r.id)!).replaceAll('\n', ' ')),
+                                    ]),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(color: hint, fontSize: 15),
+                                  )
+                                : typing.isNotEmpty
                                 ? Text(r.isDirectChat ? 'печатает…' : '${typing.first.calcDisplayname()} печатает…', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: accent))
                                 : Text(previewText(r), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: hint, fontSize: 15)),
                           ),
