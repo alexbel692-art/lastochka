@@ -652,7 +652,7 @@ class _ChatPageState extends State<ChatPage> {
           ListTile(leading: const Icon(Icons.reply), title: const Text('Ответить'), onTap: () => Navigator.pop(c, 'reply')),
           if (canForward(e)) ListTile(leading: const Icon(Icons.forward_outlined), title: const Text('Переслать'), onTap: () => Navigator.pop(c, 'forward')),
           ListTile(leading: const Icon(Icons.check_circle_outline), title: const Text('Выбрать'), onTap: () => Navigator.pop(c, 'select')),
-          if (isPollStart(e) && !e.redacted && (mine || room.ownPowerLevel >= 50) && pollStateOf(e, tl) == null)
+          if (isPollStart(e) && !e.redacted && (mine || room.ownPowerLevel.level >= 50) && pollStateOf(e, tl) == null)
             ListTile(leading: const Icon(Icons.stop_circle_outlined), title: const Text('Завершить опрос'), onTap: () => Navigator.pop(c, 'endpoll')),
           if (mine && isText && !e.redacted) ListTile(leading: const Icon(Icons.edit_outlined), title: const Text('Изменить'), onTap: () => Navigator.pop(c, 'edit')),
           if (isText && !e.redacted) ListTile(leading: const Icon(Icons.copy), title: const Text('Копировать текст'), onTap: () => Navigator.pop(c, 'copy')),

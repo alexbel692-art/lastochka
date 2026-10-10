@@ -179,7 +179,10 @@ class _VideoPageState extends State<_VideoPage> {
       final c = VideoPlayerController.file(f);
       try {
         await c.initialize();
-        if (!mounted) return c.dispose();
+        if (!mounted) {
+          await c.dispose();
+          return;
+        }
         c.addListener(() => mounted ? setState(() {}) : null);
         setState(() => _c = c);
         await c.play();

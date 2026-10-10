@@ -130,7 +130,7 @@ PollState pollState(Event start, Timeline tl, PollData p) {
   final refs = start.aggregatedEvents(tl, 'm.reference');
   final s = PollState();
   for (final e in refs) {
-    if (_isEnd(e) && (e.senderId == start.senderId || (e.room.getPowerLevelByUserId(e.senderId) >= 50))) {
+    if (_isEnd(e) && (e.senderId == start.senderId || (e.room.getPowerLevelByUserId(e.senderId).level >= 50))) {
       if (s.ended == null || e.originServerTs.isBefore(s.ended!.originServerTs)) s.ended = e;
     }
   }
