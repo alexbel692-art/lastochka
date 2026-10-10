@@ -141,6 +141,9 @@ class VoicePlayback extends ChangeNotifier {
     try {
       var path = _files[e.eventId];
       if (path == null) {
+        // голосовое не бывает огромным — слишком большой «голосовой» файл не загружаем
+        final size = (e.content.tryGetMap<String, Object?>('info')?['size'] as num?)?.toInt() ?? 0;
+        if (size > 25 * 1024 * 1024) throw Exception('слишком большой файл');
         final f = await e.downloadAndDecryptAttachment();
         final mime = e.content.tryGetMap<String, Object?>('info')?['mimetype']?.toString() ?? '';
         final ext = mime.contains('ogg') ? 'ogg' : mime.contains('webm') ? 'webm' : mime.contains('mpeg') ? 'mp3' : 'm4a';

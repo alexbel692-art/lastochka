@@ -14,6 +14,6 @@ class MxcImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => FutureBuilder<Uint8List?>(
         future: loadThumb(mxc, size, method: 'scale'),
-        builder: (_, s) => s.data == null ? const SizedBox.shrink() : Image.memory(s.data!, fit: fit, gaplessPlayback: true),
+        builder: (_, s) => s.data == null ? const SizedBox.shrink() : Image.memory(s.data!, fit: fit, gaplessPlayback: true, cacheWidth: size * 2, errorBuilder: (_, __, ___) => const SizedBox.shrink()),
       );
 }

@@ -134,8 +134,15 @@ class StunFramer {
   List<int> _buf = [];
   StunFramer(this.onFrame);
 
+  // больше одного кадра STUN/ChannelData (64 КБ) копиться не может — иначе это мусор или атака
+  static const _maxBuf = 70 * 1024;
+
   void add(List<int> d) {
     _buf = _buf.isEmpty ? List.of(d) : (_buf..addAll(d));
+    if (_buf.length > _maxBuf) {
+      _buf = [];
+      return;
+    }
     while (_buf.length >= 4) {
       final kind = _buf[0] >> 6;
       int total;

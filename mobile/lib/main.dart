@@ -12,6 +12,7 @@ import 'calls/voip.dart';
 import 'chat/autodelete.dart';
 import 'pages/settings.dart';
 import 'system/lock.dart';
+import 'system/pinning.dart';
 import 'system/privacy.dart';
 import 'system/trust.dart';
 import 'system/updater.dart';
@@ -49,6 +50,7 @@ Future<void> main(List<String> args) async {
   await initializeDateFormatting('ru');
   final hidden = args.contains('--hidden');
   await initDesktop(hidden: hidden);
+  await CertPinning.instance.init();
   try {
     client = await createClient();
   } catch (e) {
@@ -179,7 +181,7 @@ class _LastochkaAppState extends State<LastochkaApp> {
       home: client.isLogged() ? const VerifyGate(child: ChatsPage()) : const LoginPage(),
       // код-пароль поверх всего приложения
       builder: (context, child) => ListenableBuilder(
-        listenable: Listenable.merge([AppLock.instance.locked, callActive, screenProtect, _switcherCover]),
+        listenable: Listenable.merge([AppLock.instance.locked, callActive, screenProtect, _switcherCover, CertPinning.instance.alert]),
         builder: (context, _) {
           // во время звонка экран звонка не закрываем блокировкой — иначе нельзя ответить
           final locked = AppLock.instance.locked.value && client.isLogged() && !callActive.value;
@@ -188,6 +190,7 @@ class _LastochkaAppState extends State<LastochkaApp> {
             // iPhone: в переключателе приложений вместо переписки — заставка
             if (_switcherCover.value && screenProtect.value && !locked)
               Positioned.fill(child: ColoredBox(color: Theme.of(context).scaffoldBackgroundColor, child: Center(child: Image.asset('assets/icon.png', width: 96)))),
+            if (CertPinning.instance.alert.value != null && !locked) Positioned.fill(child: _CertAlertScreen(CertPinning.instance.alert.value!)),
             if (locked)
               Positioned.fill(
                 child: LockScreen(onForgot: () async {
@@ -252,4 +255,61 @@ void handlePasswordConfirmations() {
       identifier: AuthenticationUserIdentifier(user: client.userID!),
     ));
   });
+}
+
+/// Сертификат сервера выдан не тем центром, что раньше — возможен перехват соединения.
+/// (Экран лежит поверх навигации, поэтому подтверждение — прямо на нём, без диалогов.)
+class _CertAlertScreen extends StatefulWidget {
+  final CertAlert a;
+  const _CertAlertScreen(this.a);
+  @override
+  State<_CertAlertScreen> createState() => _CertAlertScreenState();
+}
+
+class _CertAlertScreenState extends State<_CertAlertScreen> {
+  bool _confirm = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final a = widget.a;
+    return Material(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      child: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(28),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                const Icon(Icons.gpp_bad, size: 64, color: Colors.red),
+                const SizedBox(height: 14),
+                const Text('Соединение с сервером может быть перехвачено', textAlign: TextAlign.center, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 12),
+                Text(
+                  _confirm
+                      ? 'Нажимайте «Доверять», только если администратор подтвердил, что сервер ${a.host} теперь использует сертификат «${a.got}».'
+                      : 'Сертификат сервера ${a.host} выдан «${a.got}», а раньше его выдавал «${a.expected}». '
+                          'Так бывает, если кто-то подменяет соединение (поддельная сеть Wi-Fi, программа-перехватчик, атака на сервер). '
+                          'Ласточка прервала соединение — ни пароль, ни сообщения не отправлены.\n\n'
+                          'Если администратор сервера действительно сменил сертификат — уточните у него и только тогда доверяйте новому.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 22),
+                FilledButton(
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                  onPressed: () => _confirm ? setState(() => _confirm = false) : CertPinning.instance.dismiss(),
+                  child: Text(_confirm ? 'Назад' : 'Не подключаться'),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () => _confirm ? CertPinning.instance.trustNew() : setState(() => _confirm = true),
+                  child: Text(_confirm ? 'Да, доверять новому сертификату' : 'Администратор подтвердил смену', style: const TextStyle(color: Colors.red)),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

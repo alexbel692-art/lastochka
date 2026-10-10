@@ -62,7 +62,7 @@ class Avatar extends StatelessWidget {
       future: loadThumb(mxc!, px),
       builder: (_, s) => s.data == null
           ? fallback
-          : ClipOval(child: Image.memory(s.data!, width: size, height: size, fit: BoxFit.cover, gaplessPlayback: true)),
+          : ClipOval(child: Image.memory(s.data!, width: size, height: size, fit: BoxFit.cover, gaplessPlayback: true, cacheWidth: px, errorBuilder: (_, __, ___) => fallback)),
     );
   }
 }

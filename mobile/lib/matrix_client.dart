@@ -15,6 +15,8 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'system/pinning.dart';
+
 const _secure = FlutterSecureStorage(
   // на macOS без платной подписи Apple «новая» связка ключей недоступна — используем обычную
   mOptions: MacOsOptions(usesDataProtectionKeychain: false),
@@ -104,6 +106,7 @@ Future<Client> createClient() async {
   await vod.init();
   final client = Client(
     clientName,
+    httpClient: CertPinning.instance.httpClient(),
     database: await _openDatabase(),
     verificationMethods: {KeyVerificationMethod.emoji, KeyVerificationMethod.numbers},
     importantStateEvents: {'im.ponies.room_emotes'},

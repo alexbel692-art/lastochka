@@ -11,9 +11,13 @@ on:
         description: 'Опубликовать в релизах'
         type: boolean
         default: true
+      update_deps:
+        description: 'Обновить библиотеки (иначе — строго версии из pubspec.lock)'
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 defaults:
   run:
@@ -28,13 +32,15 @@ env:
 jobs:
   android:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # только чтобы сохранить pubspec.lock при первом запуске или обновлении библиотек
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '17'
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           cache: true
@@ -56,8 +62,25 @@ jobs:
           fi
       - name: Настройка проекта
         run: python3 tool/ci_prepare.py
+      # библиотеки строго по зафиксированным версиям: подменённое обновление чужой библиотеки само не попадёт
       - name: Зависимости
-        run: tool/annotate.sh "pub get" flutter pub get
+        run: |
+          if [ "${{ inputs.update_deps }}" = "true" ]; then
+            tool/annotate.sh "pub upgrade" flutter pub upgrade
+          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then
+            tool/annotate.sh "pub get" flutter pub get --enforce-lockfile
+          else
+            tool/annotate.sh "pub get" flutter pub get
+          fi
+      - name: Сохранить pubspec.lock
+        run: |
+          if ! git diff --quiet -- pubspec.lock 2>/dev/null || ! git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then
+            git config user.name "alexbel692-art"
+            git config user.email "alexbel692-art@users.noreply.github.com"
+            git add pubspec.lock
+            git commit -m "Зафиксированы версии библиотек (pubspec.lock)"
+            git push origin HEAD:${{ github.ref_name }} || echo "::warning::Не удалось сохранить pubspec.lock"
+          fi
       - name: Иконки
         run: tool/annotate.sh "icons" dart run flutter_launcher_icons
       # известные уязвимости в библиотеках (база OSV) — предупреждение в сборке
@@ -80,7 +103,7 @@ jobs:
         run: |
           tool/annotate.sh "build apk" flutter build apk --release --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
           mkdir -p ../dist && cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android.apk"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android
           path: dist/*
@@ -88,8 +111,8 @@ jobs:
   ios:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           cache: true
@@ -100,7 +123,8 @@ jobs:
           python3 tool/ci_prepare.py
       - name: Зависимости
         run: |
-          tool/annotate.sh "ios pub get" flutter pub get
+          if git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1 && [ "${{ inputs.update_deps }}" != "true" ]; then L=--enforce-lockfile; fi
+          tool/annotate.sh "ios pub get" flutter pub get $L
           dart run flutter_launcher_icons
       # Без платной подписи Apple: собираем приложение без подписи и упаковываем в .ipa.
       # Поставить на iPhone можно через Sideloadly/AltStore со своим Apple ID.
@@ -114,7 +138,7 @@ jobs:
           mkdir -p Payload ../../dist
           cp -R build/dd/Build/Products/Release-iphoneos/Runner.app Payload/
           zip -qry "../../dist/Lastochka-$V-iPhone-unsigned.ipa" Payload
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ios
           path: dist/*
@@ -122,8 +146,8 @@ jobs:
   macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           cache: true
@@ -134,7 +158,8 @@ jobs:
           python3 tool/ci_prepare.py
       - name: Зависимости
         run: |
-          tool/annotate.sh "macos pub get" flutter pub get
+          if git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1 && [ "${{ inputs.update_deps }}" != "true" ]; then L=--enforce-lockfile; fi
+          tool/annotate.sh "macos pub get" flutter pub get $L
           dart run flutter_launcher_icons
       - name: Сборка macOS
         run: tool/annotate.sh "build macos" flutter build macos --release --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
@@ -146,7 +171,7 @@ jobs:
           hdiutil create -volname "Ласточка" -srcfolder dmg -ov -format UDZO "../dist/Lastochka-$V-arm64.dmg"
           # одна универсальная сборка; второе имя — чтобы прежняя версия на Intel-Mac нашла обновление
           cp "../dist/Lastochka-$V-arm64.dmg" "../dist/Lastochka-$V-x64.dmg"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: macos
           path: dist/*
@@ -154,8 +179,8 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           cache: true
@@ -166,7 +191,8 @@ jobs:
           python tool/ci_prepare.py
       - name: Зависимости
         run: |
-          tool/annotate.sh "windows pub get" flutter pub get
+          if git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1 && [ "${{ inputs.update_deps }}" != "true" ]; then L=--enforce-lockfile; fi
+          tool/annotate.sh "windows pub get" flutter pub get $L
           dart run flutter_launcher_icons
       - name: Сборка Windows
         run: tool/annotate.sh "build windows" flutter build windows --release --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
@@ -182,7 +208,7 @@ jobs:
           APP_VERSION="$V" "$ISCC" tool/lastochka.iss
           (cd "$R" && 7z a -tzip "../../../../../../dist/Lastochka-$V-Windows-portable.zip" . > /dev/null)
           ls -la ../dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows
           path: dist/*
@@ -191,15 +217,17 @@ jobs:
     if: ${{ always() && inputs.publish && needs.android.result == 'success' }}
     needs: [android, ios, macos, windows]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: .
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist
           merge-multiple: true
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           path: src
       - name: Подпись файлов
@@ -208,7 +236,7 @@ jobs:
         run: |
           node src/scripts/sign-files.cjs dist "${{ inputs.version }}"
           cd dist && sha256sum $(ls | grep -v '\.sig$') > SHA256SUMS.txt && ls -la
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: v${{ inputs.version }}
           name: Ласточка ${{ inputs.version }}
