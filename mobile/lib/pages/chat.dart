@@ -266,9 +266,14 @@ class _ChatPageState extends State<ChatPage> {
         final name = p.basename(f.path);
         final bytes = await f.readAsBytes();
         final lower = name.toLowerCase();
-        if (RegExp(r'\.(jpe?g|png|webp|heic)$').hasMatch(lower)) {
+        if (RegExp(r'\.(jpe?g|png|webp)$').hasMatch(lower)) {
           final clean = await cleanPhoto(bytes, name);
           await room.sendFileEvent(MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height), inReplyTo: reply, extraContent: ttlExtra(room));
+        } else if (RegExp(r'\.(mp4|mov|m4v)$').hasMatch(lower)) {
+          // видео — без места съёмки; не получилось очистить — не отправляем
+          final clean = await cleanVideo(bytes);
+          if (clean == null) throw StateError('video');
+          await room.sendFileEvent(MatrixFile.fromMimeType(bytes: clean, name: name), inReplyTo: reply, extraContent: ttlExtra(room));
         } else {
           await room.sendFileEvent(MatrixFile.fromMimeType(bytes: bytes, name: name), inReplyTo: reply, extraContent: ttlExtra(room));
         }

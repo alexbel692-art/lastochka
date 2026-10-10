@@ -66,18 +66,29 @@ Uint8List stripJpegMetadata(Uint8List b) {
 }
 
 /// Видео MP4/MOV: место съёмки, модель телефона и прочие сведения лежат в блоках udta/meta/uuid(XMP),
-/// даты — в mvhd/tkhd/mdhd. Блоки сведений превращаются в «пустые» (free) того же размера, даты
-/// обнуляются — смещения внутри файла не меняются, видео играет как прежде.
-/// null — это не MP4/MOV (такой файл не очищаем).
+/// даты — в mvhd/tkhd/mdhd, а GPS «по кадрам» (GoPro, DJI, видеорегистраторы, некоторые телефоны) —
+/// в отдельных дорожках метаданных/субтитров. Блоки сведений превращаются в «пустые» (free) того же
+/// размера, даты обнуляются, данные таких дорожек затираются нулями — смещения внутри файла не меняются,
+/// видео и звук играют как прежде. null — это не MP4/MOV (такой файл не очищаем).
 Future<Uint8List?> cleanVideo(Uint8List bytes) => compute(stripVideoMetadata, bytes);
 
-Uint8List? stripVideoMetadata(Uint8List src) {
-  if (src.length < 12) return null;
-  final first = String.fromCharCodes(src.sublist(4, 8));
+class _Trak {
+  String? handler;
+  int fixedSize = 0;
+  List<int> sizes = [];
+  List<(int, int)> stsc = []; // (первый кусок с 1, образцов в куске)
+  List<int> chunks = [];
+}
+
+/// Работает прямо с переданным массивом (в отдельном потоке это уже копия).
+Uint8List? stripVideoMetadata(Uint8List b) {
+  if (b.length < 12) return null;
+  final first = String.fromCharCodes(b.sublist(4, 8));
   if (!const {'ftyp', 'moov', 'mdat', 'free', 'wide', 'skip'}.contains(first)) return null;
-  final b = Uint8List.fromList(src);
   final bd = ByteData.sublistView(b);
   var sawMoov = false;
+  final traks = <_Trak>[];
+  _Trak? cur;
 
   String type(int at) => String.fromCharCodes(b.sublist(at + 4, at + 8));
   void blank(int at, int size, int header) {
@@ -85,12 +96,34 @@ Uint8List? stripVideoMetadata(Uint8List src) {
     b.fillRange(at + header, at + size, 0);
   }
 
-  void zeroTimes(int at, int header) {
-    final p = at + header;
+  void zeroTimes(int p) {
     if (p + 4 > b.length) return;
-    final v = b[p];
-    final n = v == 1 ? 16 : 8; // создание и изменение: 2×8 или 2×4 байта
+    final n = b[p] == 1 ? 16 : 8; // создание и изменение: 2×8 или 2×4 байта
     if (p + 4 + n <= b.length) b.fillRange(p + 4, p + 4 + n, 0);
+  }
+
+  void table(String t, int p, int end) {
+    final c = cur;
+    if (c == null || p + 8 > end) return;
+    switch (t) {
+      case 'hdlr':
+        if (p + 12 <= end) c.handler = String.fromCharCodes(b.sublist(p + 8, p + 12));
+      case 'stsz':
+        if (p + 12 > end) return;
+        c.fixedSize = bd.getUint32(p + 4);
+        final n = bd.getUint32(p + 8);
+        if (c.fixedSize == 0 && p + 12 + n * 4 <= end) c.sizes = [for (var i = 0; i < n; i++) bd.getUint32(p + 12 + i * 4)];
+        if (c.fixedSize != 0) c.sizes = List.filled(n.clamp(0, 10000000), c.fixedSize);
+      case 'stsc':
+        final n = bd.getUint32(p + 4);
+        if (p + 8 + n * 12 <= end) c.stsc = [for (var i = 0; i < n; i++) (bd.getUint32(p + 8 + i * 12), bd.getUint32(p + 12 + i * 12))];
+      case 'stco':
+        final n = bd.getUint32(p + 4);
+        if (p + 8 + n * 4 <= end) c.chunks = [for (var i = 0; i < n; i++) bd.getUint32(p + 8 + i * 4)];
+      case 'co64':
+        final n = bd.getUint32(p + 4);
+        if (p + 8 + n * 8 <= end) c.chunks = [for (var i = 0; i < n; i++) bd.getUint64(p + 8 + i * 8)];
+    }
   }
 
   bool walk(int start, int end, int depth) {
@@ -113,12 +146,22 @@ Uint8List? stripVideoMetadata(Uint8List src) {
         case 'moov':
           sawMoov = true;
           if (!walk(at + header, at + size, depth + 1)) return false;
-        case 'trak' || 'mdia':
-          if (depth < 4 && !walk(at + header, at + size, depth + 1)) return false;
+        case 'trak':
+          if (depth > 6) break;
+          final prev = cur;
+          cur = _Trak();
+          traks.add(cur!);
+          final ok = walk(at + header, at + size, depth + 1);
+          cur = prev;
+          if (!ok) return false;
+        case 'mdia' || 'minf' || 'stbl':
+          if (depth < 6 && !walk(at + header, at + size, depth + 1)) return false;
         case 'udta' || 'meta' || 'uuid' || 'Xtra':
           blank(at, size, header);
         case 'mvhd' || 'tkhd' || 'mdhd':
-          zeroTimes(at, header);
+          zeroTimes(at + header);
+        case 'hdlr' || 'stsz' || 'stsc' || 'stco' || 'co64':
+          table(t, at + header, at + size);
       }
       at += size;
     }
@@ -126,5 +169,24 @@ Uint8List? stripVideoMetadata(Uint8List src) {
   }
 
   if (!walk(0, b.length, 0) || !sawMoov) return null;
+
+  // дорожки метаданных и субтитров (там бывают координаты по кадрам) — затираем их данные
+  for (final t in traks) {
+    if (!const {'meta', 'text', 'sbtl', 'subt', 'gpmd', 'camm'}.contains(t.handler)) continue;
+    var sample = 0;
+    for (var ci = 0; ci < t.chunks.length; ci++) {
+      var perChunk = 0;
+      for (final (firstChunk, n) in t.stsc) {
+        if (firstChunk <= ci + 1) perChunk = n;
+      }
+      var off = t.chunks[ci];
+      for (var k = 0; k < perChunk && sample < t.sizes.length; k++, sample++) {
+        final sz = t.sizes[sample];
+        if (off < 0 || off + sz > b.length) return null; // таблицы не сходятся — лучше не отправлять
+        b.fillRange(off, off + sz, 0);
+        off += sz;
+      }
+    }
+  }
   return b;
 }

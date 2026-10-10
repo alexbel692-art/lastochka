@@ -74,11 +74,11 @@ class _PickRoomsState extends State<_PickRooms> {
   @override
   Widget build(BuildContext context) {
     final q = _q.text.trim().toLowerCase();
-    final rooms = client.rooms
+    final all = client.rooms
         .where((r) => r.membership == Membership.join && r.canSendDefaultMessages)
         .where((r) => q.isEmpty || r.getLocalizedDisplayname().toLowerCase().contains(q))
-        .toList()
-      ..sort((a, b) => (isSaved(b) ? 1 : 0) - (isSaved(a) ? 1 : 0));
+        .toList();
+    final rooms = [...all.where(isSaved), ...all.where((r) => !isSaved(r))];
     return AlertDialog(
       title: const Text('Переслать в…'),
       contentPadding: const EdgeInsets.fromLTRB(8, 12, 8, 0),

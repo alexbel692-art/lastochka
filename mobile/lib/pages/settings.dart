@@ -145,8 +145,8 @@ class _SettingsPageState extends State<SettingsPage> {
     if (v == null || v.isEmpty) return;
     try {
       await client.request(RequestType.PUT, '/client/v3/profile/${Uri.encodeComponent(client.userID!)}/displayname', data: {'displayname': v});
-      final p = await client.fetchOwnProfile();
-      if (mounted) setState(() => _me = p);
+      // сервер уже обновил имя, а сохранённый профиль — ещё нет
+      if (mounted) setState(() => _me = Profile(userId: client.userID!, displayName: v, avatarUrl: _me?.avatarUrl));
     } catch (_) {
       _toast('Не удалось сменить имя');
     }
@@ -158,8 +158,8 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       final clean = await cleanPhoto(await x.readAsBytes(), x.name);
       await client.setAvatar(MatrixFile(bytes: clean.bytes, name: clean.name));
-      final p = await client.fetchOwnProfile();
-      if (mounted) setState(() => _me = p);
+      final url = (await client.getAvatarUrl(client.userID!).catchError((_) => null));
+      if (mounted) setState(() => _me = Profile(userId: client.userID!, displayName: _me?.displayName, avatarUrl: url ?? _me?.avatarUrl));
     } catch (_) {
       _toast('Не удалось сменить фото');
     }

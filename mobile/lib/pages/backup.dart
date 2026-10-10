@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:matrix/encryption.dart';
+import 'package:matrix/matrix.dart';
 
 import '../main.dart';
 import '../system/diag.dart';
@@ -61,7 +62,12 @@ class _BackupPageState extends State<BackupPage> {
       _msg = ok;
     } catch (e) {
       Diag.add('Резервная копия: $e');
-      _msg = e is StateError && e.message == 'key' ? 'Неверный ключ восстановления' : 'Не получилось. Проверьте ключ и подключение';
+      _msg = switch (e is StateError ? e.message : '') {
+        'key' => 'Неверный ключ восстановления',
+        'nossss' => 'Сначала нужен ключ восстановления — он создаётся при настройке защиты аккаунта',
+        'notcached' => 'Ключ принят, но копия зашифрована другим ключом. Подключите устройство из Element или обратитесь к администратору',
+        _ => 'Не получилось. Проверьте ключ и подключение',
+      };
     }
     await _refresh();
     if (mounted) setState(() => _busy = false);
@@ -73,10 +79,11 @@ class _BackupPageState extends State<BackupPage> {
         if (input.isEmpty) throw StateError('key');
         final enc = client.encryption!;
         try {
-          await enc.ssss.open().unlock(keyOrPassphrase: input);
+          await enc.ssss.open(EventTypes.MegolmBackup).unlock(keyOrPassphrase: input);
         } catch (_) {
           throw StateError('key');
         }
+        if (!await enc.keyManager.isCached()) throw StateError('notcached');
         await enc.keyManager.loadAllKeys();
         _key.clear();
       }, 'Готово: устройство подключено, старые ключи загружены');
@@ -93,6 +100,14 @@ class _BackupPageState extends State<BackupPage> {
                 bs.wipeSsss(false);
               case BootstrapState.askUseExistingSsss:
                 bs.useExistingSsss(true);
+              case BootstrapState.openExistingSsss:
+                try {
+                  await bs.newSsssKey!.unlock(keyOrPassphrase: input);
+                } catch (_) {
+                  if (!done.isCompleted) done.completeError(StateError('key'));
+                  return;
+                }
+                await bs.openExistingSsss();
               case BootstrapState.askUnlockSsss:
                 for (final k in bs.oldSsssKeys!.values) {
                   try {

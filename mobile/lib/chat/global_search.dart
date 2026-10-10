@@ -29,26 +29,36 @@ class GlobalSearch {
     for (var i = 0; i < rooms.length; i++) {
       if (gen != _gen) return;
       final room = rooms[i];
-      Timeline? tl;
       try {
-        tl = await room.getTimeline();
-        // у самых активных чатов дополнительно подгружаем историю
-        for (var k = 0; k < (i < 10 ? 2 : 0) && tl.canRequestHistory; k++) {
+        // из базы на устройстве, без загрузки участников и подписок; зашифрованное — расшифровываем
+        final events = await client.database?.getEventList(room, limit: 1500) ?? <Event>[];
+        final edits = <String, Event>{};
+        for (final e in events) {
           if (gen != _gen) return;
-          await tl.requestHistory(historyCount: 100);
-        }
-        for (final e in tl.events) {
-          if (e.type != EventTypes.Message || e.redacted || isExpired(e) || e.relationshipType == RelationshipTypes.edit) continue;
-          final d = e.getDisplayEvent(tl);
-          final mt = d.messageType;
+          var ev = e;
+          if (ev.type == EventTypes.Encrypted && client.encryption != null) {
+            try {
+              ev = await client.encryption!.decryptRoomEvent(ev);
+            } catch (_) {
+              continue;
+            }
+          }
+          if (ev.type != EventTypes.Message || ev.redacted || isExpired(ev)) continue;
+          if (ev.relationshipType == RelationshipTypes.edit) {
+            final target = ev.relationshipEventId;
+            if (target != null) edits.putIfAbsent(target, () => ev); // список идёт от новых к старым
+            continue;
+          }
+          final edit = edits[ev.eventId];
+          final content = edit?.content.tryGetMap<String, Object?>('m.new_content') ?? ev.content;
+          final mt = content['msgtype'];
           if (mt != MessageTypes.Text && mt != MessageTypes.Notice && mt != MessageTypes.Emote && mt != MessageTypes.File) continue;
-          final text = stripMarkdown(d.calcUnlocalizedBody(hideReply: true));
-          if (text.toLowerCase().contains(q)) all.add(SearchHit(room, e, text));
+          final body = content['body'];
+          if (body is! String) continue;
+          final text = stripMarkdown(body.replaceAll(RegExp(r'^(>.*\n)+\n?'), ''));
+          if (text.toLowerCase().contains(q)) all.add(SearchHit(room, ev, text));
         }
-      } catch (_) {
-      } finally {
-        tl?.cancelSubscriptions();
-      }
+      } catch (_) {}
       if (gen != _gen) return;
       all.sort((a, b) => b.event.originServerTs.compareTo(a.event.originServerTs));
       onHits(List.of(all.take(200)), i == rooms.length - 1);

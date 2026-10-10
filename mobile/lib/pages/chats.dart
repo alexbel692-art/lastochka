@@ -140,6 +140,7 @@ class _ChatsPageState extends State<ChatsPage> {
       return;
     }
     _msgTimer = Timer(const Duration(milliseconds: 700), () {
+      if (!mounted || !_searching) return;
       setState(() => _msgSearching = true);
       _gs.run(q, (hits, done) {
         if (!mounted || _q.text.trim() != q) return;
@@ -206,13 +207,15 @@ class _ChatsPageState extends State<ChatsPage> {
   @override
   void dispose() {
     Drafts.instance.changed.removeListener(_redraw);
+    _msgTimer?.cancel();
+    _gs.cancel();
     _sub?.cancel();
     super.dispose();
   }
 
   List<Room> get _rooms {
     final q = _q.text.trim().toLowerCase();
-    return client.rooms.where((r) {
+    final list = client.rooms.where((r) {
       if (r.membership == Membership.leave || r.membership == Membership.ban) return false;
       if (q.isNotEmpty && !r.getLocalizedDisplayname().toLowerCase().contains(q)) return false;
       // в поиске видны и архивные чаты
@@ -228,8 +231,9 @@ class _ChatsPageState extends State<ChatsPage> {
         'unread' => r.isUnreadOrInvited,
         _ => true,
       };
-    }).toList()
-      ..sort((a, b) => (isSaved(b) ? 1 : 0) - (isSaved(a) ? 1 : 0));
+    }).toList();
+    // «Избранное» — первым, остальные — в прежнем порядке
+    return [...list.where(isSaved), ...list.where((r) => !isSaved(r))];
   }
 
   // ---------- папки ----------
@@ -523,6 +527,7 @@ class _ChatsPageState extends State<ChatsPage> {
                 _msgHits = [];
                 _msgSearching = false;
                 _gs.cancel();
+                _msgTimer?.cancel();
               }
             }),
           ),

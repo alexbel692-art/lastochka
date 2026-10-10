@@ -49,12 +49,21 @@ Future<String?> recordRound(Room room, {Event? inReplyTo}) async {
 Future<String?> pickAndSendVideo(Room room, {Event? inReplyTo}) async {
   final x = await ImagePicker().pickVideo(source: ImageSource.gallery);
   if (x == null) return null;
-  return _sendVideo(room, x, inReplyTo: inReplyTo);
+  try {
+    return await _sendVideo(room, x, inReplyTo: inReplyTo);
+  } finally {
+    // копия видео, которую сделал выбор файла, не должна оставаться в кэше
+    if (Platform.isAndroid || Platform.isIOS) {
+      try {
+        await File(x.path).delete();
+      } catch (_) {}
+    }
+  }
 }
 
 Future<String?> _sendVideo(Room room, XFile x, {Event? inReplyTo, bool round = false}) async {
   final size = await x.length();
-  if (size > 300 * 1024 * 1024) return 'Видео слишком большое';
+  if (size > 100 * 1024 * 1024) return 'Видео больше 100 МБ — отправьте его файлом';
   final clean = await cleanVideo(await x.readAsBytes());
   if (clean == null) return 'Не удалось убрать из видео скрытые сведения (место съёмки и др.) — видео не отправлено. Можно отправить его как файл';
   final mov = x.name.toLowerCase().endsWith('.mov');

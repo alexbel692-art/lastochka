@@ -78,10 +78,20 @@ class _ScanPageState extends State<_ScanPage> {
 /// Ссылка matrix.to (или @id / #адрес) → начать чат или вступить в группу (после подтверждения).
 Future<void> openMatrixLink(BuildContext context, String text) async {
   var id = text.trim();
-  final m = RegExp(r'matrix\.to/#/([^?\s]+)').firstMatch(id);
-  if (m != null) id = Uri.decodeComponent(m[1]!);
+  List<String>? via;
   void toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
-  if (!RegExp(r'^[@#!][^\s:]+:[A-Za-z0-9.\-:]+$').hasMatch(id)) return toast('Это не QR-код Matrix');
+  try {
+    final i = id.indexOf('matrix.to/#/');
+    if (i >= 0) {
+      // https://matrix.to/#/<id>[/<событие>][?via=сервер&via=…]
+      final frag = Uri.parse('x:/${id.substring(i + 'matrix.to/#/'.length)}');
+      id = Uri.decodeComponent(frag.pathSegments.first);
+      via = frag.queryParametersAll['via'];
+    }
+  } catch (_) {
+    return toast('Это не QR-код Matrix');
+  }
+  if (!RegExp(r'^@[^\s:]+:[A-Za-z0-9.\-:]+$|^#[^\s:]+:[A-Za-z0-9.\-:]+$|^![A-Za-z0-9_\-.]+(:[A-Za-z0-9.\-:]+)?$').hasMatch(id)) return toast('Это не QR-код Matrix');
   final isUser = id.startsWith('@');
   if (isUser && id == client.userID) return toast('Это ваш собственный код');
   final ok = await showDialog<bool>(
@@ -97,7 +107,7 @@ Future<void> openMatrixLink(BuildContext context, String text) async {
   );
   if (ok != true) return;
   try {
-    final roomId = isUser ? await client.startDirectChat(id, enableEncryption: true) : await client.joinRoom(id);
+    final roomId = isUser ? await client.startDirectChat(id, enableEncryption: true) : await client.joinRoom(id, via: via);
     final room = client.getRoomById(roomId) ?? await client.waitForRoomInSync(roomId).then((_) => client.getRoomById(roomId));
     if (room != null && context.mounted) Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatPage(room: room)));
   } on MatrixException catch (e) {

@@ -17,6 +17,10 @@ bool isSaved(Room r) => r.id == savedRoomId();
 
 /// Найти или создать «Избранное».
 Future<Room?> openSaved() async {
+  // дождаться данных аккаунта — иначе можно создать второе «Избранное»
+  await client.roomsLoading;
+  await client.accountDataLoading;
+  if (client.prevBatch == null) throw StateError('ещё нет синхронизации');
   final id = savedRoomId();
   final existing = id == null ? null : client.getRoomById(id);
   if (existing != null && existing.membership == Membership.join) return existing;
