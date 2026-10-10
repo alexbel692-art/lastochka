@@ -27,10 +27,12 @@ class _PasscodePageState extends State<PasscodePage> {
           title: 'Текущий код-пароль',
           length: lock.pinLength,
           onDone: (pin) async {
-            if (await lock.check(pin)) {
+            if (await lock.check(pin, allowDuress: false)) {
               if (c.mounted) Navigator.pop(c, true);
               return null;
             }
+            final u = lock.blockedUntil;
+            if (u != null && DateTime.now().isBefore(u)) return 'Неверный код. Следующая попытка через ${u.difference(DateTime.now()).inSeconds + 1} с';
             return 'Неверный код';
           },
         ),

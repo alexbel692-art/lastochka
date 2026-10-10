@@ -68,6 +68,7 @@ class Scheduler {
   final items = ValueNotifier<List<Scheduled>>([]);
   Timer? _t;
   bool _busy = false;
+  final Set<String> _inFlight = {};
 
   Future<void> init() async {
     final v = await SecureStore.instance.read('scheduled');
@@ -96,12 +97,20 @@ class Scheduler {
     await _send(s);
   }
 
+  /// Отправить одно отложенное: не дважды и только если его не отменили.
   Future<void> _send(Scheduled s) async {
-    final room = client.getRoomById(s.roomId);
-    if (room != null && room.membership == Membership.join) {
-      await room.sendEvent({...textContent(s.text, mentions: s.mentions), ...ttlExtra(room)});
+    if (!_inFlight.add(s.id)) return;
+    try {
+      if (!items.value.any((x) => x.id == s.id)) return; // отменено
+      final room = client.getRoomById(s.roomId);
+      if (room != null && room.membership == Membership.join) {
+        final id = await room.sendEvent({...textContent(s.text, mentions: s.mentions), ...ttlExtra(room)});
+        if (id == null) throw StateError('не отправлено');
+      }
+      await remove(s.id);
+    } finally {
+      _inFlight.remove(s.id);
     }
-    await remove(s.id);
   }
 
   Future<void> _tick() async {

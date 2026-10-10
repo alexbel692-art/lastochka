@@ -91,7 +91,7 @@ class MainApplication : Application() {
                         val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         val stamp = (call.arguments as? Number)?.toLong() ?: 0L
                         val label = cm.primaryClipDescription?.label?.toString()
-                        val ours = stamp == clipStamp && (label == null || label == "Ласточка")
+                        val ours = stamp == clipStamp && label == "Ласточка"
                         if (ours) {
                             if (Build.VERSION.SDK_INT >= 28) cm.clearPrimaryClip() else cm.setPrimaryClip(ClipData.newPlainText("", ""))
                         }

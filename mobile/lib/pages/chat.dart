@@ -203,8 +203,8 @@ class _ChatPageState extends State<ChatPage> {
     if (t.isEmpty) return;
     final mentions = _activeMentions(t);
     _text.clear();
-    Drafts.instance.set(room.id, '');
     final reply = _replyTo, edit = _editing;
+    if (edit == null) Drafts.instance.set(room.id, '');
     setState(() {
       _replyTo = null;
       _editing = null;
@@ -373,11 +373,17 @@ class _ChatPageState extends State<ChatPage> {
     final reply = _replyTo;
     try {
       if (a == 'photo' || a == 'camera') {
-        final x = await ImagePicker().pickImage(source: a == 'camera' ? ImageSource.camera : ImageSource.gallery, requestFullMetadata: false);
+        // imageQuality — чтобы HEIC с iPhone и Android пришёл как JPEG, который можно очистить
+        final x = await ImagePicker().pickImage(source: a == 'camera' ? ImageSource.camera : ImageSource.gallery, imageQuality: 95, requestFullMetadata: false);
         if (x == null) return;
-        setState(() => _replyTo = null);
         // без места съёмки, модели телефона и прочих скрытых сведений
-        final clean = await cleanPhoto(await x.readAsBytes(), x.name);
+        final CleanImage clean;
+        try {
+          clean = await cleanPhoto(await x.readAsBytes(), x.name);
+        } catch (_) {
+          return _toast('Не удалось убрать из фото скрытые сведения (место съёмки и др.) — фото не отправлено');
+        }
+        setState(() => _replyTo = null);
         await room.sendFileEvent(
           MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height),
           inReplyTo: reply,
@@ -1174,14 +1180,15 @@ class _ChatPageState extends State<ChatPage> {
               if (empty && _editing == null)
                 IconButton(tooltip: 'Голосовое сообщение', icon: Icon(Icons.mic_none, color: hint), onPressed: _startRec)
               else
-                GestureDetector(
-                  // долгое нажатие — отправить позже
+                // нажатие — отправить, долгое нажатие (правая кнопка мыши) — отправить позже
+                InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: _send,
                   onLongPress: _editing == null ? _schedule : null,
                   onSecondaryTap: _editing == null ? _schedule : null,
-                  child: IconButton(
-                    tooltip: _editing != null ? 'Сохранить' : 'Отправить (удерживайте — отправить позже)',
-                    icon: Icon(_editing != null ? Icons.check_circle : Icons.send, color: accent),
-                    onPressed: _send,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Icon(_editing != null ? Icons.check_circle : Icons.send, color: accent, semanticLabel: _editing != null ? 'Сохранить' : 'Отправить'),
                   ),
                 ),
             ]),

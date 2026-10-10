@@ -33,6 +33,7 @@ String? markdownToHtml(String text, {Map<String, String> mentions = const {}, Se
     return '\u0000${keep.length - 1}\u0000';
   }
 
+  text = text.replaceAll('\u0000', '');
   var s = text;
   // блоки кода и код в строке — внутри них ничего не оформляем
   s = s.replaceAllMapped(RegExp(r'```(?:[a-zA-Z0-9_+-]*\n)?([\s\S]+?)```'), (m) => hold('<pre><code>${_esc(m[1]!.replaceFirst(RegExp(r'\n$'), ''))}</code></pre>'));
@@ -124,16 +125,23 @@ class _RichMessageState extends State<RichMessage> {
     return r;
   }
 
+  String? _key;
+  List<InlineSpan> _spans = const [];
+
   @override
   Widget build(BuildContext context) {
-    for (final r in _rec) {
-      r.dispose();
-    }
-    _rec.clear();
     final e = widget.event;
     final accent = Theme.of(context).colorScheme.primary;
     final c = e.content;
     final f = c['format'] == 'org.matrix.custom.html' ? c['formatted_body'] : null;
+    // разбираем заново, только когда сообщение изменилось — иначе нажатие на ссылку теряется при обновлениях
+    final key = '${e.eventId}|${c['body']}|$f|$_spoilers|${accent.toARGB32()}';
+    if (key == _key) return Text.rich(TextSpan(style: widget.style, children: _spans));
+    _key = key;
+    for (final r in _rec) {
+      r.dispose();
+    }
+    _rec.clear();
     List<InlineSpan> spans;
     if (f is String && f.length < 60000) {
       final frag = html.parseFragment(f);
@@ -144,6 +152,7 @@ class _RichMessageState extends State<RichMessage> {
     } else {
       spans = _linkify(e.calcUnlocalizedBody(hideReply: true), const TextStyle(), accent);
     }
+    _spans = spans;
     return Text.rich(TextSpan(style: widget.style, children: spans));
   }
 

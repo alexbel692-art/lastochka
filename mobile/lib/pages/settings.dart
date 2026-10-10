@@ -11,7 +11,8 @@ import '../system/updater.dart';
 import 'passcode.dart';
 import 'appearance.dart';
 import '../chat/drafts.dart';
-import '../system/lock.dart';
+import '../matrix_client.dart';
+import '../system/pinning.dart';
 import 'sessions.dart';
 import '../system/privacy.dart';
 import '../system/trust.dart';
@@ -41,7 +42,7 @@ Future<void> logoutNow() async {
   await Drafts.instance.clearAll().catchError((_) {});
   await Scheduler.instance.clearAll().catchError((_) {});
   try {
-    await client.logout();
+    await client.logout().timeout(const Duration(seconds: 10));
   } catch (_) {
     await client.clear();
   }
@@ -49,26 +50,27 @@ Future<void> logoutNow() async {
 }
 
 /// Экстренное удаление: всё, что Ласточка хранит на устройстве, стирается без вопросов.
-/// Сеанс на сервере тоже завершается (если есть связь) — ключи этого устройства становятся бесполезны.
+/// Сначала — данные (экран блокировки остаётся, пока они не удалены), потом сеанс на сервере
+/// завершается в фоне, и Ласточка закрывается: при следующем запуске — чистый экран входа.
 Future<void> wipeDevice() async {
+  final hs = client.homeserver, token = client.accessToken;
   try {
-    await AppLock.instance.disable();
-    await purgeDecryptedFiles();
-    await Drafts.instance.clearAll().catchError((_) {});
-    await Scheduler.instance.clearAll().catchError((_) {});
-    await Trust.instance.resetOwnDevices();
+    await client.clear();
   } catch (_) {}
   try {
-    await client.logout().timeout(const Duration(seconds: 5));
-  } catch (_) {
+    await client.dispose(closeDatabase: true);
+  } catch (_) {}
+  await purgeDecryptedFiles();
+  await wipeLocalStorage();
+  try {
+    await (await SharedPreferences.getInstance()).clear(); // и код-пароль, и черновики, и отложенные
+  } catch (_) {}
+  if (hs != null && token != null) {
     try {
-      await client.clear();
+      await CertPinning.instance.httpClient().post(hs.resolve('/_matrix/client/v3/logout'), headers: {'authorization': 'Bearer $token', 'content-type': 'application/json'}, body: '{}').timeout(const Duration(seconds: 4));
     } catch (_) {}
   }
-  try {
-    await (await SharedPreferences.getInstance()).clear();
-  } catch (_) {}
-  navKey.currentState?.pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginPage()), (_) => false);
+  exit(0);
 }
 
 class SettingsPage extends StatefulWidget {

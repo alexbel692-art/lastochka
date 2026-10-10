@@ -211,8 +211,8 @@ class _LastochkaAppState extends State<LastochkaApp> {
             if (locked)
               Positioned.fill(
                 child: LockScreen(onForgot: () async {
+                  await logoutNow(); // экран блокировки держится, пока данные не удалены
                   await AppLock.instance.disable();
-                  await logoutNow();
                 }),
               ),
           ]);

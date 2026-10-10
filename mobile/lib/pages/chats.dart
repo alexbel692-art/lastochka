@@ -94,7 +94,12 @@ List<UserFolder> userFolders() {
   ];
 }
 
-Future<void> saveFolders(List<UserFolder> f) => client.setAccountData(client.userID!, foldersType, {'folders': f.map((x) => x.toJson()).toList()});
+Future<void> saveFolders(List<UserFolder> f) async {
+  final content = {'folders': f.map((x) => x.toJson()).toList()};
+  await client.setAccountData(client.userID!, foldersType, content);
+  // сразу видно, не дожидаясь синхронизации (и две быстрые правки не затирают друг друга)
+  client.accountData[foldersType] = BasicEvent(type: foldersType, content: content);
+}
 
 class ChatsPage extends StatefulWidget {
   const ChatsPage({super.key});
@@ -406,6 +411,7 @@ class _ChatsPageState extends State<ChatsPage> {
           final was = isArchived(room);
           was ? await room.removeTag(archiveTag) : await room.addTag(archiveTag);
           if (mounted) _toast(was ? 'Чат возвращён из архива' : 'Чат в архиве');
+          if (was && _folder == 'archive' && client.rooms.where(isArchived).length <= 1) _folder = 'all';
         case 'read':
           final id = room.lastEvent?.eventId;
           if (id != null) await room.setReadMarker(id, mRead: id);

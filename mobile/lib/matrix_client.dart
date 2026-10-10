@@ -106,6 +106,26 @@ Future<DatabaseApi> _openDatabase() async {
   }
 }
 
+/// Стереть всё хранилище Ласточки на устройстве: базу (с журналами), ключ базы, кэш файлов.
+Future<void> wipeLocalStorage() async {
+  final dir = await _dataDir();
+  final path = p.join(dir.path, '$clientName.sqlite');
+  for (final f in [path, '$path-wal', '$path-shm', '$path-journal', '$path.v2', p.join(dir.path, '.$clientName.key')]) {
+    try {
+      final file = File(f);
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
+  }
+  try {
+    await _secure.delete(key: _dbKeyName);
+  } catch (_) {}
+  try {
+    final cache = Directory(p.join((await getTemporaryDirectory()).path, '${clientName}_files'));
+    if (await cache.exists()) await cache.delete(recursive: true);
+  } catch (_) {}
+  deviceSecret = null;
+}
+
 Future<Client> createClient() async {
   await vod.init();
   final client = Client(

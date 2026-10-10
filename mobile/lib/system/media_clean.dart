@@ -34,7 +34,10 @@ CleanImage _clean((Uint8List, String) a) {
       return CleanImage(out, png ? '$base.png' : '$base.jpg', im.width, im.height);
     }
   } catch (_) {}
-  return CleanImage(stripJpegMetadata(bytes), name, null, null);
+  final stripped = stripJpegMetadata(bytes);
+  // не смогли ни перекодировать, ни аккуратно очистить — лучше не отправлять, чем отправить с GPS
+  if (identical(stripped, bytes)) throw const FormatException('не удалось очистить фото');
+  return CleanImage(stripped, name, null, null);
 }
 
 /// Удалить из JPEG блоки APP1…APP15 (EXIF, XMP, IPTC) и комментарии, не перекодируя картинку.
@@ -44,6 +47,10 @@ Uint8List stripJpegMetadata(Uint8List b) {
   var i = 2;
   while (i + 4 <= b.length) {
     if (b[i] != 0xFF) return b; // повреждённый файл — не трогаем
+    if (b[i + 1] == 0xFF) {
+      i++; // байты-заполнители между блоками
+      continue;
+    }
     final m = b[i + 1];
     if (m == 0xDA) {
       out.add(Uint8List.sublistView(b, i)); // дальше — сами данные изображения

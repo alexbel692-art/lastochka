@@ -129,6 +129,8 @@ class AppLock {
   }
 
   void unlock() {
+    _p?.remove('lock.fails');
+    _p?.remove('lock.blockedUntil');
     _hiddenAt = null; // окно отпечатка/Face ID ненадолго «прячет» приложение — это не повод снова блокировать
     locked.value = false;
   }
@@ -146,7 +148,8 @@ class AppLock {
   Future<bool> tryBiometric() async {
     if (!biometric || !await biometricAvailable()) return false;
     try {
-      return await _auth.authenticate(localizedReason: 'Разблокировать Ласточку');
+      // только отпечаток/лицо: код телефона не должен открывать Ласточку в обход её кода
+      return await _auth.authenticate(localizedReason: 'Разблокировать Ласточку', options: const AuthenticationOptions(biometricOnly: true));
     } catch (_) {
       return false;
     }

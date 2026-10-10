@@ -23,8 +23,8 @@ Map<String, Object?> _forwardContent(Event e, Timeline? tl, Room target) {
   final c = Map<String, Object?>.from(d.content)
     ..remove('m.relates_to')
     ..remove('m.new_content')
-    ..remove('m.mentions')
     ..remove(expiresKey);
+  c['m.mentions'] = <String, Object?>{}; // пересылка никого не упоминает заново
   if (d.messageType == MessageTypes.Text || d.messageType == MessageTypes.Notice || d.messageType == MessageTypes.Emote) {
     c['body'] = d.calcUnlocalizedBody(hideReply: true);
     final f = c['formatted_body'];
