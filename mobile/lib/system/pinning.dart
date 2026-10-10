@@ -11,6 +11,8 @@ import 'package:flutter/foundation.dart';
 import 'package:http/io_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'roots.dart';
+
 class CertAlert {
   final String host, expected, got;
   CertAlert(this.host, this.expected, this.got);
@@ -74,8 +76,17 @@ class CertPinning {
 
   /// HTTP-клиент для всего общения с сервером Matrix: сертификат проверяется сразу после
   /// TLS-рукопожатия, до того как в соединение будет записан хотя бы байт запроса.
+  /// Системные корневые сертификаты + Let's Encrypt (для старых Android).
+  static final SecurityContext _ctx = () {
+    final c = SecurityContext(withTrustedRoots: true);
+    try {
+      c.setTrustedCertificatesBytes(utf8.encode(extraRootsPem));
+    } catch (_) {}
+    return c;
+  }();
+
   IOClient httpClient() {
-    final hc = HttpClient()
+    final hc = HttpClient(context: _ctx)
       ..connectionTimeout = const Duration(seconds: 30)
       ..idleTimeout = const Duration(seconds: 60)
       // соединение всегда напрямую: через прокси проверка сертификата была бы не того сервера
@@ -90,7 +101,7 @@ class CertPinning {
         if (!local) throw const TlsException('Ласточка подключается к серверам только по защищённому соединению (https)');
         return Socket.startConnect(uri.host, port);
       }
-      final t = await SecureSocket.startConnect(uri.host, port);
+      final t = await SecureSocket.startConnect(uri.host, port, context: _ctx);
       final checked = t.socket.then((s) {
         try {
           _check(uri.host, s.peerCertificate);
