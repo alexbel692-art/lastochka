@@ -4,8 +4,10 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:matrix/matrix.dart';
 import 'package:path/path.dart' as p;
@@ -30,18 +32,41 @@ class VideoFrame {
   const VideoFrame(this.jpeg, this.w, this.h, this.videoW, this.videoH, this.durationMs);
 }
 
-/// Первый кадр видеофайла. Пока только Android (средствами системы); на остальных — null.
+const _frames = MethodChannel('lastochka/video_frame');
+
+/// Где умеем доставать кадр из видео: Android — системой, iPhone и Mac — AVFoundation,
+/// Windows — Media Foundation (модуль packages/video_frame).
+final bool frameSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isWindows;
+
+/// Первый кадр видеофайла (JPEG до 480 точек) и размеры самого видео.
 Future<VideoFrame?> videoFrame(String path) async {
-  if (!Platform.isAndroid) return null;
+  if (!frameSupported) return null;
   try {
-    final r = await _system.invokeMapMethod<String, Object?>('videoFrame', {'path': path, 'max': 480}).timeout(const Duration(seconds: 20));
-    final jpeg = r?['jpeg'];
-    if (r == null || jpeg is! Uint8List || jpeg.isEmpty) return null;
+    final args = {'path': path, 'max': 480};
+    final r = await (Platform.isAndroid ? _system.invokeMapMethod<String, Object?>('videoFrame', args) : _frames.invokeMapMethod<String, Object?>('frame', args))
+        .timeout(const Duration(seconds: 20));
+    if (r == null) return null;
     int n(String k) => (r[k] as num?)?.toInt() ?? 0;
-    return VideoFrame(jpeg, n('w'), n('h'), n('vw'), n('vh'), n('duration'));
+    var jpeg = r['jpeg'];
+    final rgba = r['rgba'];
+    if (jpeg is! Uint8List && rgba is Uint8List) {
+      // Windows отдаёт пиксели — сжимаем в JPEG здесь (в отдельном потоке)
+      jpeg = await compute(_toJpeg, (rgba, n('w'), n('h'), n('rot')));
+    }
+    if (jpeg is! Uint8List || jpeg.isEmpty) return null;
+    final turned = n('rot') == 90 || n('rot') == 270;
+    return VideoFrame(jpeg, turned ? n('h') : n('w'), turned ? n('w') : n('h'), n('vw'), n('vh'), n('duration'));
   } catch (_) {
     return null;
   }
+}
+
+Uint8List? _toJpeg((Uint8List, int, int, int) a) {
+  final (bytes, w, h, rot) = a;
+  if (w <= 0 || h <= 0 || bytes.length < w * h * 4) return null;
+  var im = img.Image.fromBytes(width: w, height: h, bytes: bytes.buffer, bytesOffset: bytes.offsetInBytes, numChannels: 4);
+  if (rot != 0) im = img.copyRotate(im, angle: rot);
+  return img.encodeJpg(im, quality: 82);
 }
 
 bool isRound(Event e) => e.messageType == MessageTypes.Video && e.content[roundKey] == true;
@@ -118,7 +143,9 @@ final _files = Lru<String, Future<File?>>(20)..register();
 Future<File?> _decrypted(Event e) => _files.putIfAbsent(e.eventId, () async {
       try {
         final f = await e.downloadAndDecryptAttachment();
-        final path = p.join((await privateTemp()).path, 'video_${e.eventId.hashCode.abs()}.mp4');
+        final name = (e.content.tryGet<String>('filename') ?? e.body).toLowerCase();
+        final ext = name.endsWith('.mov') ? 'mov' : name.endsWith('.webm') ? 'webm' : name.endsWith('.mkv') ? 'mkv' : 'mp4';
+        final path = p.join((await privateTemp()).path, 'video_${e.eventId.hashCode.abs()}.$ext');
         return File(path)..writeAsBytesSync(f.bytes, flush: true);
       } catch (_) {
         _files.remove(e.eventId);
@@ -138,7 +165,7 @@ Future<Uint8List?> _preview(Event e) => _previews.putIfAbsent(e.eventId, () asyn
         } catch (_) {}
       }
       final size = (e.content.tryGetMap<String, Object?>('info')?['size'] as num?)?.toInt() ?? 0;
-      if (!Platform.isAndroid || size <= 0 || size > _autoFrameLimit) return null;
+      if (!frameSupported || size <= 0 || size > _autoFrameLimit) return null;
       final f = await _decrypted(e);
       if (f == null) return null;
       return (await videoFrame(f.path))?.jpeg;

@@ -1,0 +1,24 @@
+name: video_frame
+description: Кадр-превью видео средствами системы (iOS и macOS — AVFoundation, Windows — Media Foundation). Часть Ласточки.
+version: 1.0.0
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+  flutter: '>=3.22.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        pluginClass: VideoFramePlugin
+        sharedDarwinSource: true
+      macos:
+        pluginClass: VideoFramePlugin
+        sharedDarwinSource: true
+      windows:
+        pluginClass: VideoFramePluginCApi
