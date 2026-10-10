@@ -68,7 +68,12 @@ jobs:
           if [ "${{ inputs.update_deps }}" = "true" ]; then
             tool/annotate.sh "pub upgrade" flutter pub upgrade
           elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then
-            tool/annotate.sh "pub get" flutter pub get --enforce-lockfile
+            tool/annotate.sh "pub get" flutter pub get
+            # версии должны совпасть с зафиксированными до байта
+            if ! git diff --quiet -- pubspec.lock; then
+              echo "::error::pubspec.lock изменился: $(git diff -- pubspec.lock | grep '^[-+] ' | head -20 | tr '\n' ' ')"
+              exit 1
+            fi
           else
             tool/annotate.sh "pub get" flutter pub get
           fi
@@ -120,7 +125,7 @@ jobs:
       - name: Зависимости
         run: |
           if [ "${{ inputs.update_deps }}" = "true" ]; then tool/annotate.sh "ios pub upgrade" flutter pub upgrade
-          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "ios pub get" flutter pub get --enforce-lockfile
+          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "ios pub get" flutter pub get; git diff --exit-code --stat -- pubspec.lock || { echo "::error::pubspec.lock изменился"; exit 1; }
           else tool/annotate.sh "ios pub get" flutter pub get; fi
           dart run flutter_launcher_icons
       # Без платной подписи Apple: собираем приложение без подписи и упаковываем в .ipa.
@@ -156,7 +161,7 @@ jobs:
       - name: Зависимости
         run: |
           if [ "${{ inputs.update_deps }}" = "true" ]; then tool/annotate.sh "macos pub upgrade" flutter pub upgrade
-          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "macos pub get" flutter pub get --enforce-lockfile
+          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "macos pub get" flutter pub get; git diff --exit-code --stat -- pubspec.lock || { echo "::error::pubspec.lock изменился"; exit 1; }
           else tool/annotate.sh "macos pub get" flutter pub get; fi
           dart run flutter_launcher_icons
       - name: Сборка macOS
@@ -190,7 +195,7 @@ jobs:
       - name: Зависимости
         run: |
           if [ "${{ inputs.update_deps }}" = "true" ]; then tool/annotate.sh "windows pub upgrade" flutter pub upgrade
-          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "windows pub get" flutter pub get --enforce-lockfile
+          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "windows pub get" flutter pub get; git diff --exit-code --stat -- pubspec.lock || { echo "::error::pubspec.lock изменился"; exit 1; }
           else tool/annotate.sh "windows pub get" flutter pub get; fi
           dart run flutter_launcher_icons
       - name: Сборка Windows
