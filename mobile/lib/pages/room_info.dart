@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../calls/voip.dart';
 import '../system/media_clean.dart';
 import 'chat.dart';
+import 'people.dart';
 import 'qr.dart';
 import '../chat/autodelete.dart';
 import '../system/trust.dart';
@@ -330,29 +331,24 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
       true;
 
   Future<void> _invite() async {
-    final c = TextEditingController();
-    final v = await showDialog<String>(
-      context: context,
-      builder: (d) => AlertDialog(
-        title: const Text('Пригласить'),
-        content: TextField(enableIMEPersonalizedLearning: false, controller: c, autofocus: true, decoration: const InputDecoration(hintText: '@имя:сервер или имя')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(d), child: const Text('Отмена')),
-          FilledButton(onPressed: () => Navigator.pop(d, c.text.trim()), child: const Text('Пригласить')),
-        ],
-      ),
-    );
-    if (v == null || v.isEmpty) return;
-    var id = v.startsWith('@') ? v : '@$v';
-    if (!id.contains(':')) id = '$id:${client.userID!.domain}';
-    try {
-      await room.invite(id);
-      _toast('Приглашение отправлено');
-    } on MatrixException catch (e) {
-      _toast(e.errcode == 'M_NOT_FOUND' ? 'Пользователь не найден' : e.errorMessage);
-    } catch (_) {
-      _toast('Не получилось');
+    final have = room.getParticipants().where((u) => u.membership == Membership.join || u.membership == Membership.invite).map((u) => u.id).toSet();
+    final r = await pickPeople(context, title: 'Пригласить в группу', doneLabel: 'Пригласить', exclude: have);
+    if (r == null || r.ids.isEmpty) return;
+    var ok = 0;
+    String? err;
+    for (final id in r.ids) {
+      try {
+        await room.invite(id);
+        ok++;
+      } on MatrixException catch (e) {
+        err = e.errcode == 'M_NOT_FOUND' ? 'Пользователь не найден' : e.errorMessage;
+      } catch (_) {
+        err = 'Не получилось';
+      }
     }
+    if (!mounted) return;
+    _toast(ok == r.ids.length ? (ok == 1 ? 'Приглашение отправлено' : 'Приглашения отправлены: $ok') : 'Приглашено $ok из ${r.ids.length}${err == null ? '' : '. $err'}');
+    setState(() {});
   }
 
   Future<void> _ttlDialog() async {

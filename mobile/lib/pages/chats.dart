@@ -10,6 +10,7 @@ import '../chat/autodelete.dart';
 import '../chat/drafts.dart';
 import '../chat/global_search.dart';
 import '../chat/saved.dart';
+import 'people.dart';
 import 'qr.dart';
 import '../chat/formatting.dart';
 import '../chat/polls.dart';
@@ -32,6 +33,7 @@ String previewText(Room room) {
     body = switch (ev.messageType) {
       MessageTypes.Image => '🖼 Фото',
       MessageTypes.Video => '🎬 Видео',
+      'm.key.verification.request' => '🔐 Запрос подтверждения',
       MessageTypes.Audio => ev.content.containsKey('org.matrix.msc3245.voice') ? '🎤 Голосовое сообщение' : '🎵 ${ev.body}',
       MessageTypes.File => '📎 ${ev.body}',
       MessageTypes.Sticker => 'Стикер',
@@ -325,39 +327,46 @@ class _ChatsPageState extends State<ChatsPage> {
     await saveFolders(list);
   }
 
+  /// Новый чат, как в Telegram: сразу список людей, сверху — «Новая группа», «Найти группу», QR.
   Future<void> _newChat() async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (c) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(leading: const Icon(Icons.person_outline), title: const Text('Новый личный чат'), onTap: () => Navigator.pop(c, 'dm')),
-          ListTile(leading: const Icon(Icons.group_outlined), title: const Text('Новая группа'), onTap: () => Navigator.pop(c, 'group')),
-          ListTile(leading: const Icon(Icons.travel_explore), title: const Text('Найти группу'), onTap: () => Navigator.pop(c, 'join')),
-        ]),
-      ),
+    final r = await pickPeople(
+      context,
+      title: 'Новый чат',
+      multi: false,
+      actions: [
+        const PickerAction(Icons.group_add_outlined, 'Новая группа', 'group'),
+        const PickerAction(Icons.travel_explore, 'Найти группу', 'join'),
+        if (canScanQr) const PickerAction(Icons.qr_code_scanner, 'Сканировать QR-код', 'qr'),
+      ],
     );
-    if (action == null || !mounted) return;
-    await _newChatOf(action);
+    if (r == null || !mounted) return;
+    if (r.action == 'qr') {
+      final v = await scanQr(context);
+      if (v != null && mounted) await openMatrixLink(context, v);
+      return;
+    }
+    if (r.action != null) return _newChatOf(r.action!);
+    if (r.ids.isNotEmpty) await _create(() => client.startDirectChat(r.ids.first, enableEncryption: true), 'dm');
   }
 
   Future<void> _newChatOf(String action) async {
-    final hints = {
-      'dm': ('Новый личный чат', 'Имя пользователя, например @ivan:сервер'),
-      'group': ('Новая группа', 'Название группы'),
-      'join': ('Найти группу', 'Адрес группы, например #общий:сервер'),
-    }[action]!;
-    final input = await _ask(hints.$1, hints.$2);
+    if (action == 'dm') return _newChat();
+    if (action == 'group') {
+      final r = await pickPeople(context, title: 'Новая группа', doneLabel: 'Далее', allowEmpty: true);
+      if (r == null || !mounted) return;
+      final name = await _ask('Название группы', 'Например: Отдел продаж');
+      if (name == null || name.isEmpty) return;
+      await _create(() => client.createGroupChat(groupName: name, invite: r.ids, enableEncryption: true, preset: CreateRoomPreset.privateChat), 'group');
+      return;
+    }
+    final input = await _ask('Найти группу', 'Адрес группы, например #общий:сервер');
     if (input == null || input.isEmpty) return;
+    await _create(() => client.joinRoom(input.startsWith('#') || input.startsWith('!') ? input : '#$input'), 'join');
+  }
+
+  Future<void> _create(Future<String> Function() make, String action) async {
     try {
-      String roomId;
-      if (action == 'dm') {
-        roomId = await client.startDirectChat(_mxid(input), enableEncryption: true);
-      } else if (action == 'group') {
-        roomId = await client.createGroupChat(groupName: input, enableEncryption: true, preset: CreateRoomPreset.privateChat);
-      } else {
-        roomId = await client.joinRoom(input.startsWith('#') || input.startsWith('!') ? input : '#$input');
-      }
+      final roomId = await make();
       final room = client.getRoomById(roomId) ?? await client.waitForRoomInSync(roomId).then((_) => client.getRoomById(roomId));
       if (room != null && mounted) _open(room);
     } on MatrixException catch (e) {
@@ -369,13 +378,6 @@ class _ChatsPageState extends State<ChatsPage> {
     } catch (_) {
       _toast('Не получилось. Проверьте адрес и подключение');
     }
-  }
-
-  String _mxid(String s) {
-    s = s.trim();
-    if (!s.startsWith('@')) s = '@$s';
-    if (!s.contains(':')) s = '$s:${client.userID!.domain}';
-    return s;
   }
 
   Future<String?> _ask(String title, String hint) {

@@ -1,8 +1,11 @@
 // Видео: «кружки» (короткие видеосообщения с фронтальной камеры, как в Telegram) и просмотр видео
 // внутри Ласточки. Расшифрованный файл лежит во внутренней папке и удаляется при следующем запуске.
 import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:matrix/matrix.dart';
 import 'package:path/path.dart' as p;
@@ -17,6 +20,29 @@ import 'voice.dart' show fmtDur;
 const roundKey = 'ru.lastochka.round';
 final bool videoSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
 final bool canRecordRound = Platform.isAndroid || Platform.isIOS;
+
+const _system = MethodChannel('lastochka/system');
+
+/// Кадр-превью видео (JPEG, без сведений из исходного файла) и размеры самого видео.
+class VideoFrame {
+  final Uint8List jpeg;
+  final int w, h, videoW, videoH, durationMs;
+  const VideoFrame(this.jpeg, this.w, this.h, this.videoW, this.videoH, this.durationMs);
+}
+
+/// Первый кадр видеофайла. Пока только Android (средствами системы); на остальных — null.
+Future<VideoFrame?> videoFrame(String path) async {
+  if (!Platform.isAndroid) return null;
+  try {
+    final r = await _system.invokeMapMethod<String, Object?>('videoFrame', {'path': path, 'max': 480}).timeout(const Duration(seconds: 20));
+    final jpeg = r?['jpeg'];
+    if (r == null || jpeg is! Uint8List || jpeg.isEmpty) return null;
+    int n(String k) => (r[k] as num?)?.toInt() ?? 0;
+    return VideoFrame(jpeg, n('w'), n('h'), n('vw'), n('vh'), n('duration'));
+  } catch (_) {
+    return null;
+  }
+}
 
 bool isRound(Event e) => e.messageType == MessageTypes.Video && e.content[roundKey] == true;
 
@@ -69,13 +95,18 @@ Future<String?> _sendVideo(Room room, XFile x, {Event? inReplyTo, bool round = f
   if (clean == null) return 'Не удалось убрать из видео скрытые сведения (место съёмки и др.) — видео не отправлено. Можно отправить его как файл';
   final mov = x.name.toLowerCase().endsWith('.mov');
   final base = x.name.contains('.') ? x.name.substring(0, x.name.lastIndexOf('.')) : 'Видео';
+  // превью-кадр, чтобы у собеседника видео выглядело как в Telegram, а не как файл
+  final frame = await videoFrame(x.path);
   await room.sendFileEvent(
     MatrixVideoFile(
       bytes: clean,
       name: round ? 'Видеосообщение.mp4' : '$base.${mov ? 'mov' : 'mp4'}',
       mimeType: mov ? 'video/quicktime' : 'video/mp4',
-      duration: await _durationOf(x.path),
+      width: frame != null && frame.videoW > 0 ? frame.videoW : null,
+      height: frame != null && frame.videoH > 0 ? frame.videoH : null,
+      duration: frame != null && frame.durationMs > 0 ? frame.durationMs : await _durationOf(x.path),
     ),
+    thumbnail: frame == null ? null : MatrixImageFile(bytes: frame.jpeg, name: 'thumbnail.jpg', mimeType: 'image/jpeg', width: frame.w, height: frame.h),
     inReplyTo: inReplyTo,
     extraContent: {if (round) 'body': 'Видеосообщение', if (round) roundKey: true, ...ttlExtra(room)},
   );
@@ -94,6 +125,93 @@ Future<File?> _decrypted(Event e) => _files.putIfAbsent(e.eventId, () async {
         return null;
       }
     });
+
+// Превью видео в ленте: уменьшенная копия от отправителя, а если её нет (Element, мосты) —
+// небольшое видео скачивается и кадр берётся из него, как в Telegram.
+final _previews = Lru<String, Future<Uint8List?>>(60)..register();
+const _autoFrameLimit = 30 * 1024 * 1024;
+
+Future<Uint8List?> _preview(Event e) => _previews.putIfAbsent(e.eventId, () async {
+      if (e.hasThumbnail) {
+        try {
+          return (await e.downloadAndDecryptAttachment(getThumbnail: true)).bytes;
+        } catch (_) {}
+      }
+      final size = (e.content.tryGetMap<String, Object?>('info')?['size'] as num?)?.toInt() ?? 0;
+      if (!Platform.isAndroid || size <= 0 || size > _autoFrameLimit) return null;
+      final f = await _decrypted(e);
+      if (f == null) return null;
+      return (await videoFrame(f.path))?.jpeg;
+    });
+
+String _mb(int b) => b >= 1048576 ? '${(b / 1048576).toStringAsFixed(1)} МБ' : '${max(1, b ~/ 1024)} КБ';
+
+/// Видео в ленте: кадр, кнопка воспроизведения, длительность и размер.
+class VideoPreview extends StatelessWidget {
+  final Event event;
+  final double maxWidth;
+  final VoidCallback onOpen;
+  const VideoPreview({super.key, required this.event, required this.maxWidth, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    final info = event.content.tryGetMap<String, Object?>('info');
+    final w = (info?['w'] as num?)?.toDouble();
+    final h = (info?['h'] as num?)?.toDouble();
+    final dur = (info?['duration'] as num?)?.toInt();
+    final size = (info?['size'] as num?)?.toInt();
+    final thumb = info?.tryGetMap<String, Object?>('thumbnail_info');
+    final tw = (thumb?['w'] as num?)?.toDouble(), th = (thumb?['h'] as num?)?.toDouble();
+    final ratio = (w != null && h != null && w > 0 && h > 0)
+        ? w / h
+        : (tw != null && th != null && tw > 0 && th > 0)
+            ? tw / th
+            : 16 / 9;
+    final decodeW = (maxWidth * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(64, 1200);
+    final chip = [if (dur != null && dur > 0) fmtDur(dur), if (size != null && size > 0) _mb(size)].join(' · ');
+    return GestureDetector(
+      onTap: onOpen,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(13),
+        child: SizedBox(
+          width: maxWidth,
+          child: AspectRatio(
+            aspectRatio: ratio.clamp(0.6, 1.9),
+            child: Stack(fit: StackFit.expand, children: [
+              const DecoratedBox(
+                decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF2A3440), Color(0xFF151A20)])),
+              ),
+              FutureBuilder<Uint8List?>(
+                future: _preview(event),
+                builder: (_, s) => s.data == null
+                    ? const SizedBox.shrink()
+                    : Image.memory(s.data!, fit: BoxFit.cover, gaplessPlayback: true, cacheWidth: decodeW, errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+              ),
+              Center(
+                child: Container(
+                  width: 54,
+                  height: 54,
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.45), shape: BoxShape.circle),
+                  child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 38),
+                ),
+              ),
+              if (chip.isNotEmpty)
+                Positioned(
+                  left: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(10)),
+                    child: Text(chip, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+                  ),
+                ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// «Кружок» в ленте: нажатие — воспроизвести со звуком, ещё нажатие — пауза.
 class RoundVideo extends StatefulWidget {

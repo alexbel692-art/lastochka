@@ -112,18 +112,27 @@ class _Bubble extends StatelessWidget {
       content = _Image(e, sticker: isSticker);
     } else if (e.messageType == MessageTypes.Audio) {
       content = VoiceMessage(event: e, color: mine ? const Color(0xFF4FAE4E) : accent);
-    } else if (e.messageType == MessageTypes.File || e.messageType == MessageTypes.Video) {
+    } else if (e.messageType == MessageTypes.Video) {
+      content = VideoPreview(
+        event: e,
+        maxWidth: min(paneWidth(context) * 0.7, 360.0),
+        onOpen: () => openVideo(context, e, () => openAttachment(e, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s))))),
+      );
+    } else if (e.messageType == 'm.key.verification.request') {
+      content = Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.verified_user_outlined, size: 18, color: mine ? const Color(0xFF4FAE4E) : accent),
+        const SizedBox(width: 6),
+        Flexible(child: Text(mine ? 'Запрос подтверждения устройства' : 'Собеседник запросил подтверждение устройства', style: TextStyle(fontStyle: FontStyle.italic, color: hint))),
+      ]);
+    } else if (e.messageType == MessageTypes.File) {
       final size = (e.content.tryGetMap<String, Object?>('info')?['size'] as num?)?.toInt();
       content = InkWell(
-        onTap: () {
-          void ext() => openAttachment(e, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s))));
-          e.messageType == MessageTypes.Video ? openVideo(context, e, ext) : ext();
-        },
+        onTap: () => openAttachment(e, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)))),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           CircleAvatar(
             radius: 22,
             backgroundColor: mine ? const Color(0xFF4FAE4E) : accent,
-            child: Icon(e.messageType == MessageTypes.Video ? Icons.play_arrow : Icons.insert_drive_file, color: Colors.white),
+            child: const Icon(Icons.insert_drive_file, color: Colors.white),
           ),
           const SizedBox(width: 10),
           Flexible(

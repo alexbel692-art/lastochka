@@ -236,19 +236,19 @@ extension _ChatActions on _ChatPageState {
   }
 
   Future<void> _attach() async {
+    final items = <_AttachItem>[
+      const _AttachItem(Icons.photo_library_rounded, 'Галерея', 'photo', [Color(0xFF4FA3FF), Color(0xFF2A6FE0)]),
+      if (!isDesktop) const _AttachItem(Icons.photo_camera_rounded, 'Камера', 'camera', [Color(0xFFFF6B8B), Color(0xFFE5395F)]),
+      const _AttachItem(Icons.movie_rounded, 'Видео', 'video', [Color(0xFF8E7BFF), Color(0xFF5B45E0)]),
+      if (canRecordRound) const _AttachItem(Icons.radio_button_checked_rounded, 'Кружок', 'round', [Color(0xFFB36BFF), Color(0xFF8333E0)]),
+      const _AttachItem(Icons.description_rounded, 'Файл', 'file', [Color(0xFF3DD6B0), Color(0xFF14A386)]),
+      const _AttachItem(Icons.bar_chart_rounded, 'Опрос', 'poll', [Color(0xFFFFB547), Color(0xFFF08A1C)]),
+    ];
     final a = await showModalBottomSheet<String>(
       context: context,
-      showDragHandle: true,
-      builder: (c) => SafeArea(
-        child: Wrap(alignment: WrapAlignment.spaceEvenly, children: [
-          _attachBtn(c, Icons.photo_outlined, 'Фото', 'photo', Colors.blue),
-          if (!isDesktop) _attachBtn(c, Icons.photo_camera_outlined, 'Камера', 'camera', Colors.pink),
-          _attachBtn(c, Icons.insert_drive_file_outlined, 'Файл', 'file', Colors.teal),
-          _attachBtn(c, Icons.videocam_outlined, 'Видео', 'video', Colors.indigo),
-          if (canRecordRound) _attachBtn(c, Icons.radio_button_checked, 'Кружок', 'round', Colors.deepPurple),
-          _attachBtn(c, Icons.poll_outlined, 'Опрос', 'poll', Colors.orange),
-        ]),
-      ),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      builder: (c) => _AttachSheet(items: items),
     );
     final reply = _replyTo;
     try {
@@ -292,16 +292,87 @@ extension _ChatActions on _ChatPageState {
     }
   }
 
-  Widget _attachBtn(BuildContext c, IconData i, String label, String v, Color color) => InkWell(
-        onTap: () => Navigator.pop(c, v),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            CircleAvatar(radius: 28, backgroundColor: color, child: Icon(i, color: Colors.white, size: 28)),
-            const SizedBox(height: 6),
-            Text(label),
-          ]),
+
+}
+
+class _AttachItem {
+  final IconData icon;
+  final String label, value;
+  final List<Color> colors;
+  const _AttachItem(this.icon, this.label, this.value, this.colors);
+}
+
+/// Меню «Прикрепить»: плавающая карточка с плитками-градиентами, плитки появляются по очереди.
+class _AttachSheet extends StatelessWidget {
+  final List<_AttachItem> items;
+  const _AttachSheet({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final dark = t.brightness == Brightness.dark;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+        child: Material(
+          color: dark ? const Color(0xFF1F2329) : Colors.white,
+          elevation: 12,
+          shadowColor: Colors.black38,
+          borderRadius: BorderRadius.circular(26),
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 18),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 38, height: 4, decoration: BoxDecoration(color: t.hintColor.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 12),
+              Text('Прикрепить', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: t.textTheme.titleMedium?.color)),
+              const SizedBox(height: 16),
+              LayoutBuilder(builder: (_, c) {
+                final cols = c.maxWidth >= 520 ? 6 : 3;
+                final w = c.maxWidth / cols;
+                return Wrap(children: [
+                  for (var i = 0; i < items.length; i++) SizedBox(width: w, child: _AttachTile(item: items[i], index: i)),
+                ]);
+              }),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AttachTile extends StatelessWidget {
+  final _AttachItem item;
+  final int index;
+  const _AttachTile({required this.item, required this.index});
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: Duration(milliseconds: 260 + index * 45),
+        curve: Curves.easeOutBack,
+        builder: (_, v, child) => Opacity(opacity: v.clamp(0.0, 1.0), child: Transform.scale(scale: 0.7 + 0.3 * v, child: child)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => Navigator.pop(context, item.value),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: item.colors),
+                  boxShadow: [BoxShadow(color: item.colors.last.withValues(alpha: 0.35), blurRadius: 12, offset: const Offset(0, 5))],
+                ),
+                child: Icon(item.icon, color: Colors.white, size: 30),
+              ),
+              const SizedBox(height: 8),
+              Text(item.label, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500)),
+            ]),
+          ),
         ),
       );
-
 }

@@ -19,6 +19,7 @@ String eventPreview(Event e, Timeline? tl) {
   return switch (d.messageType) {
     MessageTypes.Image => '🖼 Фото',
     MessageTypes.Video => '🎬 Видео',
+    'm.key.verification.request' => '🔐 Запрос подтверждения',
     MessageTypes.Audio => d.content.containsKey('org.matrix.msc3245.voice') ? '🎤 Голосовое сообщение' : '🎵 ${d.body}',
     MessageTypes.File => '📎 ${d.body}',
     _ => stripMarkdown(d.calcUnlocalizedBody(hideReply: true)).replaceAll('\n', ' '),

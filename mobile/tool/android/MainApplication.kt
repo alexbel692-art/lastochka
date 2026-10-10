@@ -114,6 +114,15 @@ class MainApplication : Application() {
                     }
                     "tone" -> { Tones.play(ctx, call.arguments as? String ?: ""); result.success(true) }
                     "toneStop" -> { Tones.stop(ctx); result.success(true) }
+                    "videoFrame" -> {
+                        // кадр из видео для превью (как в Telegram); делается в фоне, чтобы не подвешивать экран
+                        val path = call.argument<String>("path") ?: ""
+                        val max = call.argument<Int>("max") ?: 480
+                        Thread({
+                            val r = try { VideoFrame.grab(path, max) } catch (_: Throwable) { null }
+                            android.os.Handler(android.os.Looper.getMainLooper()).post { result.success(r) }
+                        }, "video-frame").start()
+                    }
                     "copySensitive" -> {
                         // текст помечается секретным: Android 13+ не показывает его в подсказках и превью
                         val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -229,5 +238,36 @@ object Tones {
                 }
             }
         } catch (_: Throwable) {}
+    }
+}
+
+/** Первый кадр видео в JPEG (без каких-либо сведений из исходного файла) и размеры видео. */
+object VideoFrame {
+    fun grab(path: String, max: Int): Map<String, Any>? {
+        val mr = android.media.MediaMetadataRetriever()
+        try {
+            mr.setDataSource(path)
+            val rot = mr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            var vw = mr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            var vh = mr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            if (rot == 90 || rot == 270) { val t = vw; vw = vh; vh = t }
+            val dur = mr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            var bmp = mr.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: return null
+            // на части устройств кадр приходит неповёрнутым — поворачиваем сами
+            if (vw > 0 && vh > 0 && (bmp.width > bmp.height) != (vw > vh) && (rot == 90 || rot == 270)) {
+                val m = android.graphics.Matrix().apply { postRotate(rot.toFloat()) }
+                bmp = android.graphics.Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+            }
+            val scale = minOf(1f, max.toFloat() / maxOf(bmp.width, bmp.height))
+            if (scale < 1f) {
+                bmp = android.graphics.Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt().coerceAtLeast(1), (bmp.height * scale).toInt().coerceAtLeast(1), true)
+            }
+            val out = java.io.ByteArrayOutputStream()
+            bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)
+            if (vw <= 0 || vh <= 0) { vw = bmp.width; vh = bmp.height }
+            return mapOf("jpeg" to out.toByteArray(), "w" to bmp.width, "h" to bmp.height, "vw" to vw, "vh" to vh, "duration" to dur)
+        } finally {
+            try { mr.release() } catch (_: Throwable) {}
+        }
     }
 }
