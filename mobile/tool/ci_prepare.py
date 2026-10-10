@@ -61,6 +61,13 @@ def gradle_fn(s):
         s = s.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true', 1)
         s += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n    implementation("androidx.appcompat:appcompat:1.7.0")\n}\n'
     s = re.sub(r'ndkVersion = .*', 'ndkVersion = "27.0.12077973"', s)
+    # сборка под один тип процессора (--target-platform) — и библиотеки плагинов (звонки, сканер QR)
+    # кладём только для него, иначе в APK попадают все три набора
+    if 'abiFilters' not in s:
+        s = s.replace('    defaultConfig {', """    defaultConfig {
+        val tp = (project.findProperty("target-platform") as String?) ?: ""
+        val abi = mapOf("android-arm" to "armeabi-v7a", "android-arm64" to "arm64-v8a", "android-x64" to "x86_64")[tp]
+        if (abi != null) ndk { abiFilters.add(abi) }""", 1)
     if signed and 'create("release")' not in s:
         block = '''    signingConfigs {
         create("release") {
