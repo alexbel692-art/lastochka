@@ -107,13 +107,14 @@ jobs:
           B="--release --dart-define=APP_VERSION=$V --build-name=$V --build-number=${{ github.run_number }}"
           # отдельные APK под тип процессора (в 3 раза меньше) — их и ставит автообновление;
           # общий APK — для ручной установки и для обновления с версий до 4.5
-          tool/annotate.sh "build apk arm64" flutter build apk $B --target-platform android-arm64
+          grep -q LASTOCHKA_ABI android/app/build.gradle.kts || { echo "::error::нет фильтра ABI в build.gradle.kts"; exit 1; }
+          LASTOCHKA_ABI=arm64-v8a tool/annotate.sh "build apk arm64" flutter build apk $B --target-platform android-arm64
           cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android-arm64.apk"
-          tool/annotate.sh "build apk arm" flutter build apk $B --target-platform android-arm
+          LASTOCHKA_ABI=armeabi-v7a tool/annotate.sh "build apk arm" flutter build apk $B --target-platform android-arm
           cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android-arm.apk"
           tool/annotate.sh "build apk" flutter build apk $B
           cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android.apk"
-          ls -la ../dist
+          for f in ../dist/*.apk; do echo "::notice::$(basename $f) — $(( $(stat -c%s $f) / 1048576 )) МБ, $(unzip -l $f | grep -oE 'lib/[^/]+/' | sort -u | tr '\n' ' ')"; done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android

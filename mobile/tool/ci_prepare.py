@@ -64,10 +64,10 @@ def gradle_fn(s):
     # сборка под один тип процессора (--target-platform) — и библиотеки плагинов (звонки, сканер QR)
     # кладём только для него, иначе в APK попадают все три набора
     if 'abiFilters' not in s:
+        assert '    defaultConfig {' in s, 'defaultConfig не найден'
         s = s.replace('    defaultConfig {', """    defaultConfig {
-        val tp = (project.findProperty("target-platform") as String?) ?: ""
-        val abi = mapOf("android-arm" to "armeabi-v7a", "android-arm64" to "arm64-v8a", "android-x64" to "x86_64")[tp]
-        if (abi != null) ndk { abiFilters.add(abi) }""", 1)
+        val abi = System.getenv("LASTOCHKA_ABI")
+        if (!abi.isNullOrEmpty()) ndk { abiFilters.add(abi) }""", 1)
     if signed and 'create("release")' not in s:
         block = '''    signingConfigs {
         create("release") {
