@@ -67,7 +67,13 @@ def gradle_fn(s):
         assert '    defaultConfig {' in s, 'defaultConfig не найден'
         s = s.replace('    defaultConfig {', """    defaultConfig {
         val abi = System.getenv("LASTOCHKA_ABI")
-        if (!abi.isNullOrEmpty()) ndk { abiFilters.add(abi) }""", 1)
+        if (!abi.isNullOrEmpty()) ndk { abiFilters.clear(); abiFilters.add(abi) }""", 1)
+        # Flutter сам добавляет все типы процессоров — лишние библиотеки вырезаем при упаковке
+        s = s.replace('\nandroid {', """
+android {
+    System.getenv("LASTOCHKA_ABI")?.takeIf { it.isNotEmpty() }?.let { keep ->
+        packaging { jniLibs { excludes += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86").filter { it != keep }.map { "lib/$it/**" } } }
+    }""", 1)
     if signed and 'create("release")' not in s:
         block = '''    signingConfigs {
         create("release") {
