@@ -93,17 +93,17 @@ class _BackupPageState extends State<BackupPage> {
                 }
                 bs.unlockedSsss();
               case BootstrapState.askBadSsss:
-                bs.ignoreBadSecrets(true);
+                // повреждённые секреты — не переносим молча, лучше остановиться
+                if (!done.isCompleted) done.completeError(StateError('bad'));
               case BootstrapState.askNewSsss:
                 await bs.newSsss(phrase);
               case BootstrapState.askWipeCrossSigning:
                 await bs.wipeCrossSigning(false);
-              case BootstrapState.askSetupCrossSigning:
-                await bs.askSetupCrossSigning(setupMasterKey: true, setupSelfSigningKey: true, setupUserSigningKey: true);
+              // замена ключа фразой никогда не создаёт новых ключей личности или новой копии
+              case BootstrapState.askSetupCrossSigning || BootstrapState.askSetupOnlineKeyBackup:
+                if (!done.isCompleted) done.completeError(StateError('nocs'));
               case BootstrapState.askWipeOnlineKeyBackup:
                 bs.wipeOnlineKeyBackup(false);
-              case BootstrapState.askSetupOnlineKeyBackup:
-                await bs.askSetupOnlineKeyBackup(true);
               case BootstrapState.done:
                 if (!done.isCompleted) done.complete();
               case BootstrapState.error:
@@ -135,6 +135,7 @@ class _BackupPageState extends State<BackupPage> {
         'key' => 'Неверная секретная фраза (или ключ)',
         'nossss' => 'Сначала нужна секретная фраза — она задаётся при настройке защиты аккаунта',
         'phrase' => _phraseErr ?? 'Проверьте новую фразу',
+        'nocs' || 'bad' => 'На этом аккаунте защита настроена не полностью — замену фразой лучше сделать вместе с администратором',
         'notcached' => 'Ключ принят, но копия зашифрована другим ключом. Подключите устройство из Element или обратитесь к администратору',
         _ => 'Не получилось. Проверьте ключ и подключение',
       };

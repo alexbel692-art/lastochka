@@ -12,7 +12,9 @@ final appReady = ValueNotifier<Widget?>(null);
 class Root extends StatelessWidget {
   const Root({super.key});
   @override
-  Widget build(BuildContext context) => Directionality(
+  Widget build(BuildContext context) => MediaQuery.fromView(
+        view: View.of(context),
+        child: Directionality(
         textDirection: TextDirection.ltr,
         child: ValueListenableBuilder<Widget?>(
           valueListenable: appReady,
@@ -21,6 +23,7 @@ class Root extends StatelessWidget {
             switchInCurve: Curves.easeOut,
             child: app ?? const SplashScreen(key: ValueKey('splash')),
           ),
+        ),
         ),
       );
 }

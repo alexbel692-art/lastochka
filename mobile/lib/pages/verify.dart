@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:matrix/encryption.dart';
 import 'package:matrix/encryption/utils/key_verification.dart';
+import 'package:matrix/matrix.dart';
 
 import '../main.dart';
 import '../system/trust.dart';
@@ -62,7 +63,8 @@ class _VerifyGateState extends State<VerifyGate> {
     setState(() { _busy = true; _error = null; });
     try {
       final enc = client.encryption!;
-      await enc.ssss.open().unlock(keyOrPassphrase: input);
+      // ключ, которым на самом деле зашифрована подпись устройств (а не просто «по умолчанию»)
+      await enc.ssss.open(EventTypes.CrossSigningSelfSigning).unlock(keyOrPassphrase: input);
       await enc.keyManager.loadAllKeys();
       await client.updateUserDeviceKeys();
       if (!needsVerification()) setState(() {});

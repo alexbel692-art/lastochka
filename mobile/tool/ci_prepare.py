@@ -197,7 +197,7 @@ for st in ('android/app/src/main/res/values/styles.xml', 'android/app/src/main/r
 launch = """<?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/lastochka_splash" />
-    <item><bitmap android:gravity="center" android:src="@mipmap/ic_launcher" /></item>
+    <item android:gravity="center" android:drawable="@mipmap/ic_launcher" />
 </layer-list>
 """
 for d in ('drawable', 'drawable-v21'):
@@ -219,9 +219,9 @@ v31 = """<?xml version="1.0" encoding="utf-8"?>
     </style>
 </resources>
 """
-for d in ('values-v31', 'values-night-v31'):
+for d, theme in (('values-v31', 'Theme.AppCompat.Light.NoActionBar'), ('values-night-v31', 'Theme.AppCompat.NoActionBar')):
     os.makedirs(f'android/app/src/main/res/{d}', exist_ok=True)
-    open(f'android/app/src/main/res/{d}/styles.xml', 'w', encoding='utf-8').write(v31)
+    open(f'android/app/src/main/res/{d}/styles.xml', 'w', encoding='utf-8').write(v31.replace('Theme.AppCompat.Light.NoActionBar', theme))
 
 # --- macOS: защита окна от снимков экрана (настройка «Запретить снимки экрана») ---
 mw = 'macos/Runner/MainFlutterWindow.swift'

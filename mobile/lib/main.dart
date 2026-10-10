@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:matrix/encryption/utils/key_verification.dart';
@@ -85,6 +86,7 @@ Future<void> main(List<String> args) async {
         ),
       ),
     );
+    SchedulerBinding.instance.scheduleForcedFrame();
     return;
   }
   initVoip();
@@ -107,6 +109,9 @@ Future<void> main(List<String> args) async {
   final onScreen = !hidden && (isDesktopOS || WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed);
   if (onScreen && left > Duration.zero) await Future.delayed(left);
   appReady.value = const LastochkaApp();
+  // запуск в фоне (после перезагрузки, из трея): кадры не рисуются — дорисовываем принудительно,
+  // иначе приложение (фоновая служба, подписки) не запустится, пока не откроют окно
+  SchedulerBinding.instance.scheduleForcedFrame();
   // Android может запустить Ласточку в фоне (после перезагрузки, фоновой службой) — окна нет
   if (!isDesktopOS) appVisible = WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
   // автозапуск с Windows — сразу в трей, без окна
