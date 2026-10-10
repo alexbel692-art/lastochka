@@ -13,8 +13,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'roots.dart';
 
-import 'roots.dart';
-
 class CertAlert {
   final String host, expected, got;
   CertAlert(this.host, this.expected, this.got);
@@ -76,20 +74,6 @@ class CertPinning {
     await _p?.remove('tls.pins');
   }
 
-  SecurityContext? _ctx;
-
-  /// Системные корневые сертификаты + Let's Encrypt (на Android 7.0 и старше его корня нет).
-  SecurityContext? _context() {
-    if (!Platform.isAndroid) return null;
-    if (_ctx != null) return _ctx;
-    try {
-      _ctx = SecurityContext(withTrustedRoots: true)..setTrustedCertificatesBytes(utf8.encode(extraRootsPem));
-    } catch (_) {
-      _ctx = SecurityContext(withTrustedRoots: true);
-    }
-    return _ctx;
-  }
-
   /// HTTP-клиент для всего общения с сервером Matrix: сертификат проверяется сразу после
   /// TLS-рукопожатия, до того как в соединение будет записан хотя бы байт запроса.
   /// Системные корневые сертификаты + Let's Encrypt (для старых Android).
@@ -117,7 +101,7 @@ class CertPinning {
         if (!local) throw const TlsException('Ласточка подключается к серверам только по защищённому соединению (https)');
         return Socket.startConnect(uri.host, port);
       }
-      final t = await SecureSocket.startConnect(uri.host, port, context: _context());
+      final t = await SecureSocket.startConnect(uri.host, port, context: _ctx);
       final checked = t.socket.then((s) {
         try {
           _check(uri.host, s.peerCertificate);

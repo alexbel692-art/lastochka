@@ -87,11 +87,7 @@ class _LoginPageState extends State<LoginPage> {
     } on TlsException catch (e) {
       setState(() => _error = e.message);
     } catch (e) {
-      final d = '$e';
-      setState(() => _error = RegExp('CERTIFICATE|Handshake|HANDSHAKE', caseSensitive: false).hasMatch(d)
-          ? 'Не удалось проверить сертификат сервера. Проверьте дату и время на устройстве'
-          // коротко — что именно не так, чтобы было что сообщить администратору
-          : 'Сервер недоступен или это не сервер Matrix\n(${d.length > 140 ? d.substring(0, 140) : d})');
+      setState(() => _error = 'Сервер недоступен или это не сервер Matrix');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
