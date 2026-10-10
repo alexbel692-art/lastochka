@@ -13,6 +13,7 @@ import 'package:matrix/encryption/utils/key_verification.dart';
 import 'package:matrix/matrix.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'system/pinning.dart';
@@ -87,7 +88,7 @@ Future<DatabaseApi> _openDatabase() async {
         database: await open(),
         maxFileSize: 10 * 1000 * 1000,
         fileStorageLocation: cache.uri,
-        deleteFilesAfterDuration: const Duration(days: 30),
+        deleteFilesAfterDuration: Duration(days: await fileKeepDays()),
       );
 
   // отметка «база создана этой версией»: только старую базу (Android до 0.4) можно пересоздать
@@ -103,6 +104,52 @@ Future<DatabaseApi> _openDatabase() async {
     final db = await init();
     await marker.writeAsString('1');
     return db;
+  }
+}
+
+/// Сколько дней хранить загруженные файлы (настройка «Хранилище»).
+Future<int> fileKeepDays() async => (await SharedPreferences.getInstance()).getInt('storage.days') ?? 30;
+
+Future<int> _sizeOf(FileSystemEntity e) async {
+  try {
+    if (e is File) return await e.length();
+    if (e is Directory && await e.exists()) {
+      var n = 0;
+      await for (final f in e.list(recursive: true, followLinks: false)) {
+        if (f is File) n += await f.length().catchError((_) => 0);
+      }
+      return n;
+    }
+  } catch (_) {}
+  return 0;
+}
+
+/// Сколько места занимает Ласточка: база (переписка и ключи), загруженные файлы, временные файлы.
+Future<({int db, int files, int temp})> storageUsage() async {
+  final dir = await _dataDir();
+  final path = p.join(dir.path, '$clientName.sqlite');
+  var db = 0;
+  for (final f in [path, '$path-wal', '$path-shm']) {
+    db += await _sizeOf(File(f));
+  }
+  final tmp = await getTemporaryDirectory();
+  final files = await _sizeOf(Directory(p.join(tmp.path, '${clientName}_files')));
+  final temp = await _sizeOf(Directory(p.join(tmp.path, 'lastochka-update')));
+  return (db: db, files: files, temp: temp);
+}
+
+/// Очистить загруженные файлы (картинки, видео, голосовые): при необходимости они скачаются заново.
+Future<void> clearFileCache() async {
+  final tmp = await getTemporaryDirectory();
+  for (final d in [Directory(p.join(tmp.path, '${clientName}_files')), Directory(p.join(tmp.path, 'lastochka-update'))]) {
+    try {
+      if (!await d.exists()) continue;
+      await for (final f in d.list()) {
+        try {
+          await f.delete(recursive: true);
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
 }
 

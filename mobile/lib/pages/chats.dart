@@ -194,19 +194,25 @@ class _ChatsPageState extends State<ChatsPage> {
   @override
   void initState() {
     super.initState();
-    _sub = client.onSync.stream.listen((_) {
-      if (mounted) setState(() {});
+    // перерисовываем список, только если в синхронизации было что-то про чаты, и не чаще 4 раз в секунду
+    _sub = client.onSync.stream.listen((s) {
+      if (s.rooms != null || s.accountData != null || s.presence != null) _redraw();
     });
     Drafts.instance.changed.addListener(_redraw);
   }
 
+  Timer? _redrawTimer;
   void _redraw() {
-    if (mounted) setState(() {});
+    if (_redrawTimer?.isActive == true) return;
+    _redrawTimer = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
     Drafts.instance.changed.removeListener(_redraw);
+    _redrawTimer?.cancel();
     _msgTimer?.cancel();
     _gs.cancel();
     _sub?.cancel();

@@ -5,9 +5,13 @@
 // а Ласточка отправителя удаляет его с сервера. Дополнительно ставится m.room.retention.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 
 import '../main.dart';
+
+/// Тикает раз в секунду, пока на экране есть исчезающие сообщения (обновляет только их таймеры).
+final ttlTick = ValueNotifier<int>(0);
 
 const ttlStateType = 'ru.lastochka.autodelete';
 const expiresKey = 'ru.lastochka.expires';

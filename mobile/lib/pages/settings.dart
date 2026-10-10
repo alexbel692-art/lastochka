@@ -17,6 +17,7 @@ import '../system/diag.dart';
 import '../system/media_clean.dart';
 import 'backup.dart';
 import 'qr.dart';
+import 'storage.dart';
 import '../system/pinning.dart';
 import '../system/clipboard.dart';
 import 'sessions.dart';
@@ -261,6 +262,7 @@ class _SettingsPageState extends State<SettingsPage> {
           setState(() {});
         }),
         _switch(Icons.how_to_reg_outlined, 'Принимать личные чаты автоматически', 'От коллег с вашего сервера — без нажатия «Вступить»', _pref('invites.autoAccept'), (v) => _set('invites.autoAccept', v)),
+        _row(Icons.data_usage, 'Хранилище', sub: 'Сколько места занято, очистка кэша', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StoragePage()))),
         _header('Оформление'),
         _row(Icons.palette_outlined, 'Оформление', sub: 'Тема, размер текста, обои чатов', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AppearancePage()))),
         _header('Уведомления'),

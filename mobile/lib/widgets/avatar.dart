@@ -3,15 +3,17 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../main.dart';
+import '../system/lru.dart';
 
 // Кэш миниатюр в памяти, чтобы список чатов не мигал при прокрутке.
-final Map<String, Uint8List> _thumbs = {};
+final _thumbs = Lru<String, Uint8List>(400)..register(); // миниатюры аватаров маленькие
 final Map<String, Future<Uint8List?>> _loading = {};
 
 /// Загружает миниатюру mxc:// через авторизованный доступ к медиа.
 Future<Uint8List?> loadThumb(Uri mxc, int size, {String method = 'crop'}) {
   final key = '$mxc@$size$method';
-  if (_thumbs.containsKey(key)) return Future.value(_thumbs[key]);
+  final hit = _thumbs[key];
+  if (hit != null) return Future.value(hit);
   return _loading[key] ??= () async {
     try {
       final hs = client.homeserver;

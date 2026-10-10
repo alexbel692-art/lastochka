@@ -8,6 +8,7 @@ import 'package:matrix/matrix.dart';
 import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
+import '../system/lru.dart';
 import '../system/media_clean.dart';
 import '../system/privacy.dart';
 import 'autodelete.dart';
@@ -81,7 +82,7 @@ Future<String?> _sendVideo(Room room, XFile x, {Event? inReplyTo, bool round = f
   return null;
 }
 
-final Map<String, Future<File?>> _files = {};
+final _files = Lru<String, Future<File?>>(20)..register();
 
 Future<File?> _decrypted(Event e) => _files.putIfAbsent(e.eventId, () async {
       try {

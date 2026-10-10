@@ -27,6 +27,7 @@ import '../chat/stickers.dart';
 import '../chat/voice.dart';
 import '../main.dart';
 import '../system/notify.dart';
+import '../system/lru.dart';
 import '../system/privacy.dart';
 import '../system/trust.dart';
 import 'verify.dart';
@@ -93,8 +94,11 @@ class _ChatPageState extends State<ChatPage> {
     Trust.instance.senderChecks.addListener(_onTrust);
     _init();
     // исчезающие сообщения: раз в секунду обновляем таймеры и скрываем истёкшие
+    // раз в секунду обновляются только таймеры 🔥, а весь чат — лишь когда сообщение исчезло
     _ttlTick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && (roomTtl(room) > 0 || _events.any((e) => expiryOf(e) > 0))) setState(() {});
+      if (!mounted || !_events.any((e) => expiryOf(e) > 0)) return;
+      ttlTick.value++;
+      if (_events.any(isExpired)) setState(() {});
     });
     _scroll.addListener(() {
       _updateFloatDate();
@@ -1560,7 +1564,11 @@ class _Bubble extends StatelessWidget {
           triggerMode: TooltipTriggerMode.tap,
           child: Padding(padding: const EdgeInsets.only(right: 3), child: Icon(Icons.gpp_maybe, size: 15, color: Colors.orange.shade700)),
         ),
-      if (exp > 0) Text('🔥${fmtLeft(exp - DateTime.now().millisecondsSinceEpoch)} ', style: TextStyle(fontSize: 11.5, color: metaColor)),
+      if (exp > 0)
+        ValueListenableBuilder<int>(
+          valueListenable: ttlTick,
+          builder: (_, __, ___) => Text('🔥${fmtLeft(exp - DateTime.now().millisecondsSinceEpoch)} ', style: TextStyle(fontSize: 11.5, color: metaColor)),
+        ),
       if (edited) Text('изм. ', style: TextStyle(fontSize: 11.5, color: metaColor)),
       Text(time, style: TextStyle(fontSize: 11.5, color: metaColor)),
       if (mine) ...[
@@ -1777,7 +1785,8 @@ class _ReplyPreview extends StatelessWidget {
   }
 }
 
-final Map<String, Future<Uint8List?>> _images = {};
+// не больше 60 картинок в памяти (уменьшенные копии лёгкие, но фото целиком — нет)
+final _images = Lru<String, Future<Uint8List?>>(60)..register();
 
 class _Image extends StatefulWidget {
   final Event event;

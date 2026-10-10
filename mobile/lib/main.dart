@@ -34,6 +34,8 @@ final navKey = GlobalKey<NavigatorState>();
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   Diag.init();
+  // кэш картинок Flutter — не больше 80 МБ (по умолчанию 100), для слабых телефонов
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 80 << 20;
   // Вместо серого экрана при ошибке — понятное сообщение и кнопка «Назад».
   ErrorWidget.builder = (details) => Material(
         child: SafeArea(

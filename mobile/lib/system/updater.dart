@@ -3,6 +3,7 @@
 // настольной версии. Подменённый или повреждённый файл не пройдёт проверку подписи и SHA-256.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi' show Abi;
 import 'dart:io';
 
 import 'package:crypto/crypto.dart' as hash;
@@ -85,7 +86,14 @@ class Updater {
   RegExp? get _assetPattern {
     if (Platform.isWindows) return RegExp(r'^Lastochka-Setup-.*\.exe$', caseSensitive: false);
     if (Platform.isMacOS) return RegExp(r'-arm64\.dmg$', caseSensitive: false); // сборка универсальная
-    if (Platform.isAndroid) return RegExp(r'-Android\.apk$', caseSensitive: false);
+    if (Platform.isAndroid) {
+      // APK только под процессор этого телефона — в 3 раза меньше общего
+      return switch (Abi.current()) {
+        Abi.androidArm64 => RegExp(r'-Android-arm64\.apk$', caseSensitive: false),
+        Abi.androidArm => RegExp(r'-Android-arm\.apk$', caseSensitive: false),
+        _ => RegExp(r'-Android\.apk$', caseSensitive: false),
+      };
+    }
     return null;
   }
 
@@ -104,7 +112,9 @@ class Updater {
         return false;
       }
       final assets = (rel['assets'] as List? ?? []).cast<Map<String, dynamic>>();
-      final file = assets.where((a) => re.hasMatch('${a['name']}')).firstOrNull;
+      final universal = RegExp(r'-Android\.apk$', caseSensitive: false);
+      final file = assets.where((a) => re.hasMatch('${a['name']}')).firstOrNull ??
+          (Platform.isAndroid ? assets.where((a) => universal.hasMatch('${a['name']}')).firstOrNull : null);
       final sig = file == null ? null : assets.where((a) => a['name'] == '${file['name']}.sig').firstOrNull;
       if (file == null || sig == null) return false;
       available.value = UpdateInfo(version, '${rel['body'] ?? ''}', '${file['name']}', '${file['browser_download_url']}',

@@ -34,10 +34,10 @@ jobs:
   android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: '17'
@@ -79,7 +79,7 @@ jobs:
             fi
           fi
       # pubspec.lock сохраняет отдельное задание без чужого кода (у сборки нет прав на запись)
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pubspec-lock
           path: mobile/pubspec.lock
@@ -103,9 +103,18 @@ jobs:
         run: tool/annotate.sh "tests" flutter test
       - name: Сборка APK
         run: |
-          tool/annotate.sh "build apk" flutter build apk --release --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
-          mkdir -p ../dist && cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android.apk"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+          mkdir -p ../dist
+          B="--release --dart-define=APP_VERSION=$V --build-name=$V --build-number=${{ github.run_number }}"
+          # отдельные APK под тип процессора (в 3 раза меньше) — их и ставит автообновление;
+          # общий APK — для ручной установки и для обновления с версий до 4.5
+          tool/annotate.sh "build apk arm64" flutter build apk $B --target-platform android-arm64
+          cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android-arm64.apk"
+          tool/annotate.sh "build apk arm" flutter build apk $B --target-platform android-arm
+          cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android-arm.apk"
+          tool/annotate.sh "build apk" flutter build apk $B
+          cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android.apk"
+          ls -la ../dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android
           path: dist/*
@@ -113,7 +122,7 @@ jobs:
   ios:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
@@ -142,7 +151,7 @@ jobs:
           mkdir -p Payload ../../dist
           cp -R build/dd/Build/Products/Release-iphoneos/Runner.app Payload/
           zip -qry "../../dist/Lastochka-$V-iPhone-unsigned.ipa" Payload
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios
           path: dist/*
@@ -150,7 +159,7 @@ jobs:
   macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
@@ -177,7 +186,7 @@ jobs:
           hdiutil create -volname "Ласточка" -srcfolder dmg -ov -format UDZO "../dist/Lastochka-$V-arm64.dmg"
           # одна универсальная сборка; второе имя — чтобы прежняя версия на Intel-Mac нашла обновление
           cp "../dist/Lastochka-$V-arm64.dmg" "../dist/Lastochka-$V-x64.dmg"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos
           path: dist/*
@@ -185,7 +194,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
@@ -216,7 +225,7 @@ jobs:
           APP_VERSION="$V" "$ISCC" tool/lastochka.iss
           (cd "$R" && 7z a -tzip "../../../../../../dist/Lastochka-$V-Windows-portable.zip" . > /dev/null)
           ls -la ../dist
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows
           path: dist/*
@@ -231,8 +240,8 @@ jobs:
       run:
         working-directory: .
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: pubspec-lock
           path: lockdl
@@ -257,11 +266,11 @@ jobs:
       run:
         working-directory: .
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           merge-multiple: true
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: src
       - name: Подпись файлов
