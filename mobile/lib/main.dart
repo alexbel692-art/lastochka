@@ -26,6 +26,7 @@ import 'pages/chats.dart';
 import 'pages/login.dart';
 import 'pages/verify.dart';
 import 'theme.dart';
+import 'widgets/splash.dart';
 
 late Client client;
 final _switcherCover = ValueNotifier<bool>(false);
@@ -53,6 +54,9 @@ Future<void> main(List<String> args) async {
           ),
         ),
       );
+  // заставка сразу — пока открывается защищённое хранилище и подключается всё остальное
+  final started = DateTime.now();
+  runApp(const Root());
   await initializeDateFormatting('ru');
   final hidden = args.contains('--hidden');
   await initDesktop(hidden: hidden);
@@ -62,7 +66,7 @@ Future<void> main(List<String> args) async {
     client = await createClient();
   } catch (e) {
     await showMainWindow();
-    runApp(MaterialApp(
+    appReady.value = MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: lightTheme,
       darkTheme: darkTheme,
@@ -80,7 +84,7 @@ Future<void> main(List<String> args) async {
           ),
         ),
       ),
-    ));
+    );
     return;
   }
   initVoip();
@@ -98,7 +102,11 @@ Future<void> main(List<String> args) async {
   unawaited(Updater.instance.checkDowngrade());
   await Drafts.instance.init();
   unawaited(Scheduler.instance.init());
-  runApp(const LastochkaApp());
+  // заставка показывается хотя бы до конца анимации влёта
+  final left = const Duration(milliseconds: 1100) - DateTime.now().difference(started);
+  final onScreen = !hidden && (isDesktopOS || WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed);
+  if (onScreen && left > Duration.zero) await Future.delayed(left);
+  appReady.value = const LastochkaApp();
   // Android может запустить Ласточку в фоне (после перезагрузки, фоновой службой) — окна нет
   if (!isDesktopOS) appVisible = WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
   // автозапуск с Windows — сразу в трей, без окна

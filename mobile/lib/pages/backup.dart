@@ -8,6 +8,7 @@ import 'package:matrix/matrix.dart';
 
 import '../main.dart';
 import '../system/diag.dart';
+import 'verify.dart' show phraseProblem;
 
 enum BackupState { unknown, ok, notConnected, missing }
 
@@ -40,6 +41,9 @@ class _BackupPageState extends State<BackupPage> {
   bool _busy = false;
   String? _msg;
   final _key = TextEditingController();
+  final _old = TextEditingController(), _n1 = TextEditingController(), _n2 = TextEditingController();
+  bool _hasPhrase = true;
+  String? _phraseErr;
 
   @override
   void initState() {
@@ -49,8 +53,73 @@ class _BackupPageState extends State<BackupPage> {
 
   Future<void> _refresh() async {
     final s = await backupState();
-    if (mounted) setState(() => _s = s);
+    var phrase = true;
+    try {
+      // ключ защиты задан фразой (у него есть параметры вывода из фразы)?
+      phrase = client.encryption?.ssss.open().keyData.passphrase != null;
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        _s = s;
+        _hasPhrase = phrase;
+      });
+    }
   }
+
+  /// Заменить ключ восстановления секретной фразой: все секреты перешифровываются новым ключом,
+  /// выведенным из фразы. Подпись устройств и резервная копия остаются прежними.
+  Future<void> _toPhrase() => _run(() async {
+        final old = _old.text.trim();
+        final phrase = _n1.text.trim();
+        _phraseErr = phraseProblem(phrase, _n2.text.trim());
+        if (_phraseErr != null) throw StateError('phrase');
+        if (old.isEmpty) throw StateError('key');
+        final done = Completer<void>();
+        client.encryption!.bootstrap(onUpdate: (bs) async {
+          try {
+            switch (bs.state) {
+              case BootstrapState.askWipeSsss:
+                bs.wipeSsss(false);
+              case BootstrapState.askUseExistingSsss:
+                bs.useExistingSsss(false); // новый ключ, старые секреты переносятся
+              case BootstrapState.askUnlockSsss:
+                for (final k in bs.oldSsssKeys!.values) {
+                  try {
+                    await k.unlock(keyOrPassphrase: old);
+                  } catch (_) {
+                    if (!done.isCompleted) done.completeError(StateError('key'));
+                    return;
+                  }
+                }
+                bs.unlockedSsss();
+              case BootstrapState.askBadSsss:
+                bs.ignoreBadSecrets(true);
+              case BootstrapState.askNewSsss:
+                await bs.newSsss(phrase);
+              case BootstrapState.askWipeCrossSigning:
+                await bs.wipeCrossSigning(false);
+              case BootstrapState.askSetupCrossSigning:
+                await bs.askSetupCrossSigning(setupMasterKey: true, setupSelfSigningKey: true, setupUserSigningKey: true);
+              case BootstrapState.askWipeOnlineKeyBackup:
+                bs.wipeOnlineKeyBackup(false);
+              case BootstrapState.askSetupOnlineKeyBackup:
+                await bs.askSetupOnlineKeyBackup(true);
+              case BootstrapState.done:
+                if (!done.isCompleted) done.complete();
+              case BootstrapState.error:
+                if (!done.isCompleted) done.completeError(StateError('bootstrap'));
+              default:
+                break;
+            }
+          } catch (e) {
+            if (!done.isCompleted) done.completeError(e);
+          }
+        });
+        await done.future.timeout(const Duration(minutes: 3));
+        _old.clear();
+        _n1.clear();
+        _n2.clear();
+      }, 'Готово: теперь защита открывается вашей секретной фразой. Ключ восстановления больше не нужен');
 
   Future<void> _run(Future<void> Function() f, String ok) async {
     setState(() {
@@ -63,8 +132,9 @@ class _BackupPageState extends State<BackupPage> {
     } catch (e) {
       Diag.add('Резервная копия: $e');
       _msg = switch (e is StateError ? e.message : '') {
-        'key' => 'Неверный ключ восстановления',
-        'nossss' => 'Сначала нужен ключ восстановления — он создаётся при настройке защиты аккаунта',
+        'key' => 'Неверная секретная фраза (или ключ)',
+        'nossss' => 'Сначала нужна секретная фраза — она задаётся при настройке защиты аккаунта',
+        'phrase' => _phraseErr ?? 'Проверьте новую фразу',
         'notcached' => 'Ключ принят, но копия зашифрована другим ключом. Подключите устройство из Element или обратитесь к администратору',
         _ => 'Не получилось. Проверьте ключ и подключение',
       };
@@ -164,8 +234,8 @@ class _BackupPageState extends State<BackupPage> {
             Text(backupText(_s), textAlign: TextAlign.center, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: color)),
             const SizedBox(height: 10),
             Text(
-              'Ключи от переписки хранятся на сервере в зашифрованном виде — открыть их можно только вашим ключом восстановления. '
-              'Если потеряете все устройства, по ключу восстановления вернётся вся старая переписка.',
+              'Ключи от переписки хранятся на сервере в зашифрованном виде — открыть их можно только вашей секретной фразой. '
+              'Если потеряете все устройства, по фразе вернётся вся старая переписка.',
               textAlign: TextAlign.center,
               style: TextStyle(color: hint),
             ),
@@ -176,7 +246,7 @@ class _BackupPageState extends State<BackupPage> {
                 controller: _key,
                 obscureText: true,
                 autocorrect: false,
-                decoration: const InputDecoration(hintText: 'Ключ восстановления'),
+                decoration: const InputDecoration(hintText: 'Секретная фраза'),
               ),
               const SizedBox(height: 12),
               FilledButton(
@@ -192,6 +262,27 @@ class _BackupPageState extends State<BackupPage> {
                 icon: const Icon(Icons.restore),
                 label: const Text('Загрузить старые ключи из копии'),
               ),
+            if (_s == BackupState.ok && !_hasPhrase) ...[
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 8),
+              const Text('Перейти на секретную фразу', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Text('Сейчас защита открывается длинным ключом восстановления. Замените его фразой, которую вы просто помните — ключ хранить больше не придётся.',
+                  style: TextStyle(color: hint)),
+              const SizedBox(height: 10),
+              TextField(enableIMEPersonalizedLearning: false, controller: _old, obscureText: true, autocorrect: false, decoration: const InputDecoration(hintText: 'Нынешний ключ восстановления')),
+              const SizedBox(height: 8),
+              TextField(enableIMEPersonalizedLearning: false, controller: _n1, obscureText: true, autocorrect: false, decoration: const InputDecoration(hintText: 'Новая секретная фраза')),
+              const SizedBox(height: 8),
+              TextField(enableIMEPersonalizedLearning: false, controller: _n2, obscureText: true, autocorrect: false, decoration: const InputDecoration(hintText: 'Повторите фразу')),
+              const SizedBox(height: 10),
+              FilledButton(
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                onPressed: _busy ? null : _toPhrase,
+                child: const Text('Заменить ключ фразой'),
+              ),
+            ],
             if (_busy) const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator())),
             if (_msg != null) Padding(padding: const EdgeInsets.only(top: 14), child: Text(_msg!, textAlign: TextAlign.center)),
           ]),

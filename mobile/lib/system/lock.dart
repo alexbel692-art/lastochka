@@ -340,7 +340,7 @@ class _LockScreenState extends State<LockScreen> {
                   const SizedBox(height: 14),
                   const Text('Забыли код-пароль?', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 10),
-                  Text('Сбросить код можно только выходом из аккаунта на этом устройстве. Потом войдите снова и подтвердите устройство ключом восстановления.',
+                  Text('Сбросить код можно только выходом из аккаунта на этом устройстве. Потом войдите снова и подтвердите устройство секретной фразой.',
                       textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).hintColor)),
                   const SizedBox(height: 22),
                   FilledButton(

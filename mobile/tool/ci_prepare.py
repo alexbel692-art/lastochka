@@ -193,6 +193,36 @@ for st in ('android/app/src/main/res/values/styles.xml', 'android/app/src/main/r
             return s
         edit(st, st_fn)
 
+# --- Android: экран запуска в цветах Ласточки (дальше его продолжает анимация в самом приложении) ---
+launch = """<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/lastochka_splash" />
+    <item><bitmap android:gravity="center" android:src="@mipmap/ic_launcher" /></item>
+</layer-list>
+"""
+for d in ('drawable', 'drawable-v21'):
+    f = f'android/app/src/main/res/{d}/launch_background.xml'
+    if os.path.isdir(os.path.dirname(f)):
+        open(f, 'w', encoding='utf-8').write(launch)
+os.makedirs('android/app/src/main/res/values', exist_ok=True)
+open('android/app/src/main/res/values/lastochka_colors.xml', 'w', encoding='utf-8').write(
+    '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="lastochka_splash">#2F7FE8</color>\n</resources>\n')
+# Android 12+: системный экран запуска — тот же цвет
+v31 = """<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="LaunchTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowSplashScreenBackground">@color/lastochka_splash</item>
+    </style>
+    <style name="NormalTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowBackground">?android:colorBackground</item>
+    </style>
+</resources>
+"""
+for d in ('values-v31', 'values-night-v31'):
+    os.makedirs(f'android/app/src/main/res/{d}', exist_ok=True)
+    open(f'android/app/src/main/res/{d}/styles.xml', 'w', encoding='utf-8').write(v31)
+
 # --- macOS: защита окна от снимков экрана (настройка «Запретить снимки экрана») ---
 mw = 'macos/Runner/MainFlutterWindow.swift'
 if os.path.exists(mw):

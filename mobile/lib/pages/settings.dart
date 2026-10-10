@@ -31,7 +31,7 @@ Future<void> logout(BuildContext context) async {
     context: context,
     builder: (c) => AlertDialog(
       title: const Text('Выйти из аккаунта?'),
-      content: const Text('Сообщения на этом устройстве будут удалены. Без ключа восстановления старые зашифрованные сообщения прочитать не получится.'),
+      content: const Text('Сообщения на этом устройстве будут удалены. Без секретной фразы старую переписку потом прочитать не получится.'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Отмена')),
         TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Выйти', style: TextStyle(color: Colors.redAccent))),
@@ -293,7 +293,7 @@ class _SettingsPageState extends State<SettingsPage> {
           _row(Icons.info_outline, 'Уведомления на iPhone', sub: 'Приходят, пока Ласточка открыта или недавно свёрнута. Чтобы они приходили всегда, нужен сервер push-уведомлений Apple.'),
         _header('О программе'),
         _row(Icons.bug_report_outlined, 'Отчёт для диагностики', sub: 'Версия, устройство и ошибки — без переписки, имён и адресов', onTap: _diag),
-        _row(Icons.info_outline, 'Ласточка $appVersion', sub: 'Защищённый мессенджер на Matrix'),
+        _row(Icons.info_outline, 'Ласточка $appVersion', sub: 'Защищённый мессенджер'),
         if (Updater.instance.supported)
           _row(Icons.system_update_alt, 'Проверить обновления', sub: 'Обновления подписаны ключом разработчика и проверяются перед установкой', onTap: () async {
             final has = await Updater.instance.check();

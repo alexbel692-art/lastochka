@@ -89,7 +89,7 @@ class _LoginPageState extends State<LoginPage> {
       setState(() => _error = e.message);
     } catch (e) {
       Diag.add('Вход: $e');
-      setState(() => _error = 'Сервер недоступен или это не сервер Matrix');
+      setState(() => _error = 'Сервер недоступен. Проверьте имя сервера и подключение');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -111,11 +111,11 @@ class _LoginPageState extends State<LoginPage> {
                   const SizedBox(height: 16),
                   Text('Ласточка', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700)),
                   const SizedBox(height: 6),
-                  Text('Защищённый мессенджер. Войдите в свой аккаунт Matrix', textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).hintColor)),
+                  Text('Защищённый мессенджер', textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).hintColor)),
                   const SizedBox(height: 24),
-                  TextField(enableIMEPersonalizedLearning: false, controller: _server, keyboardType: TextInputType.url, autocorrect: false, decoration: const InputDecoration(hintText: 'Адрес сервера, например matrix.org')),
+                  TextField(enableIMEPersonalizedLearning: false, controller: _server, keyboardType: TextInputType.url, autocorrect: false, decoration: const InputDecoration(hintText: 'Имя сервера')),
                   const SizedBox(height: 10),
-                  TextField(enableIMEPersonalizedLearning: false, controller: _user, autocorrect: false, decoration: const InputDecoration(hintText: 'Логин или @имя:сервер')),
+                  TextField(enableIMEPersonalizedLearning: false, controller: _user, autocorrect: false, decoration: const InputDecoration(hintText: 'Логин')),
                   const SizedBox(height: 10),
                   TextField(enableIMEPersonalizedLearning: false, controller: _pass, obscureText: true, onSubmitted: (_) => _login(), decoration: const InputDecoration(hintText: 'Пароль')),
                   if (_error != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(_error!, style: const TextStyle(color: Colors.redAccent))),

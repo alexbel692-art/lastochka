@@ -105,7 +105,7 @@ class _ScanPageState extends State<_ScanPage> {
 Future<void> openMatrixLink(BuildContext context, String text) async {
   void toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
   final link = parseMatrixLink(text);
-  if (link == null) return toast('Это не QR-код Matrix');
+  if (link == null) return toast('Это не QR-код Ласточки');
   final id = link.id;
   final via = link.via.isEmpty ? null : link.via;
   final isUser = id.startsWith('@');

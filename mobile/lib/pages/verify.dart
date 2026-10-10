@@ -8,9 +8,16 @@ import 'package:matrix/encryption.dart';
 import 'package:matrix/encryption/utils/key_verification.dart';
 
 import '../main.dart';
-import '../system/clipboard.dart';
 import '../system/trust.dart';
 import 'settings.dart';
+
+/// Проверка новой секретной фразы. null — подходит.
+String? phraseProblem(String p1, String p2) {
+  if (p1.length < 12) return 'Фраза слишком короткая — нужно не меньше 12 символов';
+  if (RegExp(r'^(.)\1+$').hasMatch(p1) || RegExp(r'^(0123|1234|qwer|йцук|abcd)', caseSensitive: false).hasMatch(p1)) return 'Слишком простая фраза — придумайте другую';
+  if (p1 != p2) return 'Фразы не совпадают';
+  return null;
+}
 
 bool needsVerification() =>
     client.encryption?.crossSigning.enabled == true && client.isUnknownSession;
@@ -61,7 +68,7 @@ class _VerifyGateState extends State<VerifyGate> {
       if (!needsVerification()) setState(() {});
       if (needsVerification()) setState(() => _error = 'Ключ принят, подтверждение ещё синхронизируется…');
     } catch (e) {
-      setState(() => _error = 'Неверный ключ восстановления');
+      setState(() => _error = 'Неверная секретная фраза');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -77,20 +84,23 @@ class _VerifyGateState extends State<VerifyGate> {
     if (mounted) setState(() {});
   }
 
-  String? _newKey; // показываем созданный ключ восстановления, пока пользователь его не сохранит
-  bool _setupRunning = false;
+  // секретная фраза вместо ключа восстановления: ключ выводится из фразы и нигде не показывается
+  final _p1 = TextEditingController(), _p2 = TextEditingController();
+  bool _setupRunning = false, _show = false;
   String? _setupError;
 
   /// Первичная настройка защиты: ключ восстановления, подпись устройств, резервная копия ключей.
   Future<void> _runSetup() async {
     if (_setupRunning) return;
+    final phrase = _p1.text.trim();
+    final err = phraseProblem(phrase, _p2.text.trim());
+    if (err != null) return setState(() => _setupError = err);
     setState(() {
       _setupRunning = true;
       _setupError = null;
     });
     final done = Completer<void>();
-    late Bootstrap b;
-    b = client.encryption!.bootstrap(onUpdate: (bs) async {
+    client.encryption!.bootstrap(onUpdate: (bs) async {
       try {
         switch (bs.state) {
           case BootstrapState.askWipeSsss:
@@ -100,7 +110,7 @@ class _VerifyGateState extends State<VerifyGate> {
           case BootstrapState.askBadSsss:
             bs.ignoreBadSecrets(true);
           case BootstrapState.askNewSsss:
-            await bs.newSsss();
+            await bs.newSsss(phrase);
           case BootstrapState.askWipeCrossSigning:
             await bs.wipeCrossSigning(true);
           case BootstrapState.askSetupCrossSigning:
@@ -124,8 +134,9 @@ class _VerifyGateState extends State<VerifyGate> {
     });
     try {
       await done.future.timeout(const Duration(minutes: 3));
-      final key = b.newSsssKey?.recoveryKey;
-      setState(() => _newKey = key ?? '');
+      _p1.clear();
+      _p2.clear();
+      setState(() {});
     } catch (e) {
       setState(() => _setupError = 'Не удалось настроить защиту. Проверьте подключение и попробуйте ещё раз.');
     } finally {
@@ -135,7 +146,6 @@ class _VerifyGateState extends State<VerifyGate> {
 
   Widget _setupScreen(BuildContext context) {
     final hint = Theme.of(context).hintColor;
-    final key = _newKey;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -146,42 +156,43 @@ class _VerifyGateState extends State<VerifyGate> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Icon(Icons.vpn_key_outlined, size: 64, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(height: 14),
-                Text(key == null ? 'Защита аккаунта' : 'Ваш ключ восстановления',
-                    textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+                Text('Секретная фраза', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 10),
                 Text(
-                  key == null
-                      ? 'Ласточка создаст ключ восстановления и подпись ваших устройств. После этого ключи от переписки будут получать только подтверждённые вами входы — даже зная пароль, посторонний не прочитает сообщения.'
-                      : 'Сохраните ключ в надёжном месте (менеджер паролей, бумага в сейфе). Он нужен, чтобы подтвердить новое устройство и вернуть переписку, если потеряете все устройства. Восстановить его нельзя.',
+                  'Придумайте фразу, которую знаете только вы. По ней вы будете подтверждать новые устройства и возвращать переписку. '
+                  'Нигде её не записывайте в телефоне — просто запомните. Восстановить её нельзя: без фразы старую переписку на новом устройстве не прочитать.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: hint),
                 ),
-                const SizedBox(height: 20),
-                if (key != null && key.isNotEmpty) ...[
-                  SelectableText(key, textAlign: TextAlign.center, style: const TextStyle(fontFamily: 'monospace', fontSize: 17, height: 1.5, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.copy),
-                    label: const Text('Скопировать'),
-                    onPressed: () async {
-                      await copySensitive(key, clearAfter: const Duration(minutes: 2));
-                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ключ скопирован — сохраните его, буфер очистится через 2 минуты')));
-                    },
+                const SizedBox(height: 18),
+                TextField(
+                  enableIMEPersonalizedLearning: false,
+                  controller: _p1,
+                  obscureText: !_show,
+                  autocorrect: false,
+                  decoration: InputDecoration(
+                    hintText: 'Секретная фраза',
+                    suffixIcon: IconButton(icon: Icon(_show ? Icons.visibility_off : Icons.visibility), onPressed: () => setState(() => _show = !_show)),
                   ),
-                  const SizedBox(height: 10),
-                  FilledButton(
-                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
-                    onPressed: () => setState(() => _newKey = null),
-                    child: const Text('Я сохранил(а) ключ'),
-                  ),
-                ] else ...[
-                  if (_setupError != null) Padding(padding: const EdgeInsets.only(bottom: 10), child: Text(_setupError!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.redAccent))),
-                  FilledButton(
-                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
-                    onPressed: _setupRunning ? null : _runSetup,
-                    child: _setupRunning ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)) : const Text('Настроить защиту'),
-                  ),
-                ],
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  enableIMEPersonalizedLearning: false,
+                  controller: _p2,
+                  obscureText: !_show,
+                  autocorrect: false,
+                  onSubmitted: (_) => _runSetup(),
+                  decoration: const InputDecoration(hintText: 'Повторите фразу'),
+                ),
+                const SizedBox(height: 8),
+                Text('Не короче 12 символов, лучше 3–4 слова. Не используйте пароль от аккаунта.', style: TextStyle(color: hint, fontSize: 12.5)),
+                if (_setupError != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(_setupError!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.redAccent))),
+                const SizedBox(height: 16),
+                FilledButton(
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+                  onPressed: _setupRunning ? null : _runSetup,
+                  child: _setupRunning ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)) : const Text('Сохранить фразу'),
+                ),
                 const SizedBox(height: 14),
                 TextButton(onPressed: () => logout(context), child: const Text('Выйти из аккаунта', style: TextStyle(color: Colors.redAccent))),
               ]),
@@ -194,7 +205,7 @@ class _VerifyGateState extends State<VerifyGate> {
 
   @override
   Widget build(BuildContext context) {
-    if (_newKey != null || needsSecuritySetup()) return _setupScreen(context);
+    if (needsSecuritySetup()) return _setupScreen(context);
     if (!needsVerification()) return widget.child;
     final hint = Theme.of(context).hintColor;
     return Scaffold(
@@ -211,7 +222,7 @@ class _VerifyGateState extends State<VerifyGate> {
                   const SizedBox(height: 16),
                   Text('Подтвердите вход', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
                   const SizedBox(height: 8),
-                  Text('Чтобы читать зашифрованные сообщения, подтвердите это устройство ключом восстановления или с другого своего устройства.',
+                  Text('Чтобы читать переписку, подтвердите это устройство секретной фразой или с другого своего устройства.',
                       textAlign: TextAlign.center, style: TextStyle(color: hint)),
                   const SizedBox(height: 24),
                   TextField(enableIMEPersonalizedLearning: false, 
@@ -219,14 +230,14 @@ class _VerifyGateState extends State<VerifyGate> {
                     autocorrect: false,
                     obscureText: true,
                     onSubmitted: (_) => _unlock(),
-                    decoration: const InputDecoration(hintText: 'Ключ восстановления или фраза'),
+                    decoration: const InputDecoration(hintText: 'Секретная фраза'),
                   ),
                   if (_error != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(_error!, style: const TextStyle(color: Colors.redAccent))),
                   const SizedBox(height: 14),
                   FilledButton(
                     onPressed: _busy ? null : _unlock,
                     style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
-                    child: _busy ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)) : const Text('Подтвердить ключом'),
+                    child: _busy ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)) : const Text('Подтвердить'),
                   ),
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
