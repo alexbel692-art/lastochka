@@ -32,10 +32,10 @@ env:
 jobs:
   android:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write   # только чтобы сохранить pubspec.lock при первом запуске или обновлении библиотек
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -72,15 +72,11 @@ jobs:
           else
             tool/annotate.sh "pub get" flutter pub get
           fi
-      - name: Сохранить pubspec.lock
-        run: |
-          if ! git diff --quiet -- pubspec.lock 2>/dev/null || ! git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then
-            git config user.name "alexbel692-art"
-            git config user.email "alexbel692-art@users.noreply.github.com"
-            git add pubspec.lock
-            git commit -m "Зафиксированы версии библиотек (pubspec.lock)"
-            git push origin HEAD:${{ github.ref_name }} || echo "::warning::Не удалось сохранить pubspec.lock"
-          fi
+      # pubspec.lock сохраняет отдельное задание без чужого кода (у сборки нет прав на запись)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pubspec-lock
+          path: mobile/pubspec.lock
       - name: Иконки
         run: tool/annotate.sh "icons" dart run flutter_launcher_icons
       # известные уязвимости в библиотеках (база OSV) — предупреждение в сборке
@@ -123,8 +119,9 @@ jobs:
           python3 tool/ci_prepare.py
       - name: Зависимости
         run: |
-          if git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1 && [ "${{ inputs.update_deps }}" != "true" ]; then L=--enforce-lockfile; fi
-          tool/annotate.sh "ios pub get" flutter pub get $L
+          if [ "${{ inputs.update_deps }}" = "true" ]; then tool/annotate.sh "ios pub upgrade" flutter pub upgrade
+          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "ios pub get" flutter pub get --enforce-lockfile
+          else tool/annotate.sh "ios pub get" flutter pub get; fi
           dart run flutter_launcher_icons
       # Без платной подписи Apple: собираем приложение без подписи и упаковываем в .ipa.
       # Поставить на iPhone можно через Sideloadly/AltStore со своим Apple ID.
@@ -158,8 +155,9 @@ jobs:
           python3 tool/ci_prepare.py
       - name: Зависимости
         run: |
-          if git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1 && [ "${{ inputs.update_deps }}" != "true" ]; then L=--enforce-lockfile; fi
-          tool/annotate.sh "macos pub get" flutter pub get $L
+          if [ "${{ inputs.update_deps }}" = "true" ]; then tool/annotate.sh "macos pub upgrade" flutter pub upgrade
+          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "macos pub get" flutter pub get --enforce-lockfile
+          else tool/annotate.sh "macos pub get" flutter pub get; fi
           dart run flutter_launcher_icons
       - name: Сборка macOS
         run: tool/annotate.sh "build macos" flutter build macos --release --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
@@ -191,8 +189,9 @@ jobs:
           python tool/ci_prepare.py
       - name: Зависимости
         run: |
-          if git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1 && [ "${{ inputs.update_deps }}" != "true" ]; then L=--enforce-lockfile; fi
-          tool/annotate.sh "windows pub get" flutter pub get $L
+          if [ "${{ inputs.update_deps }}" = "true" ]; then tool/annotate.sh "windows pub upgrade" flutter pub upgrade
+          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "windows pub get" flutter pub get --enforce-lockfile
+          else tool/annotate.sh "windows pub get" flutter pub get; fi
           dart run flutter_launcher_icons
       - name: Сборка Windows
         run: tool/annotate.sh "build windows" flutter build windows --release --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
@@ -212,6 +211,32 @@ jobs:
         with:
           name: windows
           path: dist/*
+
+  # сохранить версии библиотек, если сборка Android прошла и они новые
+  lock:
+    needs: android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pubspec-lock
+          path: lockdl
+      - name: Сохранить pubspec.lock
+        run: |
+          cp lockdl/pubspec.lock mobile/pubspec.lock
+          if [ -n "$(git status --porcelain -- mobile/pubspec.lock)" ]; then
+            git config user.name "alexbel692-art"
+            git config user.email "alexbel692-art@users.noreply.github.com"
+            git add mobile/pubspec.lock
+            git commit -m "Зафиксированы версии библиотек (pubspec.lock)"
+            git push origin HEAD:${{ github.ref_name }} || echo "::warning::Не удалось сохранить pubspec.lock"
+          fi
 
   release:
     if: ${{ always() && inputs.publish && needs.android.result == 'success' }}
@@ -234,6 +259,7 @@ jobs:
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
         run: |
+          rm -f dist/pubspec.lock
           node src/scripts/sign-files.cjs dist "${{ inputs.version }}"
           cd dist && sha256sum $(ls | grep -v '\.sig$') > SHA256SUMS.txt && ls -la
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2

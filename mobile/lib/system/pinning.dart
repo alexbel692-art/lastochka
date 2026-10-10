@@ -22,6 +22,7 @@ class CertPinning {
 
   final alert = ValueNotifier<CertAlert?>(null);
   Map<String, String> _pins = {};
+  final Set<String> _refused = {}; // «Не подключаться» — до перезапуска больше не спрашиваем
   SharedPreferences? _p;
 
   Future<void> init() async {
@@ -46,7 +47,7 @@ class CertPinning {
       return;
     }
     if (pinned != got) {
-      alert.value = CertAlert(host, pinned, got);
+      if (!_refused.contains('$host|$got')) alert.value = CertAlert(host, pinned, got);
       throw TlsException('Сертификат сервера $host выдан «$got», а раньше — «$pinned». Соединение прервано.');
     }
   }
@@ -60,7 +61,11 @@ class CertPinning {
     alert.value = null;
   }
 
-  void dismiss() => alert.value = null;
+  void dismiss() {
+    final a = alert.value;
+    if (a != null) _refused.add('${a.host}|${a.got}');
+    alert.value = null;
+  }
 
   Future<void> forget() async {
     _pins = {};
@@ -72,12 +77,16 @@ class CertPinning {
   IOClient httpClient() {
     final hc = HttpClient()
       ..connectionTimeout = const Duration(seconds: 30)
-      ..idleTimeout = const Duration(seconds: 60);
+      ..idleTimeout = const Duration(seconds: 60)
+      // соединение всегда напрямую: через прокси проверка сертификата была бы не того сервера
+      ..findProxy = ((_) => 'DIRECT');
     hc.connectionFactory = (Uri uri, String? proxyHost, int? proxyPort) async {
       final port = uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80);
       if (uri.scheme != 'https') {
         // без шифрования — только к своему компьютеру или в локальной сети (для отладки)
-        final local = uri.host == 'localhost' || RegExp(r'^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)').hasMatch(uri.host);
+        final ip = InternetAddress.tryParse(uri.host);
+        final local = uri.host == 'localhost' ||
+            (ip != null && (ip.isLoopback || (ip.type == InternetAddressType.IPv4 && RegExp(r'^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)').hasMatch(ip.address))));
         if (!local) throw const TlsException('Ласточка подключается к серверам только по защищённому соединению (https)');
         return Socket.startConnect(uri.host, port);
       }

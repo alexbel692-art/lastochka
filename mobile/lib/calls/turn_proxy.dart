@@ -134,34 +134,32 @@ class StunFramer {
   List<int> _buf = [];
   StunFramer(this.onFrame);
 
-  // больше одного кадра STUN/ChannelData (64 КБ) копиться не может — иначе это мусор или атака
+  // недособранный кадр не больше 64 КБ — больше копиться не может (защита от мусора и атак)
   static const _maxBuf = 70 * 1024;
 
   void add(List<int> d) {
-    _buf = _buf.isEmpty ? List.of(d) : (_buf..addAll(d));
-    if (_buf.length > _maxBuf) {
-      _buf = [];
-      return;
-    }
-    while (_buf.length >= 4) {
-      final kind = _buf[0] >> 6;
+    final buf = _buf.isEmpty ? d : (_buf..addAll(d));
+    var off = 0;
+    while (buf.length - off >= 4) {
+      final kind = buf[off] >> 6;
       int total;
       if (kind == 0) {
-        if (_buf.length < 20) break;
-        total = 20 + _u16(_buf, 2);
+        if (buf.length - off < 20) break;
+        total = 20 + _u16(buf, off + 2);
       } else if (kind == 1) {
-        final l = _u16(_buf, 2);
+        final l = _u16(buf, off + 2);
         total = 4 + l + ((4 - l % 4) % 4);
       } else {
-        onFrame(_buf);
-        _buf = [];
+        onFrame(buf.sublist(off));
+        off = buf.length;
         break;
       }
-      if (_buf.length < total) break;
-      final one = _buf.sublist(0, total);
-      _buf = _buf.sublist(total);
-      onFrame(one);
+      if (buf.length - off < total) break;
+      onFrame(buf.sublist(off, off + total));
+      off += total;
     }
+    _buf = off >= buf.length ? [] : List<int>.of(buf.getRange(off, buf.length));
+    if (_buf.length > _maxBuf) _buf = [];
   }
 }
 

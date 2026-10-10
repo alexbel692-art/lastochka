@@ -8,7 +8,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -187,16 +186,19 @@ class Trust {
     if (cached != null) return cached.isEmpty ? null : cached;
     final enc = client.encryption;
     if (enc == null) return null;
+    // списки устройств ещё не загружены — не судим (и не запоминаем), иначе ложная тревога
+    final sl = client.userDeviceKeys[e.senderId], ml = client.userDeviceKeys[client.userID];
+    if (sl == null || sl.outdated || ml == null) return null;
     final sess = enc.keyManager.getInboundGroupSession(e.room.id, sessionId);
     if (sess != null) {
-      final w = _judgeSession(e.senderId, sess);
+      final w = _judgeSession(e.senderId, sess.forwardingCurve25519KeyChain, sess.senderKey, sess.senderClaimedKeys);
       _bySession[key] = w ?? '';
       return w;
     }
     if (_loading.add(key)) {
       enc.keyManager.loadInboundGroupSession(e.room.id, sessionId).then((s) {
-        if (s != null) {
-          _bySession[key] = _judgeSession(e.senderId, s) ?? '';
+        if (s != null && client.userDeviceKeys[e.senderId] != null) {
+          _bySession[key] = _judgeSession(e.senderId, s.forwardingCurve25519KeyChain, s.senderKey, s.senderClaimedKeys) ?? '';
           senderChecks.value++;
         }
       }).whenComplete(() => _loading.remove(key));
@@ -206,25 +208,22 @@ class Trust {
 
   /// Ключ к сообщению мог прийти не от автора, а пересылкой (по запросу ключа).
   /// Доверяем пересылке только от самого автора или от своего подтверждённого устройства.
-  String? _judgeSession(String senderId, SessionKey s) {
-    final chain = s.forwardingCurve25519KeyChain;
+  String? _judgeSession(String senderId, List<String> chain, String senderKey, Map<String, String> claimed) {
     if (chain.isNotEmpty) {
       final fwd = chain.last;
       final bySender = client.userDeviceKeys[senderId]?.deviceKeys.values.where((d) => d.curve25519Key == fwd).firstOrNull;
       if (bySender == null) {
         final mine = client.userDeviceKeys[client.userID]?.deviceKeys.values.where((d) => d.curve25519Key == fwd).firstOrNull;
-        final trusted = mine != null && (mine.deviceId == client.deviceID || mine.hasValidSignatureChain(verifiedByTheirMasterKey: true));
-        if (!trusted) return 'Ключ к сообщению переслало постороннее устройство — подлинность не подтверждена';
-        // переслало ваше подтверждённое устройство — проверяем исходное устройство автора по его ключу подписи
-        final claimed = s.senderClaimedKeys['ed25519'];
-        final list = client.userDeviceKeys[senderId];
-        final dk = list?.deviceKeys.values.where((d) => d.ed25519Key == claimed).firstOrNull;
-        if (list == null) return null;
-        if (dk == null) return 'Отправлено с устройства, которое уже удалено или неизвестно';
-        return _judgeDevice(senderId, list, dk);
+        if (mine == null) {
+          // переславшего устройства уже нет (например, ключ из резервной копии старого устройства)
+          return 'Ключ получен с устройства, которого уже нет, — подлинность не гарантируется';
+        }
+        final trusted = mine.deviceId == client.deviceID || mine.hasValidSignatureChain(verifiedByTheirMasterKey: true);
+        if (!trusted) return 'Ключ к сообщению переслало неподтверждённое устройство — подлинность не подтверждена';
+        // переслало ваше подтверждённое устройство — дальше проверяем исходное устройство автора
       }
     }
-    return _judge(senderId, s.senderKey, s.senderClaimedKeys['ed25519']);
+    return _judge(senderId, senderKey, claimed['ed25519']);
   }
 
   String? _judge(String senderId, String senderKey, String? claimedEd25519) {

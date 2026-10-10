@@ -1384,7 +1384,8 @@ class _ImageState extends State<_Image> {
     final dpr = MediaQuery.devicePixelRatioOf(context);
     // декодируем не больше, чем нужно для показа, — огромная картинка не съест память
     final decodeW = (maxW * dpr).ceil().clamp(64, 1600);
-    final big = !event.hasThumbnail && size > _autoLoadLimit && !_manualLoaded.contains(event.eventId);
+    // размер указывает отправитель: если не указан — тоже не грузим сами
+    final big = !sticker && !event.hasThumbnail && (size <= 0 || size > _autoLoadLimit) && !_manualLoaded.contains(event.eventId);
     final fullW = (MediaQuery.sizeOf(context).width * dpr * 2).ceil().clamp(512, 4096);
     return GestureDetector(
       onTap: sticker
@@ -1420,7 +1421,7 @@ class _ImageState extends State<_Image> {
                     alignment: Alignment.center,
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
                       const Icon(Icons.download_outlined, size: 32),
-                      Text('${(size / 1048576).toStringAsFixed(0)} МБ — нажмите, чтобы загрузить', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12.5)),
+                      Text(size > 0 ? '${(size / 1048576).toStringAsFixed(0)} МБ — нажмите, чтобы загрузить' : 'Нажмите, чтобы загрузить', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12.5)),
                     ]),
                   )
                 : FutureBuilder<Uint8List?>(
