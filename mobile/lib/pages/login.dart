@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
 import '../matrix_client.dart';
+import '../system/diag.dart';
 import '../system/pinning.dart';
 import 'chats.dart';
 import 'verify.dart';
@@ -87,6 +88,7 @@ class _LoginPageState extends State<LoginPage> {
     } on TlsException catch (e) {
       setState(() => _error = e.message);
     } catch (e) {
+      Diag.add('Вход: $e');
       setState(() => _error = 'Сервер недоступен или это не сервер Matrix');
     } finally {
       if (mounted) setState(() => _busy = false);

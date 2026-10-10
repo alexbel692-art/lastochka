@@ -64,3 +64,67 @@ Uint8List stripJpegMetadata(Uint8List b) {
   }
   return b;
 }
+
+/// Видео MP4/MOV: место съёмки, модель телефона и прочие сведения лежат в блоках udta/meta/uuid(XMP),
+/// даты — в mvhd/tkhd/mdhd. Блоки сведений превращаются в «пустые» (free) того же размера, даты
+/// обнуляются — смещения внутри файла не меняются, видео играет как прежде.
+/// null — это не MP4/MOV (такой файл не очищаем).
+Future<Uint8List?> cleanVideo(Uint8List bytes) => compute(stripVideoMetadata, bytes);
+
+Uint8List? stripVideoMetadata(Uint8List src) {
+  if (src.length < 12) return null;
+  final first = String.fromCharCodes(src.sublist(4, 8));
+  if (!const {'ftyp', 'moov', 'mdat', 'free', 'wide', 'skip'}.contains(first)) return null;
+  final b = Uint8List.fromList(src);
+  final bd = ByteData.sublistView(b);
+  var sawMoov = false;
+
+  String type(int at) => String.fromCharCodes(b.sublist(at + 4, at + 8));
+  void blank(int at, int size, int header) {
+    b.setRange(at + 4, at + 8, 'free'.codeUnits);
+    b.fillRange(at + header, at + size, 0);
+  }
+
+  void zeroTimes(int at, int header) {
+    final p = at + header;
+    if (p + 4 > b.length) return;
+    final v = b[p];
+    final n = v == 1 ? 16 : 8; // создание и изменение: 2×8 или 2×4 байта
+    if (p + 4 + n <= b.length) b.fillRange(p + 4, p + 4 + n, 0);
+  }
+
+  bool walk(int start, int end, int depth) {
+    var at = start;
+    while (at + 8 <= end) {
+      var size = bd.getUint32(at);
+      var header = 8;
+      if (size == 1) {
+        if (at + 16 > end) return false;
+        final big = bd.getUint64(at + 8);
+        if (big > end - at) return false;
+        size = big;
+        header = 16;
+      } else if (size == 0) {
+        size = end - at;
+      }
+      if (size < header || at + size > end) return false;
+      final t = type(at);
+      switch (t) {
+        case 'moov':
+          sawMoov = true;
+          if (!walk(at + header, at + size, depth + 1)) return false;
+        case 'trak' || 'mdia':
+          if (depth < 4 && !walk(at + header, at + size, depth + 1)) return false;
+        case 'udta' || 'meta' || 'uuid' || 'Xtra':
+          blank(at, size, header);
+        case 'mvhd' || 'tkhd' || 'mdhd':
+          zeroTimes(at, header);
+      }
+      at += size;
+    }
+    return true;
+  }
+
+  if (!walk(0, b.length, 0) || !sawMoov) return null;
+  return b;
+}

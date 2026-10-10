@@ -12,7 +12,13 @@ import 'passcode.dart';
 import 'appearance.dart';
 import '../chat/drafts.dart';
 import '../matrix_client.dart';
+import 'package:image_picker/image_picker.dart';
+import '../system/diag.dart';
+import '../system/media_clean.dart';
+import 'backup.dart';
+import 'qr.dart';
 import '../system/pinning.dart';
+import '../system/clipboard.dart';
 import 'sessions.dart';
 import '../system/privacy.dart';
 import '../system/trust.dart';
@@ -121,6 +127,67 @@ class _SettingsPageState extends State<SettingsPage> {
         onTap: onTap,
       );
 
+  void _toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+
+  Future<void> _changeName() async {
+    final c = TextEditingController(text: _me?.displayName ?? '');
+    final v = await showDialog<String>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: const Text('Ваше имя'),
+        content: TextField(enableIMEPersonalizedLearning: false, controller: c, autofocus: true, maxLength: 64),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(d, c.text.trim()), child: const Text('Сохранить')),
+        ],
+      ),
+    );
+    if (v == null || v.isEmpty) return;
+    try {
+      await client.setDisplayName(client.userID!, v);
+      final p = await client.fetchOwnProfile();
+      if (mounted) setState(() => _me = p);
+    } catch (_) {
+      _toast('Не удалось сменить имя');
+    }
+  }
+
+  Future<void> _changeAvatar() async {
+    final x = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 95, maxWidth: 1024, requestFullMetadata: false);
+    if (x == null) return;
+    try {
+      final clean = await cleanPhoto(await x.readAsBytes(), x.name);
+      await client.setAvatar(MatrixFile(bytes: clean.bytes, name: clean.name));
+      final p = await client.fetchOwnProfile();
+      if (mounted) setState(() => _me = p);
+    } catch (_) {
+      _toast('Не удалось сменить фото');
+    }
+  }
+
+  Future<void> _diag() async {
+    final text = await Diag.report();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: const Text('Отчёт для диагностики'),
+        content: SizedBox(width: 520, height: 420, child: SingleChildScrollView(child: SelectableText(text, style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5)))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d), child: const Text('Закрыть')),
+          FilledButton(
+            onPressed: () async {
+              await copySensitive(text, clearAfter: const Duration(minutes: 5));
+              if (d.mounted) Navigator.pop(d);
+              _toast('Отчёт скопирован — вставьте его в сообщение разработчику');
+            },
+            child: const Text('Скопировать'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final name = _me?.displayName ?? client.userID?.localpart ?? '';
@@ -129,10 +196,39 @@ class _SettingsPageState extends State<SettingsPage> {
       appBar: AppBar(title: const Text('Настройки')),
       body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 640), child: ListView(children: [
         const SizedBox(height: 16),
-        Center(child: Avatar(mxc: _me?.avatarUrl, name: name, size: 96)),
+        Center(
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: _changeAvatar,
+            child: Stack(children: [
+              Avatar(mxc: _me?.avatarUrl, name: name, size: 96),
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: CircleAvatar(radius: 15, backgroundColor: Theme.of(context).colorScheme.primary, child: const Icon(Icons.photo_camera, size: 16, color: Colors.white)),
+              ),
+            ]),
+          ),
+        ),
         const SizedBox(height: 12),
-        Text(name, textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600)),
-        const SizedBox(height: 20),
+        InkWell(
+          onTap: _changeName,
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Flexible(child: Text(name, textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600))),
+            const SizedBox(width: 6),
+            Icon(Icons.edit_outlined, size: 18, color: Theme.of(context).hintColor),
+          ]),
+        ),
+        Text(client.userID ?? '', textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).hintColor)),
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton.icon(
+            icon: const Icon(Icons.qr_code_2),
+            label: const Text('Мой QR-код'),
+            onPressed: () => showQr(context, name, userLink(client.userID!), note: 'Отсканируйте в Ласточке, чтобы написать мне'),
+          ),
+        ),
+        const SizedBox(height: 8),
         _row(verified ? Icons.verified_user_outlined : Icons.gpp_maybe_outlined, 'Это устройство',
             sub: verified ? 'Подтверждено, сообщения шифруются' : 'Не подтверждено'),
         _row(Icons.devices_outlined, 'Имя устройства', sub: client.deviceName ?? client.deviceID),
@@ -141,6 +237,19 @@ class _SettingsPageState extends State<SettingsPage> {
           await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PasscodePage()));
           setState(() {});
         }),
+        FutureBuilder<BackupState>(
+          future: backupState(),
+          builder: (_, s) => _row(
+            Icons.cloud_sync_outlined,
+            'Резервная копия ключей',
+            sub: backupText(s.data ?? BackupState.unknown),
+            color: s.data == BackupState.missing || s.data == BackupState.notConnected ? Colors.orange.shade800 : null,
+            onTap: () async {
+              await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BackupPage()));
+              setState(() {});
+            },
+          ),
+        ),
         _row(Icons.devices_other_outlined, 'Мои сеансы', sub: 'Где выполнен вход; завершить чужой вход', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SessionsPage()))),
         _switch(Icons.screenshot_monitor_outlined, 'Запретить снимки экрана',
             Platform.isIOS ? 'Скрывать переписку в переключателе приложений' : 'Переписку нельзя сфотографировать или записать с экрана', screenProtect.value, (v) async {
@@ -177,6 +286,7 @@ class _SettingsPageState extends State<SettingsPage> {
         if (Platform.isIOS)
           _row(Icons.info_outline, 'Уведомления на iPhone', sub: 'Приходят, пока Ласточка открыта или недавно свёрнута. Чтобы они приходили всегда, нужен сервер push-уведомлений Apple.'),
         _header('О программе'),
+        _row(Icons.bug_report_outlined, 'Отчёт для диагностики', sub: 'Версия, устройство и ошибки — без переписки, имён и адресов', onTap: _diag),
         _row(Icons.info_outline, 'Ласточка $appVersion', sub: 'Защищённый мессенджер на Matrix'),
         if (Updater.instance.supported)
           _row(Icons.system_update_alt, 'Проверить обновления', sub: 'Обновления подписаны ключом разработчика и проверяются перед установкой', onTap: () async {

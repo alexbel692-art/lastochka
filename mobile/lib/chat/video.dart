@@ -8,6 +8,7 @@ import 'package:matrix/matrix.dart';
 import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
+import '../system/media_clean.dart';
 import '../system/privacy.dart';
 import 'autodelete.dart';
 import 'voice.dart' show fmtDur;
@@ -18,27 +19,56 @@ final bool canRecordRound = Platform.isAndroid || Platform.isIOS;
 
 bool isRound(Event e) => e.messageType == MessageTypes.Video && e.content[roundKey] == true;
 
+Future<int?> _durationOf(String path) async {
+  if (!videoSupported) return null;
+  try {
+    final c = VideoPlayerController.file(File(path));
+    await c.initialize();
+    final d = c.value.duration.inMilliseconds;
+    await c.dispose();
+    return d;
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Записать и отправить «кружок».
 Future<String?> recordRound(Room room, {Event? inReplyTo}) async {
   final x = await ImagePicker().pickVideo(source: ImageSource.camera, preferredCameraDevice: CameraDevice.front, maxDuration: const Duration(seconds: 60));
   if (x == null) return null;
+  try {
+    return await _sendVideo(room, x, inReplyTo: inReplyTo, round: true);
+  } finally {
+    try {
+      await File(x.path).delete();
+    } catch (_) {}
+  }
+}
+
+/// Выбрать видео из галереи и отправить (без места съёмки и прочих сведений).
+Future<String?> pickAndSendVideo(Room room, {Event? inReplyTo}) async {
+  final x = await ImagePicker().pickVideo(source: ImageSource.gallery);
+  if (x == null) return null;
+  return _sendVideo(room, x, inReplyTo: inReplyTo);
+}
+
+Future<String?> _sendVideo(Room room, XFile x, {Event? inReplyTo, bool round = false}) async {
   final size = await x.length();
-  if (size > 60 * 1024 * 1024) return 'Видео слишком большое';
-  int? durationMs;
-  try {
-    final c = VideoPlayerController.file(File(x.path));
-    await c.initialize();
-    durationMs = c.value.duration.inMilliseconds;
-    await c.dispose();
-  } catch (_) {}
+  if (size > 300 * 1024 * 1024) return 'Видео слишком большое';
+  final clean = await cleanVideo(await x.readAsBytes());
+  if (clean == null) return 'Не удалось убрать из видео скрытые сведения (место съёмки и др.) — видео не отправлено. Можно отправить его как файл';
+  final mov = x.name.toLowerCase().endsWith('.mov');
+  final base = x.name.contains('.') ? x.name.substring(0, x.name.lastIndexOf('.')) : 'Видео';
   await room.sendFileEvent(
-    MatrixVideoFile(bytes: await x.readAsBytes(), name: 'Видеосообщение.mp4', mimeType: 'video/mp4', duration: durationMs),
+    MatrixVideoFile(
+      bytes: clean,
+      name: round ? 'Видеосообщение.mp4' : '$base.${mov ? 'mov' : 'mp4'}',
+      mimeType: mov ? 'video/quicktime' : 'video/mp4',
+      duration: await _durationOf(x.path),
+    ),
     inReplyTo: inReplyTo,
-    extraContent: {'body': 'Видеосообщение', roundKey: true, ...ttlExtra(room)},
+    extraContent: {if (round) 'body': 'Видеосообщение', if (round) roundKey: true, ...ttlExtra(room)},
   );
-  try {
-    await File(x.path).delete();
-  } catch (_) {}
   return null;
 }
 

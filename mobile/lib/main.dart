@@ -12,6 +12,7 @@ import 'calls/voip.dart';
 import 'chat/autodelete.dart';
 import 'chat/drafts.dart';
 import 'system/appearance.dart';
+import 'system/diag.dart';
 import 'pages/settings.dart';
 import 'system/lock.dart';
 import 'system/pinning.dart';
@@ -32,6 +33,7 @@ final navKey = GlobalKey<NavigatorState>();
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  Diag.init();
   // Вместо серого экрана при ошибке — понятное сообщение и кнопка «Назад».
   ErrorWidget.builder = (details) => Material(
         child: SafeArea(

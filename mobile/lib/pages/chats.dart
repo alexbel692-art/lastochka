@@ -8,6 +8,9 @@ import '../main.dart';
 import '../calls/voip.dart';
 import '../chat/autodelete.dart';
 import '../chat/drafts.dart';
+import '../chat/global_search.dart';
+import '../chat/saved.dart';
+import 'qr.dart';
 import '../chat/formatting.dart';
 import '../chat/polls.dart';
 import '../theme.dart';
@@ -111,6 +114,7 @@ class _ChatsPageState extends State<ChatsPage> {
   StreamSubscription? _sub;
   String _folder = 'all';
   Room? _selected; // открытый чат справа (планшет)
+  String? _jump; // перейти к сообщению (из поиска)
   bool _wide = false;
   bool _searching = false;
   final _q = TextEditingController();
@@ -118,8 +122,38 @@ class _ChatsPageState extends State<ChatsPage> {
   Timer? _peopleTimer;
   String _peopleFor = '';
 
+  // поиск сообщений во всех чатах
+  final _gs = GlobalSearch();
+  List<SearchHit> _msgHits = [];
+  bool _msgSearching = false;
+  Timer? _msgTimer;
+
+  void _searchMessages() {
+    _msgTimer?.cancel();
+    _gs.cancel();
+    final q = _q.text.trim();
+    if (q.length < 3) {
+      setState(() {
+        _msgHits = [];
+        _msgSearching = false;
+      });
+      return;
+    }
+    _msgTimer = Timer(const Duration(milliseconds: 700), () {
+      setState(() => _msgSearching = true);
+      _gs.run(q, (hits, done) {
+        if (!mounted || _q.text.trim() != q) return;
+        setState(() {
+          _msgHits = hits;
+          _msgSearching = !done;
+        });
+      });
+    });
+  }
+
   // поиск людей на сервере (каталог пользователей) — чтобы написать тому, с кем ещё нет чата
   void _searchPeople() {
+    _searchMessages();
     final q = _q.text.trim();
     _peopleTimer?.cancel();
     if (q.length < 2) {
@@ -194,7 +228,8 @@ class _ChatsPageState extends State<ChatsPage> {
         'unread' => r.isUnreadOrInvited,
         _ => true,
       };
-    }).toList();
+    }).toList()
+      ..sort((a, b) => (isSaved(b) ? 1 : 0) - (isSaved(a) ? 1 : 0));
   }
 
   // ---------- папки ----------
@@ -350,7 +385,7 @@ class _ChatsPageState extends State<ChatsPage> {
 
   void _toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
 
-  Future<void> _open(Room room) async {
+  Future<void> _open(Room room, {String? jumpTo}) async {
     if (room.membership == Membership.invite) {
       final ok = await showDialog<bool>(
         context: context,
@@ -368,8 +403,11 @@ class _ChatsPageState extends State<ChatsPage> {
       await room.join();
     }
     if (!mounted) return;
-    if (_wide) return setState(() => _selected = room);
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatPage(room: room)));
+    if (_wide) {
+      _jump = jumpTo;
+      return setState(() => _selected = room);
+    }
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatPage(room: room, jumpTo: jumpTo)));
   }
 
   Future<void> _menu(Room room) async {
@@ -447,7 +485,7 @@ class _ChatsPageState extends State<ChatsPage> {
                     child: const Text('Выберите чат', style: TextStyle(color: Colors.white)),
                   ),
                 )
-              : ChatPage(key: ValueKey(sel.id), room: sel, embedded: true),
+              : ChatPage(key: ValueKey('${sel.id}|$_jump'), room: sel, embedded: true, jumpTo: _jump),
         ),
       ]);
     });
@@ -482,6 +520,9 @@ class _ChatsPageState extends State<ChatsPage> {
               if (!_searching) {
                 _q.clear();
                 _people = [];
+                _msgHits = [];
+                _msgSearching = false;
+                _gs.cancel();
               }
             }),
           ),
@@ -527,11 +568,36 @@ class _ChatsPageState extends State<ChatsPage> {
         const NewLoginBanner(),
         Expanded(child: client.prevBatch == null && client.rooms.isEmpty
           ? const Center(child: CircularProgressIndicator())
-          : rooms.isEmpty && _people.isEmpty
+          : rooms.isEmpty && _people.isEmpty && _msgHits.isEmpty && !_msgSearching
               ? Center(child: Text(_q.text.isEmpty ? 'Здесь пока нет чатов' : 'Ничего не найдено', style: TextStyle(color: hint)))
               : ListView.builder(
-                  itemCount: rooms.length + (_people.isEmpty || _peopleFor != _q.text.trim() ? 0 : _people.length + 1),
+                  itemCount: rooms.length + (_people.isEmpty || _peopleFor != _q.text.trim() ? 0 : _people.length + 1) + (_searching && _q.text.trim().length >= 3 ? _msgHits.length + 1 : 0),
                   itemBuilder: (_, i) {
+                    final peopleN = _people.isEmpty || _peopleFor != _q.text.trim() ? 0 : _people.length + 1;
+                    if (i >= rooms.length + peopleN) {
+                      final k = i - rooms.length - peopleN;
+                      if (k == 0) {
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+                          child: Row(children: [
+                            Text('Сообщения', style: TextStyle(color: accent, fontWeight: FontWeight.w600)),
+                            if (_msgSearching) const Padding(padding: EdgeInsets.only(left: 10), child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))),
+                            if (!_msgSearching && _msgHits.isEmpty) Padding(padding: const EdgeInsets.only(left: 10), child: Text('не найдено', style: TextStyle(color: hint))),
+                          ]),
+                        );
+                      }
+                      final h = _msgHits[k - 1];
+                      final rn = h.room.getLocalizedDisplayname();
+                      return ListTile(
+                        leading: isSaved(h.room) ? const SavedAvatar(size: 44) : Avatar(mxc: h.room.avatar, name: rn, size: 44),
+                        title: Row(children: [
+                          Expanded(child: Text(isSaved(h.room) ? savedName : rn, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600))),
+                          Text(shortTime(h.event.originServerTs), style: TextStyle(fontSize: 12.5, color: hint)),
+                        ]),
+                        subtitle: Text('${h.event.senderId == client.userID ? 'Вы' : h.event.senderFromMemoryOrFallback.calcDisplayname()}: ${h.text.replaceAll('\n', ' ')}', maxLines: 2, overflow: TextOverflow.ellipsis),
+                        onTap: () => _open(h.room, jumpTo: h.event.eventId),
+                      );
+                    }
                     if (i == rooms.length) {
                       return Padding(
                         padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
@@ -549,7 +615,8 @@ class _ChatsPageState extends State<ChatsPage> {
                       );
                     }
                     final r = rooms[i];
-                    final name = r.getLocalizedDisplayname();
+                    final saved = isSaved(r);
+                    final name = saved ? savedName : r.getLocalizedDisplayname();
                     final unread = r.notificationCount;
                     final muted = r.pushRuleState != PushRuleState.notify;
                     final ts = r.lastEvent?.originServerTs;
@@ -563,7 +630,7 @@ class _ChatsPageState extends State<ChatsPage> {
                       selectedColor: Theme.of(context).textTheme.bodyLarge?.color,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       minVerticalPadding: 6,
-                      leading: Avatar(mxc: r.avatar, name: name, size: 54),
+                      leading: saved ? const SavedAvatar() : Avatar(mxc: r.avatar, name: name, size: 54),
                       title: Row(children: [
                         if (r.encrypted && r.isDirectChat) Padding(padding: const EdgeInsets.only(right: 3), child: Icon(Icons.lock, size: 14, color: Colors.green.shade600)),
                         Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16.5))),
@@ -638,6 +705,21 @@ class _ChatsPageState extends State<ChatsPage> {
           Navigator.pop(context);
           _newChatOf('group');
         }),
+        ListTile(leading: const Icon(Icons.bookmark_outline), title: const Text(savedName), onTap: () async {
+          Navigator.pop(context);
+          try {
+            final r = await openSaved();
+            if (r != null && mounted) _open(r);
+          } catch (_) {
+            _toast('Не удалось открыть «Избранное»');
+          }
+        }),
+        if (canScanQr)
+          ListTile(leading: const Icon(Icons.qr_code_scanner), title: const Text('Сканировать QR-код'), onTap: () async {
+            Navigator.pop(context);
+            final v = await scanQr(context);
+            if (v != null && mounted) await openMatrixLink(context, v);
+          }),
         ListTile(leading: const Icon(Icons.travel_explore), title: const Text('Найти группу'), onTap: () {
           Navigator.pop(context);
           _newChatOf('join');

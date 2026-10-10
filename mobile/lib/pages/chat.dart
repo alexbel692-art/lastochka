@@ -3,7 +3,9 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:pasteboard/pasteboard.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -40,7 +42,8 @@ const quickReactions = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥'
 class ChatPage extends StatefulWidget {
   final Room room;
   final bool embedded; // показан справа от списка чатов (планшет, компьютер)
-  const ChatPage({super.key, required this.room, this.embedded = false});
+  final String? jumpTo; // сразу перейти к этому сообщению (из поиска)
+  const ChatPage({super.key, required this.room, this.embedded = false, this.jumpTo});
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
@@ -117,6 +120,8 @@ class _ChatPageState extends State<ChatPage> {
     openTimelines.add(tl);
     if (tl.events.length < 30) await _more();
     _markRead();
+    final j = widget.jumpTo;
+    if (j != null) WidgetsBinding.instance.addPostFrameCallback((_) => _jumpTo(j));
   }
 
   void _onTrust() {
@@ -160,6 +165,27 @@ class _ChatPageState extends State<ChatPage> {
   // На компьютере Enter отправляет, Shift+Enter — новая строка
   KeyEventResult _onKey(FocusNode node, KeyEvent e) {
     if (!isDesktop || e is! KeyDownEvent) return KeyEventResult.ignored;
+    final mod = HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isMetaPressed;
+    // Ctrl+V: картинка или файлы из буфера обмена (текст вставляется как обычно)
+    if (mod && e.logicalKey == LogicalKeyboardKey.keyV) {
+      unawaited(_pasteFromClipboard());
+      return KeyEventResult.ignored;
+    }
+    // ↑ в пустом поле — изменить своё последнее сообщение, как в Telegram
+    if (e.logicalKey == LogicalKeyboardKey.arrowUp && _text.text.isEmpty && _editing == null) {
+      final tl = _tl;
+      final last = tl == null
+          ? null
+          : _events.where((x) => x.senderId == client.userID && !x.redacted && x.type == EventTypes.Message && x.getDisplayEvent(tl).messageType == MessageTypes.Text).firstOrNull;
+      if (last != null && tl != null) {
+        setState(() {
+          _replyTo = null;
+          _editing = last;
+          _text.text = last.getDisplayEvent(tl).body;
+        });
+        return KeyEventResult.handled;
+      }
+    }
     if ((e.logicalKey == LogicalKeyboardKey.enter || e.logicalKey == LogicalKeyboardKey.numpadEnter) && !HardwareKeyboard.instance.isShiftPressed) {
       _send();
       return KeyEventResult.handled;
@@ -189,6 +215,67 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s), duration: const Duration(seconds: 2)));
+
+  // ---------- файлы на компьютере: перетаскивание и вставка ----------
+  bool _dragging = false;
+
+  Future<void> _pasteFromClipboard() async {
+    try {
+      final files = await Pasteboard.files();
+      if (files.isNotEmpty) return _sendPaths(files);
+      final img = await Pasteboard.image;
+      if (img == null || img.isEmpty) return;
+      // текст из буфера уже вставлен — картинку отправляем, только если текста там не было
+      final text = await Clipboard.getData(Clipboard.kTextPlain);
+      if ((text?.text ?? '').isNotEmpty) return;
+      if (!mounted) return;
+      if (!await _confirmSend('Отправить картинку из буфера обмена?')) return;
+      final clean = await cleanPhoto(img, 'Картинка.png');
+      await room.sendFileEvent(MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height), extraContent: ttlExtra(room));
+      _toBottom();
+    } catch (_) {}
+  }
+
+  Future<bool> _confirmSend(String title, [List<String> names = const []]) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (d) => AlertDialog(
+          title: Text(title),
+          content: names.isEmpty ? null : Text(names.take(8).join('\n') + (names.length > 8 ? '\n… и ещё ${names.length - 8}' : '')),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
+            FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Отправить')),
+          ],
+        ),
+      ) ==
+      true;
+
+  Future<void> _sendPaths(List<String> paths) async {
+    final files = paths.map(File.new).where((f) => f.existsSync()).toList();
+    if (files.isEmpty || !mounted) return;
+    final names = files.map((f) => p.basename(f.path)).toList();
+    if (!await _confirmSend(files.length == 1 ? 'Отправить файл?' : 'Отправить файлы (${files.length})?', names)) return;
+    final reply = _replyTo;
+    setState(() => _replyTo = null);
+    var failed = 0;
+    for (final f in files) {
+      try {
+        final name = p.basename(f.path);
+        final bytes = await f.readAsBytes();
+        final lower = name.toLowerCase();
+        if (RegExp(r'\.(jpe?g|png|webp|heic)$').hasMatch(lower)) {
+          final clean = await cleanPhoto(bytes, name);
+          await room.sendFileEvent(MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height), inReplyTo: reply, extraContent: ttlExtra(room));
+        } else {
+          await room.sendFileEvent(MatrixFile.fromMimeType(bytes: bytes, name: name), inReplyTo: reply, extraContent: ttlExtra(room));
+        }
+      } catch (_) {
+        failed++;
+      }
+    }
+    if (failed > 0) _toast('Не отправлено файлов: $failed');
+    _toBottom();
+  }
 
   void _cancelBar() {
     if (_editing != null) _text.clear();
@@ -365,6 +452,7 @@ class _ChatPageState extends State<ChatPage> {
           _attachBtn(c, Icons.photo_outlined, 'Фото', 'photo', Colors.blue),
           if (!isDesktop) _attachBtn(c, Icons.photo_camera_outlined, 'Камера', 'camera', Colors.pink),
           _attachBtn(c, Icons.insert_drive_file_outlined, 'Файл', 'file', Colors.teal),
+          _attachBtn(c, Icons.videocam_outlined, 'Видео', 'video', Colors.indigo),
           if (canRecordRound) _attachBtn(c, Icons.radio_button_checked, 'Кружок', 'round', Colors.deepPurple),
           _attachBtn(c, Icons.poll_outlined, 'Опрос', 'poll', Colors.orange),
         ]),
@@ -389,6 +477,10 @@ class _ChatPageState extends State<ChatPage> {
           inReplyTo: reply,
           extraContent: ttlExtra(room),
         );
+      } else if (a == 'video') {
+        final err = await pickAndSendVideo(room, inReplyTo: reply);
+        if (err != null) _toast(err);
+        setState(() => _replyTo = null);
       } else if (a == 'round') {
         setState(() => _replyTo = null);
         final err = await recordRound(room, inReplyTo: reply);
@@ -760,7 +852,17 @@ class _ChatPageState extends State<ChatPage> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _sel != null) setState(() => _sel = null);
       },
-      child: Scaffold(
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyF, control: true): () => setState(() => _searching = true),
+          const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () => setState(() => _searching = true),
+          const SingleActivator(LogicalKeyboardKey.escape): () {
+            if (_sel != null) return setState(() => _sel = null);
+            if (_searching) return _closeSearch();
+            if (_replyTo != null || _editing != null) _cancelBar();
+          },
+        },
+        child: Scaffold(
       appBar: _sel != null ? _selBar(context) : AppBar(
         automaticallyImplyLeading: !widget.embedded,
         titleSpacing: widget.embedded ? 16 : 0,
@@ -801,7 +903,16 @@ class _ChatPageState extends State<ChatPage> {
           ],
         ],
       ),
-      body: LayoutBuilder(
+      body: DropTarget(
+        enable: isDesktop,
+        onDragEntered: (_) => setState(() => _dragging = true),
+        onDragExited: (_) => setState(() => _dragging = false),
+        onDragDone: (d) {
+          setState(() => _dragging = false);
+          _sendPaths(d.files.map((f) => f.path).toList());
+        },
+        child: Stack(children: [
+          LayoutBuilder(
         builder: (context, box) => _PaneWidth(
           width: box.maxWidth,
           child: Container(
@@ -855,6 +966,24 @@ class _ChatPageState extends State<ChatPage> {
           ),
         ),
       ),
+          if (_dragging)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  margin: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+                    border: Border.all(color: Theme.of(context).colorScheme.primary, width: 2),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text('Отпустите, чтобы отправить', style: TextStyle(fontSize: 18, color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ),
+        ]),
+      ),
+    ),
     ),
     );
   }

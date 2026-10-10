@@ -5,6 +5,7 @@ import 'package:matrix/matrix.dart';
 import '../main.dart';
 import '../widgets/avatar.dart';
 import 'autodelete.dart';
+import 'saved.dart';
 
 const forwardedKey = 'ru.lastochka.forwarded';
 
@@ -76,7 +77,8 @@ class _PickRoomsState extends State<_PickRooms> {
     final rooms = client.rooms
         .where((r) => r.membership == Membership.join && r.canSendDefaultMessages)
         .where((r) => q.isEmpty || r.getLocalizedDisplayname().toLowerCase().contains(q))
-        .toList();
+        .toList()
+      ..sort((a, b) => (isSaved(b) ? 1 : 0) - (isSaved(a) ? 1 : 0));
     return AlertDialog(
       title: const Text('Переслать в…'),
       contentPadding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
@@ -103,7 +105,7 @@ class _PickRoomsState extends State<_PickRooms> {
                 return CheckboxListTile(
                   value: _sel.contains(r.id),
                   onChanged: (v) => setState(() => v == true ? _sel.add(r.id) : _sel.remove(r.id)),
-                  secondary: Avatar(mxc: r.avatar, name: name, size: 40),
+                  secondary: isSaved(r) ? const SavedAvatar(size: 40) : Avatar(mxc: r.avatar, name: name, size: 40),
                   title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
                 );
               },
