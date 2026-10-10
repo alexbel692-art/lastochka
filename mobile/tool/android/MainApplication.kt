@@ -112,6 +112,8 @@ class MainApplication : Application() {
                         MainActivity.current?.applyCallMode()
                         result.success(true)
                     }
+                    "tone" -> { Tones.play(ctx, call.arguments as? String ?: ""); result.success(true) }
+                    "toneStop" -> { Tones.stop(ctx); result.success(true) }
                     "copySensitive" -> {
                         // текст помечается секретным: Android 13+ не показывает его в подсказках и превью
                         val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -154,5 +156,78 @@ class MainApplication : Application() {
                 }
             }
         }
+    }
+}
+
+
+/**
+ * Звуки звонка средствами Android: входящий — мелодия звонка телефона (с вибрацией по настройкам),
+ * исходящий — системные гудки, конец — короткий сигнал. Надёжнее стороннего проигрывателя:
+ * не конфликтует с модулем звонков и гарантированно останавливается.
+ */
+object Tones {
+    private var ringtone: android.media.Ringtone? = null
+    private var tone: android.media.ToneGenerator? = null
+    private var vibrating = false
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val keepRinging = object : Runnable {
+        override fun run() {
+            val r = ringtone ?: return
+            // до Android 9 мелодия не повторяется сама
+            try { if (!r.isPlaying) r.play() } catch (_: Throwable) {}
+            handler.postDelayed(this, 1500)
+        }
+    }
+
+    fun stop(ctx: Context) {
+        handler.removeCallbacks(keepRinging)
+        try { ringtone?.stop() } catch (_: Throwable) {}
+        ringtone = null
+        try { tone?.stopTone(); tone?.release() } catch (_: Throwable) {}
+        tone = null
+        if (vibrating) {
+            try { (ctx.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator).cancel() } catch (_: Throwable) {}
+            vibrating = false
+        }
+    }
+
+    fun play(ctx: Context, kind: String) {
+        stop(ctx)
+        try {
+            when (kind) {
+                "incoming" -> {
+                    val am = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                    if (am.ringerMode == android.media.AudioManager.RINGER_MODE_NORMAL) {
+                        val uri = android.media.RingtoneManager.getActualDefaultRingtoneUri(ctx, android.media.RingtoneManager.TYPE_RINGTONE)
+                            ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
+                        ringtone = android.media.RingtoneManager.getRingtone(ctx, uri)?.also { r ->
+                            r.audioAttributes = android.media.AudioAttributes.Builder()
+                                .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+                            if (Build.VERSION.SDK_INT >= 28) r.isLooping = true
+                            r.play()
+                            handler.postDelayed(keepRinging, 1500)
+                        }
+                    }
+                    if (am.ringerMode != android.media.AudioManager.RINGER_MODE_SILENT) {
+                        val v = ctx.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+                        val pattern = longArrayOf(0, 800, 1200)
+                        if (Build.VERSION.SDK_INT >= 26) v.vibrate(android.os.VibrationEffect.createWaveform(pattern, 0))
+                        else { @Suppress("DEPRECATION") v.vibrate(pattern, 0) }
+                        vibrating = true
+                    }
+                }
+                "outgoing" -> {
+                    tone = android.media.ToneGenerator(android.media.AudioManager.STREAM_VOICE_CALL, 70).also {
+                        it.startTone(android.media.ToneGenerator.TONE_SUP_RINGTONE)
+                    }
+                }
+                "hangup" -> {
+                    val tg = android.media.ToneGenerator(android.media.AudioManager.STREAM_VOICE_CALL, 70)
+                    tg.startTone(android.media.ToneGenerator.TONE_PROP_ACK, 400)
+                    handler.postDelayed({ try { tg.release() } catch (_: Throwable) {} }, 700)
+                }
+            }
+        } catch (_: Throwable) {}
     }
 }

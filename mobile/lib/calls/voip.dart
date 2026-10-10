@@ -121,6 +121,7 @@ void initVoip() {
     final c = ringing;
     if (c == null || c.callId != callId) return;
     if (action == 'answer') {
+      CallSounds.stop();
       c.answer().then((_) async {
         if (c.type == CallType.kVideo && (c.localUserMediaStream?.stream?.getVideoTracks().isEmpty ?? false)) {
           try {
@@ -129,7 +130,10 @@ void initVoip() {
         }
       });
     }
-    if (action == 'decline') c.reject();
+    if (action == 'decline') {
+      CallSounds.stop();
+      c.reject();
+    }
   };
 }
 

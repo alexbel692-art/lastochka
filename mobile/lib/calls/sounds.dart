@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/services.dart';
 
 import '../system/diag.dart';
 import 'package:path/path.dart' as p;
@@ -63,6 +64,10 @@ class CallSounds {
   static final _loop = AudioPlayer();
   static final _once = AudioPlayer();
   static bool _ready = false;
+  static const _android = MethodChannel('lastochka/system');
+  // номер «поколения» звука: если звук остановили, пока он ещё готовился к проигрыванию,
+  // запоздавший запуск это увидит и не начнёт играть (раньше гудки могли не прекращаться)
+  static int _gen = 0;
 
   static Future<void> _init() async {
     if (_ready) return;
@@ -87,10 +92,22 @@ class CallSounds {
   }
 
   static Future<void> _play(String name, Uint8List wav) async {
+    final g = ++_gen;
+    if (Platform.isAndroid) {
+      // Android: мелодия звонка телефона и системные гудки
+      Diag.mark('звук: $name');
+      try {
+        await _android.invokeMethod('tone', name);
+      } catch (_) {}
+      return;
+    }
     try {
       await _init();
       await _loop.stop();
-      await _loop.play(await _src(name, wav));
+      final src = await _src(name, wav);
+      if (g != _gen) return; // пока готовились — звук уже отменили
+      await _loop.play(src);
+      if (g != _gen) await _loop.stop();
     } catch (_) {}
   }
 
@@ -98,6 +115,14 @@ class CallSounds {
   static Future<void> outgoing() => _play('outgoing', _outgoing);
 
   static Future<void> stop() async {
+    _gen++;
+    if (Platform.isAndroid) {
+      Diag.mark('звук: стоп');
+      try {
+        await _android.invokeMethod('toneStop');
+      } catch (_) {}
+      return;
+    }
     try {
       await _loop.stop();
     } catch (_) {}
@@ -105,19 +130,19 @@ class CallSounds {
 
   static DateTime _lastHangup = DateTime(2000);
 
-  /// Сигнал завершения звонка. Звучит один раз, чуть позже конца звонка — когда модуль звонков
-  /// отпустит динамик (иначе на Android звук мог «съедаться»).
+  /// Сигнал завершения звонка — один раз.
   static Future<void> hangup() async {
     if (DateTime.now().difference(_lastHangup).inSeconds < 2) return;
     _lastHangup = DateTime.now();
-    try {
-      await _init();
-      await _loop.stop();
-    } catch (_) {}
+    await stop();
     await Future.delayed(const Duration(milliseconds: 350));
     Diag.mark('звонок: звук окончания');
-    // один и тот же проигрыватель, без создания и уничтожения: на старых Android освобождение
-    // проигрывателя сразу после звонка могло подвесить приложение
+    if (Platform.isAndroid) {
+      try {
+        await _android.invokeMethod('tone', 'hangup');
+      } catch (_) {}
+      return;
+    }
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         await _once.stop();

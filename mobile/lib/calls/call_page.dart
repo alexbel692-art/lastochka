@@ -94,6 +94,8 @@ class _CallPageState extends State<CallPage> {
   /// Ответить только голосом (на видеозвонок — с выключенной камерой).
   /// Ответ с видео: если звонок пришёл в фоне, камера ещё не включена — включаем после ответа.
   Future<void> _answerVideo() async {
+    Diag.mark('звонок: ответ с видео');
+    CallSounds.stop();
     await call.answer();
     if (call.localUserMediaStream?.stream?.getVideoTracks().isEmpty ?? false) {
       try {
@@ -104,6 +106,8 @@ class _CallPageState extends State<CallPage> {
   }
 
   Future<void> _answerAudio() async {
+    Diag.mark('звонок: ответ');
+    CallSounds.stop();
     await call.answer();
     if (call.type == CallType.kVideo) {
       try {
