@@ -1,4 +1,6 @@
 // Звонки 1:1 (протокол m.call.*), совместимые с настольной Ласточкой и Element.
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
@@ -8,6 +10,7 @@ import 'package:webrtc_interface/webrtc_interface.dart' hide Navigator;
 import '../main.dart';
 import 'call_page.dart';
 import 'sounds.dart';
+import '../system/diag.dart';
 import '../system/desktop.dart';
 import '../system/notify.dart';
 import 'turn_proxy.dart';
@@ -60,12 +63,23 @@ class LastochkaVoip implements WebRTCDelegate {
 
   @override
   Future<void> handleCallEnded(CallSession session) async {
+    Diag.mark('звонок: модуль сообщил о завершении');
+    // «пульс» 10 секунд после звонка: если экран застынет, по следам будет видно,
+    // живо ли само приложение (тогда завис системный поток) или нет
+    var n = 0;
+    Timer.periodic(const Duration(seconds: 1), (t) {
+      Diag.mark('пульс ${++n}${n >= 10 ? ' — готово' : ''}');
+      if (n >= 10) t.cancel();
+    });
     await stopRingtone();
+    Diag.mark('звонок: гудки остановлены');
     // звук окончания — для любого завершения: сбросили вы, собеседник, отклонили или не дозвонились
     CallSounds.hangup();
     callActive.value = voip.currentCID != null && voip.currentCID?.callId != session.callId;
     await clearCallNotification();
+    Diag.mark('звонок: уведомление убрано');
     await setCallMode(false);
+    Diag.mark('звонок: режим звонка выключен');
     if (ringing == session) ringing = null;
   }
 

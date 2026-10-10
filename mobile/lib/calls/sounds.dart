@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
+
+import '../system/diag.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -113,6 +115,7 @@ class CallSounds {
       await _loop.stop();
     } catch (_) {}
     await Future.delayed(const Duration(milliseconds: 350));
+    Diag.mark('звонок: звук окончания');
     // один и тот же проигрыватель, без создания и уничтожения: на старых Android освобождение
     // проигрывателя сразу после звонка могло подвесить приложение
     for (var attempt = 0; attempt < 2; attempt++) {

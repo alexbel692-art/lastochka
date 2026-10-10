@@ -24,7 +24,46 @@ import io.flutter.plugin.common.MethodChannel
 class MainApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        startWatchdog()
         engine(this)
+    }
+
+    /**
+     * Сторож главного потока: если он не отвечает 4 секунды (приложение «зависло»), записываем,
+     * чем он занят, в файл — после перезапуска это попадёт в «Отчёт для диагностики».
+     */
+    private fun startWatchdog() {
+        val main = android.os.Handler(mainLooper)
+        val file = java.io.File(filesDir, "anr_trace.txt")
+        Thread({
+            var reported = false
+            while (true) {
+                val done = java.util.concurrent.atomic.AtomicBoolean(false)
+                main.post { done.set(true) }
+                Thread.sleep(4000)
+                if (!done.get()) {
+                    if (!reported) {
+                        reported = true
+                        try {
+                            val sb = StringBuilder()
+                            sb.append("Главный поток не отвечает > 4 с (").append(java.util.Date()).append(")\n")
+                            for (el in mainLooper.thread.stackTrace.take(40)) sb.append("  at ").append(el.toString()).append('\n')
+                            // потоки звонков и звука — часто держат главный поток
+                            for ((t, st) in Thread.getAllStackTraces()) {
+                                val n = t.name.lowercase()
+                                if (n.contains("webrtc") || n.contains("audio") || n.contains("signal") || n.contains("worker")) {
+                                    sb.append("— поток ").append(t.name).append(" (").append(t.state).append(")\n")
+                                    for (el in st.take(12)) sb.append("    at ").append(el.toString()).append('\n')
+                                }
+                            }
+                            file.writeText(sb.toString())
+                        } catch (_: Throwable) {}
+                    }
+                } else {
+                    reported = false
+                }
+            }
+        }, "lastochka-watchdog").apply { isDaemon = true; start() }
     }
 
     companion object {

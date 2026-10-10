@@ -26,14 +26,25 @@ class Diag {
   static File? _trail;
 
   static Future<void> initTrail() async {
+    // Android: сторож главного потока записал, где приложение зависло
+    var hung = false;
+    try {
+      final anr = File(p.join((await getApplicationSupportDirectory()).path, 'anr_trace.txt'));
+      if (await anr.exists()) {
+        final t = await anr.readAsString();
+        await anr.delete();
+        hung = true;
+        add('Зависание (прошлый запуск):\n$t');
+      }
+    } catch (_) {}
     try {
       final f = File(p.join((await getApplicationSupportDirectory()).path, 'diag_trail.txt'));
       _trail = f;
       if (await f.exists()) {
         final lines = (await f.readAsString()).trim().split('\n');
-        if (lines.isNotEmpty && lines.last.isNotEmpty && !lines.last.endsWith('— готово')) {
+        if (lines.isNotEmpty && lines.last.isNotEmpty && (hung || !lines.last.endsWith('— готово'))) {
           add('Прошлый запуск оборвался после шага: ${lines.last}');
-          for (final l in lines.reversed.take(12).toList().reversed) {
+          for (final l in lines.reversed.take(30).toList().reversed) {
             add('  след: $l');
           }
         }
@@ -78,7 +89,7 @@ class Diag {
         .replaceAll(RegExp(r'[\w.+-]+@[\w-]+\.[\w.]+'), '<почта>')
         // имена серверов (но не файлы из трассировки: chat.dart, Foo.kt…)
         .replaceAllMapped(RegExp(r'\b(?:[a-z0-9-]+\.)+[a-z]{2,6}\b'),
-            (m) => RegExp(r'\.(dart|kt|java|swift|mm|cc|cpp|h|so|dll|js|json|png|jpg|mp4)$').hasMatch(m[0]!) ? m[0]! : '<сайт>')
+            (m) => RegExp(r'\.(dart|kt|java|swift|mm|cc|cpp|h|so|dll|js|json|png|jpg|mp4)$').hasMatch(m[0]!) || RegExp(r'^(m|org\.matrix|im|io|ru\.lastochka)\.').hasMatch(m[0]!) ? m[0]! : '<сайт>')
         .replaceAll(RegExp(r'\b(?:[0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{1,4}\b|\b[0-9a-fA-F]{0,4}::[0-9a-fA-F:]+\b'), '<ip>')
         .replaceAll(RegExp(r'\b\d{1,3}(\.\d{1,3}){3}\b'), '<ip>')
         .replaceAll(RegExp(r'(syt|syt_|mat_|Bearer )\S+'), '<токен>')
