@@ -76,22 +76,38 @@ class _ScanPageState extends State<_ScanPage> {
 }
 
 /// Ссылка matrix.to (или @id / #адрес) → начать чат или вступить в группу (после подтверждения).
-Future<void> openMatrixLink(BuildContext context, String text) async {
+/// Разобрать ссылку matrix.to или @id / #адрес / !чат. null — это не ссылка Matrix.
+({String id, List<String> via})? parseMatrixLink(String text) {
   var id = text.trim();
-  List<String>? via;
-  void toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+  final via = <String>[];
   try {
     final i = id.indexOf('matrix.to/#/');
     if (i >= 0) {
-      // https://matrix.to/#/<id>[/<событие>][?via=сервер&via=…]
-      final frag = Uri.parse('x:/${id.substring(i + 'matrix.to/#/'.length)}');
-      id = Uri.decodeComponent(frag.pathSegments.first);
-      via = frag.queryParametersAll['via'];
+      // https://matrix.to/#/<id>[/<событие>][?via=сервер&via=…] — '#' в адресе группы не считаем началом фрагмента
+      final rest = id.substring(i + 'matrix.to/#/'.length);
+      final q = rest.indexOf('?');
+      final path = q < 0 ? rest : rest.substring(0, q);
+      if (q >= 0) {
+        for (final kv in rest.substring(q + 1).split('&')) {
+          final parts = kv.split('=');
+          if (parts.length == 2 && parts[0] == 'via' && parts[1].isNotEmpty) via.add(Uri.decodeComponent(parts[1]));
+        }
+      }
+      id = Uri.decodeComponent(path.split('/').first);
     }
   } catch (_) {
-    return toast('Это не QR-код Matrix');
+    return null;
   }
-  if (!RegExp(r'^@[^\s:]+:[A-Za-z0-9.\-:]+$|^#[^\s:]+:[A-Za-z0-9.\-:]+$|^![A-Za-z0-9_\-.]+(:[A-Za-z0-9.\-:]+)?$').hasMatch(id)) return toast('Это не QR-код Matrix');
+  if (!RegExp(r'^@[^\s:]+:[A-Za-z0-9.\-:]+$|^#[^\s:]+:[A-Za-z0-9.\-:]+$|^![A-Za-z0-9_\-.]+(:[A-Za-z0-9.\-:]+)?$').hasMatch(id)) return null;
+  return (id: id, via: via);
+}
+
+Future<void> openMatrixLink(BuildContext context, String text) async {
+  void toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+  final link = parseMatrixLink(text);
+  if (link == null) return toast('Это не QR-код Matrix');
+  final id = link.id;
+  final via = link.via.isEmpty ? null : link.via;
   final isUser = id.startsWith('@');
   if (isUser && id == client.userID) return toast('Это ваш собственный код');
   final ok = await showDialog<bool>(
