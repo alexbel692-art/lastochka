@@ -144,7 +144,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
     if (v == null || v.isEmpty) return;
     try {
-      await client.setDisplayName(client.userID!, v);
+      await client.request(RequestType.PUT, '/client/v3/profile/${Uri.encodeComponent(client.userID!)}/displayname', data: {'displayname': v});
       final p = await client.fetchOwnProfile();
       if (mounted) setState(() => _me = p);
     } catch (_) {

@@ -222,7 +222,10 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _pasteFromClipboard() async {
     try {
       final files = await Pasteboard.files();
-      if (files.isNotEmpty) return _sendPaths(files);
+      if (files.isNotEmpty) {
+        await _sendPaths(files);
+        return;
+      }
       final img = await Pasteboard.image;
       if (img == null || img.isEmpty) return;
       // текст из буфера уже вставлен — картинку отправляем, только если текста там не было
