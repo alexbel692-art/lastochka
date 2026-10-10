@@ -158,7 +158,11 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       final clean = await cleanPhoto(await x.readAsBytes(), x.name);
       await client.setAvatar(MatrixFile(bytes: clean.bytes, name: clean.name));
-      final url = (await client.getAvatarUrl(client.userID!).catchError((_) => null));
+      Uri? url;
+      try {
+        final r = await client.request(RequestType.GET, '/client/v3/profile/${Uri.encodeComponent(client.userID!)}');
+        url = Uri.tryParse('${r['avatar_url'] ?? ''}');
+      } catch (_) {}
       if (mounted) setState(() => _me = Profile(userId: client.userID!, displayName: _me?.displayName, avatarUrl: url ?? _me?.avatarUrl));
     } catch (_) {
       _toast('Не удалось сменить фото');

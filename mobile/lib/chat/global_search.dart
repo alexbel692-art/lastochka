@@ -31,7 +31,7 @@ class GlobalSearch {
       final room = rooms[i];
       try {
         // из базы на устройстве, без загрузки участников и подписок; зашифрованное — расшифровываем
-        final events = await client.database?.getEventList(room, limit: 1500) ?? <Event>[];
+        final events = await client.database.getEventList(room, limit: 1500);
         final edits = <String, Event>{};
         for (final e in events) {
           if (gen != _gen) return;
