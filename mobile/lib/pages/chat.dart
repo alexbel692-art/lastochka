@@ -26,6 +26,7 @@ import '../chat/forward.dart';
 import '../chat/polls.dart';
 import '../chat/video.dart';
 import '../system/clipboard.dart';
+import '../system/diag.dart';
 import '../system/media_clean.dart';
 import '../chat/stickers.dart';
 import '../chat/voice.dart';

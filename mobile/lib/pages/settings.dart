@@ -1,4 +1,7 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
@@ -11,6 +14,7 @@ import '../system/updater.dart';
 import 'passcode.dart';
 import 'appearance.dart';
 import '../chat/drafts.dart';
+import '../chat/forward.dart' show pickRooms;
 import '../matrix_client.dart';
 import 'package:image_picker/image_picker.dart';
 import '../system/diag.dart';
@@ -170,6 +174,23 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  /// Отчёт уходит файлом (целиком, а не скриншотом), в зашифрованном чате — зашифрованным.
+  Future<void> _sendReport(String text) async {
+    final rooms = await pickRooms(context, title: 'Отправить отчёт в…');
+    if (rooms == null || rooms.isEmpty) return;
+    final stamp = DateTime.now().toIso8601String().substring(0, 16).replaceAll(':', '-').replaceAll('T', '_');
+    var ok = 0;
+    for (final r in rooms) {
+      try {
+        await r.sendFileEvent(MatrixFile(bytes: Uint8List.fromList(utf8.encode(text)), name: 'Ласточка-отчёт-$stamp.txt', mimeType: 'text/plain'));
+        ok++;
+      } catch (e) {
+        Diag.err('Отправка отчёта', e);
+      }
+    }
+    _toast(ok == rooms.length ? 'Отчёт отправлен' : 'Отчёт отправлен не во все чаты — проверьте подключение');
+  }
+
   Future<void> _diag() async {
     final text = await Diag.report();
     if (!mounted) return;
@@ -180,13 +201,21 @@ class _SettingsPageState extends State<SettingsPage> {
         content: SizedBox(width: 520, height: 420, child: SingleChildScrollView(child: SelectableText(text, style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5)))),
         actions: [
           TextButton(onPressed: () => Navigator.pop(d), child: const Text('Закрыть')),
-          FilledButton(
+          TextButton(
             onPressed: () async {
               await copySensitive(text, clearAfter: const Duration(minutes: 5));
               if (d.mounted) Navigator.pop(d);
               _toast('Отчёт скопирован — вставьте его в сообщение разработчику');
             },
             child: const Text('Скопировать'),
+          ),
+          FilledButton.icon(
+            icon: const Icon(Icons.send_rounded, size: 18),
+            onPressed: () async {
+              Navigator.pop(d);
+              await _sendReport(text);
+            },
+            label: const Text('Отправить в чат'),
           ),
         ],
       ),
@@ -294,6 +323,12 @@ class _SettingsPageState extends State<SettingsPage> {
         _header('О программе'),
         _row(Icons.bug_report_outlined, 'Отчёт для диагностики', sub: 'Версия, устройство и ошибки — без переписки, имён и адресов', onTap: _diag),
         _row(Icons.info_outline, 'Ласточка $appVersion', sub: 'Защищённый мессенджер'),
+        if (Updater.instance.supported)
+          _switch(Icons.science_outlined, 'Тестовые версии', 'Получать новые версии раньше всех — до того, как их получат остальные', _p?.getBool('update.beta') ?? false, (v) async {
+            await _p?.setBool('update.beta', v);
+            setState(() {});
+            if (v) unawaited(Updater.instance.check());
+          }),
         if (Updater.instance.supported)
           _row(Icons.system_update_alt, 'Проверить обновления', sub: 'Обновления подписаны ключом разработчика и проверяются перед установкой', onTap: () async {
             final has = await Updater.instance.check();

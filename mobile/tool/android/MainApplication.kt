@@ -24,8 +24,25 @@ import io.flutter.plugin.common.MethodChannel
 class MainApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        catchCrashes()
         startWatchdog()
         engine(this)
+    }
+
+    /** Падение системной части (Kotlin): записываем стек в файл, он попадёт в следующий отчёт. */
+    private fun catchCrashes() {
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        val file = java.io.File(filesDir, "native_crash.txt")
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try {
+                val sw = java.io.StringWriter()
+                e.printStackTrace(java.io.PrintWriter(sw))
+                val text = "поток ${t.name}, ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())}\n" +
+                    sw.toString().lines().take(40).joinToString("\n")
+                file.writeText(text)
+            } catch (_: Throwable) {}
+            prev?.uncaughtException(t, e)
+        }
     }
 
     /**

@@ -15,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
 import '../pages/chat.dart';
 import 'desktop.dart';
+import 'diag.dart';
 
 final _fln = FlutterLocalNotificationsPlugin();
 const _portName = 'lastochka_notification_actions';
@@ -154,7 +155,9 @@ Future<void> _onEvent(Event e) async {
   if (ev.type == EventTypes.Encrypted && client.encryption != null) {
     try {
       ev = await client.encryption!.decryptRoomEvent(ev);
-    } catch (_) {}
+    } catch (e) {
+      Diag.err('Уведомление: расшифровка', e);
+    }
   }
   // звонки показываются отдельно
   if (ev.type.startsWith('m.call.')) return;

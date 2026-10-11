@@ -20,6 +20,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'desktop.dart';
 import 'pinning.dart';
 import 'notify.dart';
+import 'diag.dart';
 
 const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '0.0.0');
 const _repo = 'alexbel692-art/lastochka';
@@ -108,10 +109,20 @@ class Updater {
     final re = _assetPattern;
     if (re == null) return false;
     try {
-      final r = await _http.get(Uri.parse('https://api.github.com/repos/$_repo/releases/latest'),
+      // тестовые версии (бета): берём самую новую из последних выпусков, включая предварительные
+      final beta = (await SharedPreferences.getInstance()).getBool('update.beta') ?? false;
+      final r = await _http.get(Uri.parse('https://api.github.com/repos/$_repo/releases${beta ? '?per_page=15' : '/latest'}'),
           headers: {'accept': 'application/vnd.github+json', 'user-agent': 'Lastochka-Updater'});
       if (r.statusCode != 200) return false;
-      final rel = jsonDecode(r.body) as Map<String, dynamic>;
+      final Map<String, dynamic> rel;
+      if (beta) {
+        final all = (jsonDecode(r.body) as List).cast<Map<String, dynamic>>().where((x) => x['draft'] != true && RegExp(r'^v\d+\.\d+\.\d+$').hasMatch('${x['tag_name']}')).toList();
+        if (all.isEmpty) return false;
+        all.sort((a, b) => cmpVer('${b['tag_name']}'.substring(1), '${a['tag_name']}'.substring(1)));
+        rel = all.first;
+      } else {
+        rel = jsonDecode(r.body) as Map<String, dynamic>;
+      }
       final version = '${rel['tag_name'] ?? ''}'.replaceFirst(RegExp('^v'), '');
       if (version.isEmpty || cmpVer(version, appVersion) <= 0) {
         available.value = null;
@@ -126,7 +137,8 @@ class Updater {
       available.value = UpdateInfo(version, '${rel['body'] ?? ''}', '${file['name']}', '${file['browser_download_url']}',
           '${sig['browser_download_url']}', (file['size'] as num?)?.toInt() ?? 0);
       return true;
-    } catch (_) {
+    } catch (e) {
+      Diag.err('Проверка обновлений', e);
       return false;
     }
   }
@@ -185,7 +197,8 @@ class Updater {
         final r = await OpenFilex.open(target.path, type: 'application/vnd.android.package-archive');
         if (r.type != ResultType.done) throw 'Разрешите Ласточке устанавливать приложения: Настройки → Приложения → Ласточка → Установка неизвестных приложений';
       }
-    } catch (e) {
+    } catch (e, st) {
+      Diag.err('Установка обновления', e, st);
       error.value = '$e';
     } finally {
       progress.value = null;

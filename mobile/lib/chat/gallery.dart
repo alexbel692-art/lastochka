@@ -9,6 +9,7 @@ import 'package:photo_manager/photo_manager.dart';
 import '../system/lru.dart';
 import 'album.dart';
 import 'voice.dart' show fmtDur;
+import '../system/diag.dart';
 
 final bool galleryStripSupported = Platform.isAndroid || Platform.isIOS;
 
@@ -46,7 +47,8 @@ class _GalleryStripState extends State<GalleryStrip> {
       );
       final list = paths.isEmpty ? <AssetEntity>[] : await paths.first.getAssetListPaged(page: 0, size: 60);
       if (mounted) setState(() => _items = list.where((a) => a.type == AssetType.image || a.type == AssetType.video).toList());
-    } catch (_) {
+    } catch (e, st) {
+      Diag.err('Галерея', e, st);
       if (mounted) setState(() => _items = const []);
     }
   }

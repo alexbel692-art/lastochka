@@ -66,7 +66,8 @@ Future<void> main(List<String> args) async {
   await Appearance.instance.init();
   try {
     client = await createClient();
-  } catch (e) {
+  } catch (e, st) {
+    Diag.err('Хранилище не открылось', e, st);
     await showMainWindow();
     appReady.value = MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -90,6 +91,7 @@ Future<void> main(List<String> args) async {
     SchedulerBinding.instance.scheduleForcedFrame();
     return;
   }
+  Diag.watchClient(client);
   initVoip();
   await initNotifications();
   await AppLock.instance.init();

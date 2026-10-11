@@ -282,7 +282,8 @@ extension _ChatActions on _ChatPageState {
             extraContent: {...album, ...ttlExtra(room)},
           );
         }
-      } catch (e) {
+      } catch (e, st) {
+        Diag.err('Отправка ${m.video ? 'видео' : 'фото'}', e, st);
         failed++;
         _toast('Не отправлено: ${e is MatrixException ? e.errorMessage : 'ошибка сети'}');
       } finally {
@@ -361,7 +362,8 @@ extension _ChatActions on _ChatPageState {
         await room.sendFileEvent(MatrixFile.fromMimeType(bytes: bytes, name: f.name), inReplyTo: reply, extraContent: ttlExtra(room));
       }
       _toBottom();
-    } catch (e) {
+    } catch (e, st) {
+      Diag.err('Вложение', e, st);
       _toast('Не отправлено: ${e is MatrixException ? e.errorMessage : 'ошибка сети'}');
     }
   }

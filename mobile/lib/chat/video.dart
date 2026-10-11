@@ -19,6 +19,7 @@ import '../system/media_clean.dart';
 import '../system/privacy.dart';
 import 'autodelete.dart';
 import 'voice.dart' show fmtDur;
+import '../system/diag.dart';
 
 const roundKey = 'ru.lastochka.round';
 final bool videoSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
@@ -57,7 +58,8 @@ Future<VideoFrame?> videoFrame(String path) async {
     if (jpeg is! Uint8List || jpeg.isEmpty) return null;
     final turned = n('rot') == 90 || n('rot') == 270;
     return VideoFrame(jpeg, turned ? n('h') : n('w'), turned ? n('w') : n('h'), n('vw'), n('vh'), n('duration'));
-  } catch (_) {
+  } catch (e, st) {
+    Diag.err('Кадр из видео', e, st);
     return null;
   }
 }
@@ -142,7 +144,9 @@ Future<String?> compressVideo(String src, {bool round = false}) async {
         .invokeMethod<bool>(Platform.isAndroid ? 'compressVideo' : 'compress', {'src': src, 'dst': dst, 'short': round ? 480 : 720, 'bitrate': round ? 1200000 : 2500000})
         .timeout(const Duration(minutes: 20));
     if (ok == true && File(dst).existsSync() && File(dst).lengthSync() > 0) return dst;
-  } catch (_) {
+    Diag.add('Сжатие видео не удалось — отправляем без сжатия');
+  } catch (e, st) {
+    Diag.err('Сжатие видео', e, st);
   } finally {
     t.cancel();
   }
@@ -215,7 +219,8 @@ Future<File?> _decrypted(Event e) => _files.putIfAbsent(e.eventId, () async {
         final ext = name.endsWith('.mov') ? 'mov' : name.endsWith('.webm') ? 'webm' : name.endsWith('.mkv') ? 'mkv' : 'mp4';
         final path = p.join((await privateTemp()).path, 'video_${e.eventId.hashCode.abs()}.$ext');
         return File(path)..writeAsBytesSync(f.bytes, flush: true);
-      } catch (_) {
+      } catch (err, st) {
+        Diag.err('Загрузка видео', err, st);
         _files.remove(e.eventId);
         return null;
       }
@@ -230,7 +235,9 @@ Future<Uint8List?> _preview(Event e) => _previews.putIfAbsent(e.eventId, () asyn
       if (e.hasThumbnail) {
         try {
           return (await e.downloadAndDecryptAttachment(getThumbnail: true)).bytes;
-        } catch (_) {}
+        } catch (err) {
+          Diag.err('Превью видео', err);
+        }
       }
       final size = (e.content.tryGetMap<String, Object?>('info')?['size'] as num?)?.toInt() ?? 0;
       if (!frameSupported || size <= 0 || size > _autoFrameLimit) return null;
@@ -358,7 +365,8 @@ class _RoundVideoState extends State<RoundVideo> {
         _loading = false;
       });
       await nc.play();
-    } catch (_) {
+    } catch (e, st) {
+      Diag.err('Воспроизведение кружка', e, st);
       await nc.dispose();
       setState(() {
         _loading = false;
@@ -442,7 +450,8 @@ class _VideoPageState extends State<_VideoPage> {
         c.addListener(() => mounted ? setState(() {}) : null);
         setState(() => _c = c);
         await c.play();
-      } catch (_) {
+      } catch (e, st) {
+        Diag.err('Воспроизведение видео', e, st);
         await c.dispose();
         if (mounted) setState(() => _failed = true);
       }

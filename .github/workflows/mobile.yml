@@ -11,6 +11,10 @@ on:
         description: 'Опубликовать в релизах'
         type: boolean
         default: true
+      beta:
+        description: 'Тестовая версия (получат только те, у кого включены «Тестовые версии»)'
+        type: boolean
+        default: false
       deps:
         description: 'Библиотеки: locked — строго по pubspec.lock; add — добавить новые (остальные не трогать); upgrade — обновить все'
         type: choice
@@ -257,9 +261,47 @@ jobs:
             git push origin HEAD:${{ github.ref_name }} || echo "::warning::Не удалось сохранить pubspec.lock"
           fi
 
+  # Проверка на эмуляторе Android 7 (как Samsung A5): ставится, запускается, не падает, показывает вход
+  emulator:
+    needs: android
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android
+          path: dist
+      - name: Доступ к KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Android 7 — установка и запуск
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 24
+          target: default
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          disable-animations: true
+          script: bash src/mobile/tool/emulator_smoke.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: android7-check
+          path: smoke/
+
   release:
-    if: ${{ always() && inputs.publish && needs.android.result == 'success' }}
-    needs: [android, ios, macos, windows]
+    if: ${{ always() && inputs.publish && needs.android.result == 'success' && needs.emulator.result == 'success' }}
+    needs: [android, ios, macos, windows, emulator]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -284,9 +326,9 @@ jobs:
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: v${{ inputs.version }}
-          name: Ласточка ${{ inputs.version }}
-          prerelease: false
-          make_latest: true
+          name: Ласточка ${{ inputs.version }}${{ inputs.beta && ' (тестовая)' || '' }}
+          prerelease: ${{ inputs.beta }}
+          make_latest: ${{ !inputs.beta }}
           target_commitish: ${{ github.sha }}
           body: |
             Ласточка — защищённый мессенджер на Matrix. Одна программа для всех устройств; обновляется сама, каждое обновление подписано и проверяется перед установкой.

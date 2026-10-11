@@ -61,8 +61,13 @@ Future<void> forwardEvents(BuildContext context, List<Event> events, Timeline? t
   }
 }
 
+/// Выбрать чаты (например, куда отправить отчёт для диагностики).
+Future<List<Room>?> pickRooms(BuildContext context, {String title = 'Переслать в…'}) =>
+    showDialog<List<Room>>(context: context, builder: (_) => _PickRooms(title: title));
+
 class _PickRooms extends StatefulWidget {
-  const _PickRooms();
+  final String title;
+  const _PickRooms({this.title = 'Переслать в…'});
   @override
   State<_PickRooms> createState() => _PickRoomsState();
 }
@@ -80,7 +85,7 @@ class _PickRoomsState extends State<_PickRooms> {
         .toList();
     final rooms = [...all.where(isSaved), ...all.where((r) => !isSaved(r))];
     return AlertDialog(
-      title: const Text('Переслать в…'),
+      title: Text(widget.title),
       contentPadding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
       content: SizedBox(
         width: 420,

@@ -9,6 +9,7 @@ import 'package:webrtc_interface/webrtc_interface.dart' hide Navigator;
 
 import '../main.dart';
 import 'call_page.dart';
+import 'call_stats.dart';
 import 'sounds.dart';
 import '../system/diag.dart';
 import '../system/desktop.dart';
@@ -44,6 +45,7 @@ class LastochkaVoip implements WebRTCDelegate {
 
   @override
   Future<void> handleNewCall(CallSession session) async {
+    CallStats.watch(session);
     ringing = session;
     callActive.value = true;
     await setCallMode(true);
@@ -64,6 +66,7 @@ class LastochkaVoip implements WebRTCDelegate {
   @override
   Future<void> handleCallEnded(CallSession session) async {
     Diag.mark('звонок: модуль сообщил о завершении');
+    CallStats.ended(session);
     // «пульс» 10 секунд после звонка: если экран застынет, по следам будет видно,
     // живо ли само приложение (тогда завис системный поток) или нет
     var n = 0;

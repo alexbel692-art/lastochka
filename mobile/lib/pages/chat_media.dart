@@ -16,7 +16,8 @@ Future<void> openAttachment(Event e, void Function(String) toast) async {
     await File(path).writeAsBytes(f.bytes, flush: true);
     final r = await OpenFilex.open(path);
     if (r.type != ResultType.done) toast('Нет программы, чтобы открыть этот файл');
-  } catch (_) {
+  } catch (e, st) {
+    Diag.err('Открытие файла', e, st);
     toast('Не удалось скачать файл');
   }
 }
@@ -46,7 +47,8 @@ class _ImageState extends State<_Image> {
         try {
           final f = await event.downloadAndDecryptAttachment(getThumbnail: !full && event.hasThumbnail);
           return f.bytes;
-        } catch (_) {
+        } catch (e) {
+          Diag.err('Загрузка фото', e);
           return null;
         }
       });
