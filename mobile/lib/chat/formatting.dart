@@ -98,11 +98,37 @@ Future<void> openLink(BuildContext context, String href) async {
   }
 }
 
+/// Ссылка в читаемом виде, как в Telegram: без https:// и www., русские буквы вместо %D0%…,
+/// очень длинная — с многоточием (открывается всё равно полный адрес).
+String prettyUrl(String u, {int max = 60}) {
+  var s = u;
+  try {
+    s = Uri.decodeFull(s);
+  } catch (_) {}
+  s = s.replaceFirst(RegExp(r'^https?://', caseSensitive: false), '').replaceFirst(RegExp(r'^www\.', caseSensitive: false), '');
+  if (s.endsWith('/')) s = s.substring(0, s.length - 1);
+  return s.length > max ? '${s.substring(0, max - 1)}…' : s;
+}
+
+/// Сайт и путь для карточки ссылки.
+({String host, String path})? linkParts(String href) {
+  final uri = Uri.tryParse(href.toLowerCase().startsWith('www.') ? 'https://$href' : href);
+  if (uri == null || uri.host.isEmpty) return null;
+  var path = uri.path;
+  try {
+    path = Uri.decodeFull(path);
+  } catch (_) {}
+  path = path.replaceAll(RegExp(r'^/+|/+$'), '').replaceAll('/', ' › ').replaceAll(RegExp(r'[-_]+'), ' ');
+  return (host: uri.host.replaceFirst(RegExp(r'^www\.'), ''), path: path);
+}
+
 /// Текст сообщения с оформлением и ссылками.
 class RichMessage extends StatefulWidget {
   final Event event;
   final TextStyle style;
-  const RichMessage({super.key, required this.event, required this.style});
+  /// Цвет ссылок (в своих сообщениях — цвет текста пузыря, иначе ссылки сливаются с фоном).
+  final Color? linkColor;
+  const RichMessage({super.key, required this.event, required this.style, this.linkColor});
   @override
   State<RichMessage> createState() => _RichMessageState();
 }
@@ -131,12 +157,12 @@ class _RichMessageState extends State<RichMessage> {
   @override
   Widget build(BuildContext context) {
     final e = widget.event;
-    final accent = Theme.of(context).colorScheme.primary;
+    final accent = widget.linkColor ?? Theme.of(context).colorScheme.primary;
     final c = e.content;
     final f = c['format'] == 'org.matrix.custom.html' ? c['formatted_body'] : null;
     // разбираем заново, только когда сообщение изменилось — иначе нажатие на ссылку теряется при обновлениях
     final key = '${e.eventId}|${c['body']}|$f|$_spoilers|${accent.toARGB32()}';
-    if (key == _key) return Text.rich(TextSpan(style: widget.style, children: _spans));
+    if (key == _key) return _withCard(accent);
     _key = key;
     for (final r in _rec) {
       r.dispose();
@@ -153,7 +179,48 @@ class _RichMessageState extends State<RichMessage> {
       spans = _linkify(e.calcUnlocalizedBody(hideReply: true), const TextStyle(), accent);
     }
     _spans = spans;
-    return Text.rich(TextSpan(style: widget.style, children: spans));
+    _firstLink = _urlRe.firstMatch(e.calcUnlocalizedBody(hideReply: true))?[0];
+    return _withCard(accent);
+  }
+
+  String? _firstLink;
+
+  /// Текст и под ним карточка первой ссылки: сайт и раздел (страницу не загружаем — так никто
+  /// не узнаёт, что вы открыли чат, и не видит ваш адрес).
+  Widget _withCard(Color accent) {
+    final text = Text.rich(TextSpan(style: widget.style, children: _spans));
+    final link = _firstLink;
+    final parts = link == null ? null : linkParts(link);
+    if (link == null || parts == null) return text;
+    final href = link.toLowerCase().startsWith('www.') ? 'https://$link' : link;
+    final base = widget.style.color ?? Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+      text,
+      const SizedBox(height: 6),
+      InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => openLink(context, href),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(10, 6, 10, 7),
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+            border: Border(left: BorderSide(color: accent, width: 3)),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.language, size: 18, color: accent),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                Text(parts.host, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: accent, fontWeight: FontWeight.w700, fontSize: 14.5)),
+                if (parts.path.isNotEmpty)
+                  Text(parts.path, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: base.withValues(alpha: 0.8), fontSize: 13.5, height: 1.25)),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    ]);
   }
 
   List<InlineSpan> _linkify(String text, TextStyle st, Color accent) {
@@ -163,7 +230,7 @@ class _RichMessageState extends State<RichMessage> {
       if (m.start > last) out.add(TextSpan(text: text.substring(last, m.start), style: st));
       final u = m[0]!;
       final href = u.toLowerCase().startsWith('www.') ? 'https://$u' : u;
-      out.add(TextSpan(text: u, style: st.copyWith(color: accent, decoration: TextDecoration.underline), recognizer: _tap(() => openLink(context, href))));
+      out.add(TextSpan(text: prettyUrl(u), style: st.copyWith(color: accent, decoration: TextDecoration.underline, decorationColor: accent), recognizer: _tap(() => openLink(context, href))));
       last = m.end;
     }
     if (last < text.length) out.add(TextSpan(text: text.substring(last), style: st));
@@ -234,10 +301,11 @@ class _RichMessageState extends State<RichMessage> {
           // упоминание участника
           return [TextSpan(text: el.text.startsWith('@') ? el.text : '@${el.text}', style: st.copyWith(color: accent, fontWeight: FontWeight.w600))];
         }
+        final shown = el.text.isEmpty || el.text == href || _urlRe.hasMatch(el.text) && el.text.trim() == _urlRe.firstMatch(el.text)?[0] ? prettyUrl(el.text.isEmpty ? href : el.text) : el.text;
         return [
           TextSpan(
-            text: el.text.isEmpty ? href : el.text,
-            style: st.copyWith(color: accent, decoration: TextDecoration.underline),
+            text: shown,
+            style: st.copyWith(color: accent, decoration: TextDecoration.underline, decorationColor: accent),
             recognizer: _tap(() => openLink(context, href)),
           ),
         ];

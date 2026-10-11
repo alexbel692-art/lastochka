@@ -1,6 +1,7 @@
 // Отчёт для диагностики: версия, устройство, последние ошибки. Без переписки: адреса, имена,
 // идентификаторы, ссылки и пути к файлам вырезаются, поэтому отчёт можно спокойно переслать.
 import 'dart:async';
+import 'dart:ffi' show Abi;
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:ui';
@@ -251,6 +252,12 @@ class Diag {
         battery = ok == true ? 'без ограничений' : 'ограничена системой (уведомления и звонки могут опаздывать)';
       } catch (_) {}
     }
+    String? cpu;
+    if (Platform.isAndroid) {
+      final dev = await Updater.androidAbi();
+      final run = Abi.current() == Abi.androidArm64 ? 'arm64' : Abi.current() == Abi.androidArm ? 'arm' : '${Abi.current()}';
+      cpu = run == dev ? run : '$run, а телефон $dev — нужна версия под его процессор';
+    }
     var beta = false;
     try {
       beta = (await SharedPreferences.getInstance()).getBool('update.beta') ?? false;
@@ -267,6 +274,7 @@ class Diag {
       'Резервная копия ключей: ${backup == true ? 'есть' : 'нет'}${cached == true ? ', подключена' : ''}',
       'Чатов: ${client.rooms.length}',
       if (battery != null) 'Работа в фоне: $battery',
+      if (cpu != null) 'Процессор: $cpu',
       if (lastCall != null) 'Последний звонок: $lastCall',
       '',
       '— Ошибки приложения —',

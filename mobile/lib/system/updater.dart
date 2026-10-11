@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart' as hash;
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:open_filex/open_filex.dart';
@@ -90,14 +91,29 @@ class Updater {
     await prefs.setString('update.highest', appVersion);
   }
 
-  RegExp? get _assetPattern {
+  /// Android: под какой процессор брать APK. Смотрим, что умеет телефон, а не в каком режиме
+  /// запущена Ласточка: если когда-то поставили 32-битный APK на 64-битный телефон, обновление
+  /// переведёт её на 64-битную версию (новые Android иначе пишут «не совместимо с последней версией»).
+  static Future<String> androidAbi() async {
+    try {
+      final l = await const MethodChannel('lastochka/system').invokeListMethod<String>('abis');
+      if (l != null && l.contains('arm64-v8a')) return 'arm64';
+      if (l != null && l.contains('armeabi-v7a')) return 'arm';
+    } catch (_) {}
+    return switch (Abi.current()) { Abi.androidArm64 => 'arm64', Abi.androidArm => 'arm', _ => 'universal' };
+  }
+
+  /// Запущена 32-битная версия на 64-битном телефоне — нужно переставить, даже если номер версии тот же.
+  Future<bool> wrongAbi() async => Platform.isAndroid && Abi.current() == Abi.androidArm && await androidAbi() == 'arm64';
+
+  Future<RegExp?> _assetPattern() async {
     if (Platform.isWindows) return RegExp(r'^Lastochka-Setup-.*\.exe$', caseSensitive: false);
     if (Platform.isMacOS) return RegExp(r'-arm64\.dmg$', caseSensitive: false); // сборка универсальная
     if (Platform.isAndroid) {
       // APK только под процессор этого телефона — в 3 раза меньше общего
-      return switch (Abi.current()) {
-        Abi.androidArm64 => RegExp(r'-Android-arm64\.apk$', caseSensitive: false),
-        Abi.androidArm => RegExp(r'-Android-arm\.apk$', caseSensitive: false),
+      return switch (await androidAbi()) {
+        'arm64' => RegExp(r'-Android-arm64\.apk$', caseSensitive: false),
+        'arm' => RegExp(r'-Android-arm\.apk$', caseSensitive: false),
         _ => RegExp(r'-Android\.apk$', caseSensitive: false),
       };
     }
@@ -106,8 +122,9 @@ class Updater {
 
   /// Проверить, есть ли новая версия. Возвращает true, если есть.
   Future<bool> check() async {
-    final re = _assetPattern;
+    final re = await _assetPattern();
     if (re == null) return false;
+    final switchAbi = await wrongAbi();
     try {
       // тестовые версии (бета): берём самую новую из последних выпусков, включая предварительные
       final beta = (await SharedPreferences.getInstance()).getBool('update.beta') ?? false;
@@ -124,7 +141,7 @@ class Updater {
         rel = jsonDecode(r.body) as Map<String, dynamic>;
       }
       final version = '${rel['tag_name'] ?? ''}'.replaceFirst(RegExp('^v'), '');
-      if (version.isEmpty || cmpVer(version, appVersion) <= 0) {
+      if (version.isEmpty || cmpVer(version, appVersion) < 0 || (cmpVer(version, appVersion) == 0 && !switchAbi)) {
         available.value = null;
         return false;
       }
@@ -134,7 +151,8 @@ class Updater {
           (Platform.isAndroid ? assets.where((a) => universal.hasMatch('${a['name']}')).firstOrNull : null);
       final sig = file == null ? null : assets.where((a) => a['name'] == '${file['name']}.sig').firstOrNull;
       if (file == null || sig == null) return false;
-      available.value = UpdateInfo(version, '${rel['body'] ?? ''}', '${file['name']}', '${file['browser_download_url']}',
+      if (switchAbi) Diag.add('Стоит 32-битная версия на 64-битном телефоне — предлагаем переустановку');
+      available.value = UpdateInfo(version, switchAbi && cmpVer(version, appVersion) == 0 ? 'Версия для вашего процессора — уберёт предупреждение о совместимости' : '${rel['body'] ?? ''}', '${file['name']}', '${file['browser_download_url']}',
           '${sig['browser_download_url']}', (file['size'] as num?)?.toInt() ?? 0);
       return true;
     } catch (e) {

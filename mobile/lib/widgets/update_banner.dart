@@ -28,7 +28,7 @@ class UpdateBanner extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      pr != null ? 'Загрузка обновления ${(pr * 100).round()}%…' : 'Доступна Ласточка ${u.version} — нажмите, чтобы обновить',
+                      pr != null ? 'Загрузка обновления ${(pr * 100).round()}%…' : u.version == appVersion ? 'Ласточка для вашего процессора — нажмите, чтобы переустановить' : 'Доступна Ласточка ${u.version} — нажмите, чтобы обновить',
                       style: TextStyle(color: accent, fontWeight: FontWeight.w600),
                     ),
                   ),

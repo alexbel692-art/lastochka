@@ -541,35 +541,57 @@ class _ChatsPageState extends State<ChatsPage> {
           ),
         ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(44),
+          preferredSize: const Size.fromHeight(46),
+          // папки: по центру, если помещаются; иначе листаются с одинаковыми отступами по краям
           child: SizedBox(
-            height: 44,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              children: [
-                for (final (id, name) in [
-                  ...builtinFolders,
-                  for (final f in userFolders()) ('f:${f.id}', f.name),
-                  if (client.rooms.any(isArchived)) ('archive', '🗄 Архив'),
-                ])
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                    child: GestureDetector(
-                      onLongPress: id.startsWith('f:') ? () => _editFolder(userFolders().firstWhere((f) => 'f:${f.id}' == id)) : null,
-                      child: ChoiceChip(
-                        label: Text(name),
-                        selected: _folder == id,
-                        showCheckmark: false,
-                        onSelected: (_) => setState(() => _folder = id),
+            height: 46,
+            child: LayoutBuilder(
+              builder: (_, c) => SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minWidth: c.maxWidth - 24),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    for (final (id, name) in [
+                      ...builtinFolders,
+                      for (final f in userFolders()) ('f:${f.id}', f.name),
+                      if (client.rooms.any(isArchived)) ('archive', '🗄 Архив'),
+                    ])
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 7),
+                        child: GestureDetector(
+                          onLongPress: id.startsWith('f:') ? () => _editFolder(userFolders().firstWhere((f) => 'f:${f.id}' == id)) : null,
+                          child: ChoiceChip(
+                            label: Text(name),
+                            selected: _folder == id,
+                            showCheckmark: false,
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            shape: const StadiumBorder(),
+                            onSelected: (_) => setState(() => _folder = id),
+                          ),
+                        ),
+                      ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 7),
+                      child: Tooltip(
+                        message: 'Новая папка (удерживайте папку, чтобы изменить)',
+                        child: ActionChip(
+                          label: const Icon(Icons.add, size: 18),
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          labelPadding: EdgeInsets.zero,
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          shape: const StadiumBorder(),
+                          onPressed: () => _editFolder(),
+                        ),
                       ),
                     ),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                  child: ActionChip(avatar: const Icon(Icons.add, size: 18), label: const Text('Папка'), tooltip: 'Новая папка (удерживайте папку, чтобы изменить)', onPressed: () => _editFolder()),
+                  ]),
                 ),
-              ],
+              ),
             ),
           ),
         ),

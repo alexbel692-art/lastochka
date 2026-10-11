@@ -148,7 +148,16 @@ class _Bubble extends StatelessWidget {
         ]),
       );
     } else {
-      content = RichMessage(event: e, style: TextStyle(fontSize: 16, height: 1.3, color: mine ? Bubbles.outText(context) : Theme.of(context).textTheme.bodyLarge?.color));
+      content = RichMessage(
+        event: e,
+        style: TextStyle(fontSize: 16, height: 1.3, color: mine ? Bubbles.outText(context) : Theme.of(context).textTheme.bodyLarge?.color),
+        // в своих пузырях ссылка — цвета текста (фиолетовая на фиолетовом не читается), в чужих — светлее в тёмной теме
+        linkColor: mine
+            ? Bubbles.outText(context)
+            : Theme.of(context).brightness == Brightness.dark
+                ? Color.lerp(accent, Colors.white, 0.35)
+                : accent,
+      );
     }
 
     final replyId = event.content.tryGetMap<String, Object?>('m.relates_to')?.tryGetMap<String, Object?>('m.in_reply_to')?.tryGet<String>('event_id');

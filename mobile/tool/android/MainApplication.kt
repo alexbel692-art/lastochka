@@ -141,6 +141,8 @@ class MainApplication : Application() {
                         }
                     }
                     "compressProgress" -> result.success(VideoCompress.progress())
+                    // какие процессоры поддерживает телефон (а не в каком режиме запущено приложение)
+                    "abis" -> result.success(Build.SUPPORTED_ABIS.toList())
                     "uptime" -> {
                         // время с включения телефона: его нельзя «перевести», в отличие от часов
                         val boot = if (Build.VERSION.SDK_INT >= 24) Settings.Global.getInt(ctx.contentResolver, Settings.Global.BOOT_COUNT, -1) else -1
