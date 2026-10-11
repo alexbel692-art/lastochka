@@ -68,6 +68,7 @@ extension _ChatCompose on _ChatPageState {
                 avatarSpace: !room.isDirectChat,
                 onReact: (k) => _react(e, k),
                 onReplyTap: _jumpTo,
+                album: _albums[e.eventId],
               ),
               ),
             ),

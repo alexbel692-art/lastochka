@@ -162,7 +162,7 @@ extension _ChatMessages on _ChatPageState {
         await copySensitive(disp.calcUnlocalizedBody(hideReply: true));
         _toast('Текст скопирован (буфер очистится через минуту)');
       case 'forward':
-        await forwardEvents(context, [e], tl);
+        await forwardEvents(context, _albums[e.eventId] ?? [e], tl);
       case 'select':
         _toggleSel(e);
       case 'endpoll':
@@ -181,7 +181,7 @@ extension _ChatMessages on _ChatPageState {
         final ok = await showDialog<bool>(
           context: context,
           builder: (d) => AlertDialog(
-            title: const Text('Удалить сообщение?'),
+            title: Text((_albums[e.eventId]?.length ?? 1) > 1 ? 'Удалить альбом?' : 'Удалить сообщение?'),
             content: const Text('Сообщение удалится у всех участников чата.'),
             actions: [
               TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
@@ -189,7 +189,11 @@ extension _ChatMessages on _ChatPageState {
             ],
           ),
         );
-        if (ok == true) await e.redactEvent();
+        if (ok == true) {
+          for (final m in _albums[e.eventId] ?? [e]) {
+            if (m.canRedact && !m.redacted) await m.redactEvent();
+          }
+        }
     }
   }
 }

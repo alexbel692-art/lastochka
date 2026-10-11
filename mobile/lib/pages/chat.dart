@@ -14,8 +14,12 @@ import 'package:matrix/matrix.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 
+import 'package:photo_manager/photo_manager.dart' show AssetEntity, AssetType, ThumbnailSize;
+
 import '../calls/voip.dart';
+import '../chat/album.dart';
 import '../chat/autodelete.dart';
+import '../chat/gallery.dart';
 import '../chat/drafts.dart';
 import '../chat/formatting.dart';
 import '../chat/forward.dart';
@@ -86,6 +90,7 @@ class _ChatPageState extends State<ChatPage> {
   DateTime? _floatDate;
   bool _floatShow = false;
   List<Event> _events = const [];
+  Map<String, List<Event>> _albums = const {}; // альбом: id первого показанного сообщения → все снимки
   // упоминания в сообщении: имя → @id
   final Map<String, String> _mentions = {};
   List<User> _mentionHits = [];
@@ -259,8 +264,9 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     final name = room.getLocalizedDisplayname();
     final tl = _tl;
-    final events = tl?.events.where(_visible).toList() ?? const <Event>[];
+    final (events, albums) = groupAlbums(tl?.events.where(_visible).toList() ?? const <Event>[]);
     _events = events;
+    _albums = albums;
     final typing = room.typingUsers.any((u) => u.id != client.userID);
     final accent = Theme.of(context).colorScheme.primary;
     return PopScope(
@@ -376,6 +382,25 @@ class _ChatPageState extends State<ChatPage> {
                       ),
                     ),
                 ]),
+              ),
+              // сжатие видео перед отправкой
+              ValueListenableBuilder<double?>(
+                valueListenable: compressProgress,
+                builder: (_, v, __) => v == null
+                    ? const SizedBox.shrink()
+                    : Material(
+                        color: Theme.of(context).scaffoldBackgroundColor,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(14, 8, 14, 6),
+                          child: Row(children: [
+                            Icon(Icons.movie_filter_outlined, size: 18, color: accent),
+                            const SizedBox(width: 8),
+                            Text('Сжимаем видео… ${(v * 100).round()}%', style: const TextStyle(fontSize: 13.5)),
+                            const SizedBox(width: 10),
+                            Expanded(child: LinearProgressIndicator(value: v > 0 ? v : null, borderRadius: BorderRadius.circular(3))),
+                          ]),
+                        ),
+                      ),
               ),
               _composer(context),
             ]),

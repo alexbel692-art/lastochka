@@ -2,6 +2,7 @@
 // Хранится только хеш кода (PBKDF2-подобное многократное хеширование с солью).
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
@@ -25,6 +26,7 @@ class AppLock {
   final locked = ValueNotifier<bool>(false);
   SharedPreferences? _p;
   DateTime? _hiddenAt;
+  final _hiddenWatch = Stopwatch();
   /// Удалить все данные Ласточки на устройстве (задаётся при запуске).
   Future<void> Function()? onWipe;
 
@@ -34,9 +36,90 @@ class AppLock {
   int get pinLength => _p?.getInt('lock.len') ?? 4;
   // неудачные попытки хранятся на диске — перезапуск приложения счётчик не сбрасывает
   int get fails => _p?.getInt('lock.fails') ?? 0;
-  DateTime? get blockedUntil {
-    final ms = _p?.getInt('lock.blockedUntil');
-    return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+
+  // Пауза после неверных попыток отсчитывается не по часам телефона (их можно перевести),
+  // а по времени работы: внутри запуска — монотонным секундомером, между запусками на Android —
+  // по времени с включения телефона (если телефон не перезагружали). Остаток хранится на диске,
+  // поэтому ни перевод часов, ни перезапуск Ласточки паузу не сокращают.
+  int _blockBase = 0;
+  final _blockWatch = Stopwatch();
+  Timer? _blockSaver;
+
+  /// Сколько ещё ждать до следующей попытки.
+  Duration get blockLeft {
+    final left = _blockBase - _blockWatch.elapsedMilliseconds;
+    return Duration(milliseconds: left > 0 ? left : 0);
+  }
+
+  bool get isBlocked => blockLeft > Duration.zero;
+
+  static const _ch = MethodChannel('lastochka/system');
+
+  Future<(int, int)?> _uptime() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final r = await _ch.invokeMapMethod<String, Object?>('uptime');
+      final boot = (r?['boot'] as num?)?.toInt() ?? -1;
+      final ms = (r?['ms'] as num?)?.toInt();
+      return boot < 0 || ms == null ? null : (boot, ms);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _saveBlock() async {
+    final p = _p;
+    if (p == null) return;
+    final left = blockLeft.inMilliseconds;
+    if (left <= 0) {
+      _blockSaver?.cancel();
+      _blockSaver = null;
+      for (final k in ['lock.blockLeft', 'lock.blockBoot', 'lock.blockMono']) {
+        await p.remove(k);
+      }
+      return;
+    }
+    await p.setInt('lock.blockLeft', left);
+    final up = await _uptime();
+    if (up != null) {
+      await p.setInt('lock.blockBoot', up.$1);
+      await p.setInt('lock.blockMono', up.$2);
+    } else {
+      await p.remove('lock.blockBoot');
+      await p.remove('lock.blockMono');
+    }
+  }
+
+  void _startBlock(int ms) {
+    _blockBase = ms;
+    _blockWatch
+      ..reset()
+      ..start();
+    // остаток регулярно сохраняется: убитое приложение продолжит ждать с того же места
+    _blockSaver ??= Timer.periodic(const Duration(seconds: 5), (_) => _saveBlock());
+  }
+
+  Future<void> _loadBlock() async {
+    final p = _p!;
+    var left = p.getInt('lock.blockLeft') ?? 0;
+    // переход со старого способа (метка времени по часам): не больше самой длинной паузы
+    final old = p.getInt('lock.blockedUntil');
+    if (old != null) {
+      left = (old - DateTime.now().millisecondsSinceEpoch).clamp(0, 15 * 60 * 1000);
+      await p.remove('lock.blockedUntil');
+    }
+    if (left > 0) {
+      final boot = p.getInt('lock.blockBoot'), mono = p.getInt('lock.blockMono');
+      final up = await _uptime();
+      // тот же сеанс работы телефона — время, прошедшее с сохранения, засчитывается
+      if (up != null && boot == up.$1 && mono != null && up.$2 >= mono) left -= up.$2 - mono;
+    }
+    if (left > 0) {
+      _startBlock(left);
+    } else {
+      _blockBase = 0;
+    }
+    await _saveBlock();
   }
 
   bool get wipeEnabled => _p?.getBool('lock.wipe') ?? false;
@@ -46,18 +129,31 @@ class AppLock {
   Future<void> init() async {
     _p = await SharedPreferences.getInstance();
     if (enabled) locked.value = true;
+    await _loadBlock();
     visibility.addListener(_onVisibility);
   }
 
   void _onVisibility() {
     if (!enabled) return;
     if (!appVisible) {
-      _hiddenAt ??= DateTime.now();
+      if (_hiddenAt == null) {
+        _hiddenAt = DateTime.now();
+        _hiddenWatch
+          ..reset()
+          ..start();
+      }
       if (timeout == 0) locked.value = true;
+      if (isBlocked) _saveBlock();
     } else {
       final h = _hiddenAt;
       _hiddenAt = null;
-      if (h != null && DateTime.now().difference(h).inSeconds >= timeout) locked.value = true;
+      if (h != null) {
+        // часы переведены назад — считаем, что время вышло (иначе так можно обойти автоблокировку)
+        final wall = DateTime.now().difference(h);
+        if (wall.isNegative || wall.inSeconds >= timeout || _hiddenWatch.elapsed.inSeconds >= timeout) locked.value = true;
+      }
+      // во сне телефона секундомер стоит — уточняем остаток паузы по времени с включения
+      if (isBlocked && Platform.isAndroid) _loadBlock();
     }
   }
 
@@ -81,6 +177,8 @@ class AppLock {
     for (final k in ['lock.hash', 'lock.salt', 'lock.duress', 'lock.fails', 'lock.blockedUntil', 'lock.wipe']) {
       await _p!.remove(k);
     }
+    _blockBase = 0;
+    await _saveBlock();
     locked.value = false;
   }
 
@@ -101,8 +199,7 @@ class AppLock {
   /// Проверить код. true — верный. Неверный — растущая пауза (30 с, 1, 2, 5, 15 минут…),
   /// а с включённым удалением после $wipeAfterFails ошибок подряд данные стираются.
   Future<bool> check(String pin, {bool allowDuress = true}) async {
-    final until = blockedUntil;
-    if (until != null && DateTime.now().isBefore(until)) return false;
+    if (isBlocked) return false;
     final h = _hash(pin, _p!.getString('lock.salt') ?? '');
     if (allowDuress && duressEnabled && h == _p!.getString('lock.duress')) {
       await onWipe?.call();
@@ -111,7 +208,8 @@ class AppLock {
     final ok = h == _p!.getString('lock.hash');
     if (ok) {
       await _p!.remove('lock.fails');
-      await _p!.remove('lock.blockedUntil');
+      _blockBase = 0;
+      await _saveBlock();
       return true;
     }
     final n = fails + 1;
@@ -123,14 +221,16 @@ class AppLock {
     if (n >= 5) {
       const steps = [30, 60, 120, 300, 900];
       final sec = steps[(n - 5).clamp(0, steps.length - 1)];
-      await _p!.setInt('lock.blockedUntil', DateTime.now().add(Duration(seconds: sec)).millisecondsSinceEpoch);
+      _startBlock(sec * 1000);
+      await _saveBlock();
     }
     return false;
   }
 
   void unlock() {
     _p?.remove('lock.fails');
-    _p?.remove('lock.blockedUntil');
+    _blockBase = 0;
+    _saveBlock();
     _hiddenAt = null; // окно отпечатка/Face ID ненадолго «прячет» приложение — это не повод снова блокировать
     locked.value = false;
   }
@@ -366,10 +466,7 @@ class _LockScreenState extends State<LockScreen> {
           length: lock.pinLength,
           showBiometric: _bio,
           onDone: (pin) async {
-            final until = lock.blockedUntil;
-            if (until != null && DateTime.now().isBefore(until)) {
-              return 'Слишком много попыток. Подождите ${until.difference(DateTime.now()).inSeconds + 1} с';
-            }
+            if (lock.isBlocked) return 'Слишком много попыток. Подождите ${_wait(lock.blockLeft)}';
             if (await lock.check(pin)) {
               lock.unlock();
               return null;
@@ -377,8 +474,7 @@ class _LockScreenState extends State<LockScreen> {
             if (!client.isLogged()) return null; // данные удалены
             final left = wipeAfterFails - lock.fails;
             if (lock.wipeEnabled && left <= 3) return 'Неверный код. Ещё $left — и данные будут удалены';
-            final u = lock.blockedUntil;
-            if (u != null && DateTime.now().isBefore(u)) return 'Неверный код. Следующая попытка через ${u.difference(DateTime.now()).inSeconds + 1} с';
+            if (lock.isBlocked) return 'Неверный код. Следующая попытка через ${_wait(lock.blockLeft)}';
             return 'Неверный код';
           },
           footer: TextButton(onPressed: () => setState(() => _forgot = true), child: const Text('Забыли код?')),
@@ -387,3 +483,11 @@ class _LockScreenState extends State<LockScreen> {
     );
   }
 }
+
+/// «45 с», «2 мин 10 с».
+String _wait(Duration d) {
+  final s = d.inSeconds + 1;
+  return s < 60 ? '$s с' : '${s ~/ 60} мин${s % 60 == 0 ? '' : ' ${s % 60} с'}';
+}
+
+String waitText(Duration d) => _wait(d);

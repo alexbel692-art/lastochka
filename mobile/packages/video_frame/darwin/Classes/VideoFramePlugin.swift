@@ -19,7 +19,17 @@ public class VideoFramePlugin: NSObject, FlutterPlugin {
     registrar.addMethodCallDelegate(VideoFramePlugin(), channel: channel)
   }
 
+  private var export: AVAssetExportSession?
+
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    if call.method == "compressProgress" {
+      result(export.map { Int($0.progress * 100) } ?? -1)
+      return
+    }
+    if call.method == "compress" {
+      compress(call.arguments as? [String: Any] ?? [:], result: result)
+      return
+    }
     guard call.method == "frame", let args = call.arguments as? [String: Any], let path = args["path"] as? String else {
       result(FlutterMethodNotImplemented)
       return
@@ -28,6 +38,33 @@ public class VideoFramePlugin: NSObject, FlutterPlugin {
     DispatchQueue.global(qos: .userInitiated).async {
       let r = VideoFramePlugin.grab(path: path, maxSide: maxSide)
       DispatchQueue.main.async { result(r) }
+    }
+  }
+
+  /// Сжатие видео перед отправкой: до 720p (кружки — до 480p), MP4, без места съёмки и прочих сведений.
+  private func compress(_ args: [String: Any], result: @escaping FlutterResult) {
+    guard let src = args["src"] as? String, let dst = args["dst"] as? String else {
+      result(false)
+      return
+    }
+    let short = (args["short"] as? Int) ?? 720
+    let asset = AVURLAsset(url: URL(fileURLWithPath: src))
+    let preset = short <= 480 ? AVAssetExportPreset640x480 : AVAssetExportPreset1280x720
+    guard let ex = AVAssetExportSession(asset: asset, presetName: preset) else {
+      result(false)
+      return
+    }
+    try? FileManager.default.removeItem(atPath: dst)
+    ex.outputURL = URL(fileURLWithPath: dst)
+    ex.outputFileType = .mp4
+    ex.shouldOptimizeForNetworkUse = true
+    ex.metadataItemFilter = AVMetadataItemFilter.forSharing()
+    export = ex
+    ex.exportAsynchronously { [weak self] in
+      DispatchQueue.main.async {
+        self?.export = nil
+        result(ex.status == .completed)
+      }
     }
   }
 

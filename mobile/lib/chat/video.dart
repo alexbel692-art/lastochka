@@ -1,5 +1,6 @@
 // Видео: «кружки» (короткие видеосообщения с фронтальной камеры, как в Telegram) и просмотр видео
 // внутри Ласточки. Расшифрованный файл лежит во внутренней папке и удаляется при следующем запуске.
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -89,7 +90,7 @@ Future<String?> recordRound(Room room, {Event? inReplyTo}) async {
   final x = await ImagePicker().pickVideo(source: ImageSource.camera, preferredCameraDevice: CameraDevice.front, maxDuration: const Duration(seconds: 60));
   if (x == null) return null;
   try {
-    return await _sendVideo(room, x, inReplyTo: inReplyTo, round: true);
+    return await sendVideoFile(room, x.path, x.name, inReplyTo: inReplyTo, round: true);
   } finally {
     try {
       await File(x.path).delete();
@@ -102,7 +103,7 @@ Future<String?> pickAndSendVideo(Room room, {Event? inReplyTo}) async {
   final x = await ImagePicker().pickVideo(source: ImageSource.gallery);
   if (x == null) return null;
   try {
-    return await _sendVideo(room, x, inReplyTo: inReplyTo);
+    return await sendVideoFile(room, x.path, x.name, inReplyTo: inReplyTo);
   } finally {
     // копия видео, которую сделал выбор файла, не должна оставаться в кэше
     if (Platform.isAndroid || Platform.isIOS) {
@@ -113,45 +114,94 @@ Future<String?> pickAndSendVideo(Room room, {Event? inReplyTo}) async {
   }
 }
 
-Future<String?> _sendVideo(Room room, XFile x, {Event? inReplyTo, bool round = false}) async {
-  final size = await x.length();
-  if (size > 100 * 1024 * 1024) return 'Видео больше 100 МБ — отправьте его файлом';
-  final clean = await cleanVideo(await x.readAsBytes());
-  if (clean == null) return 'Не удалось убрать из видео скрытые сведения (место съёмки и др.) — видео не отправлено. Можно отправить его как файл';
-  final mov = x.name.toLowerCase().endsWith('.mov');
-  final base = x.name.contains('.') ? x.name.substring(0, x.name.lastIndexOf('.')) : 'Видео';
-  // превью-кадр, чтобы у собеседника видео выглядело как в Telegram, а не как файл
-  final frame = await videoFrame(x.path);
-  await room.sendFileEvent(
-    MatrixVideoFile(
-      bytes: clean,
-      name: round ? 'Видеосообщение.mp4' : '$base.${mov ? 'mov' : 'mp4'}',
-      mimeType: mov ? 'video/quicktime' : 'video/mp4',
-      width: frame != null && frame.videoW > 0 ? frame.videoW : null,
-      height: frame != null && frame.videoH > 0 ? frame.videoH : null,
-      duration: frame != null && frame.durationMs > 0 ? frame.durationMs : await _durationOf(x.path),
-    ),
-    thumbnail: frame == null ? null : MatrixImageFile(bytes: frame.jpeg, name: 'thumbnail.jpg', mimeType: 'image/jpeg', width: frame.w, height: frame.h),
-    inReplyTo: inReplyTo,
-    extraContent: {if (round) 'body': 'Видеосообщение', if (round) roundKey: true, ...ttlExtra(room)},
-  );
+// ---------- сжатие ----------
+
+/// Где видео сжимается перед отправкой: Android (Media3), iPhone и Mac (AVFoundation).
+final bool compressSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
+
+/// Видео больше этого размера сжимаются (как в Telegram: до 720p, кружки — до 480p).
+const compressFrom = 12 * 1024 * 1024;
+const maxVideoSend = 100 * 1024 * 1024;
+
+/// Ход сжатия (0…1) для полоски над полем ввода; null — сжатия нет.
+final compressProgress = ValueNotifier<double?>(null);
+
+Future<String?> compressVideo(String src, {bool round = false}) async {
+  if (!compressSupported) return null;
+  final ch = Platform.isAndroid ? _system : _frames;
+  final dst = p.join((await privateTemp()).path, 'send_${DateTime.now().microsecondsSinceEpoch}.mp4');
+  compressProgress.value = 0;
+  final t = Timer.periodic(const Duration(milliseconds: 400), (_) async {
+    try {
+      final v = await ch.invokeMethod<int>('compressProgress');
+      if (v != null && v >= 0 && compressProgress.value != null) compressProgress.value = v / 100;
+    } catch (_) {}
+  });
+  try {
+    final ok = await ch
+        .invokeMethod<bool>(Platform.isAndroid ? 'compressVideo' : 'compress', {'src': src, 'dst': dst, 'short': round ? 480 : 720, 'bitrate': round ? 1200000 : 2500000})
+        .timeout(const Duration(minutes: 20));
+    if (ok == true && File(dst).existsSync() && File(dst).lengthSync() > 0) return dst;
+  } catch (_) {}
+  try {
+    File(dst).deleteSync();
+  } catch (_) {}
   return null;
 }
 
-final _files = Lru<String, Future<File?>>(20)..register();
-
-Future<File?> _decrypted(Event e) => _files.putIfAbsent(e.eventId, () async {
+/// Отправить видео с диска: при необходимости сжать, убрать скрытые сведения, приложить превью.
+/// Исходный файл не трогается. Возвращает текст ошибки или null.
+Future<String?> sendVideoFile(Room room, String path, String name, {Event? inReplyTo, bool round = false, Map<String, Object?> extra = const {}}) async {
+  var size = await File(path).length();
+  if (size > (compressSupported ? 4096 : 100) * 1024 * 1024) return 'Видео слишком большое — отправьте его файлом';
+  String? tmp;
+  try {
+    if (compressSupported && size > compressFrom) {
       try {
-        final f = await e.downloadAndDecryptAttachment();
-        final name = (e.content.tryGet<String>('filename') ?? e.body).toLowerCase();
-        final ext = name.endsWith('.mov') ? 'mov' : name.endsWith('.webm') ? 'webm' : name.endsWith('.mkv') ? 'mkv' : 'mp4';
-        final path = p.join((await privateTemp()).path, 'video_${e.eventId.hashCode.abs()}.$ext');
-        return File(path)..writeAsBytesSync(f.bytes, flush: true);
-      } catch (_) {
-        _files.remove(e.eventId);
-        return null;
+        final c = await compressVideo(path, round: round);
+        if (c != null) {
+          final cs = await File(c).length();
+          if (cs < size) {
+            tmp = c;
+            path = c;
+            size = cs;
+          } else {
+            await File(c).delete();
+          }
+        }
+      } finally {
+        compressProgress.value = null;
       }
-    });
+    }
+    if (size > maxVideoSend) return 'Видео больше 100 МБ даже после сжатия — отправьте его файлом';
+    final clean = await cleanVideo(await File(path).readAsBytes());
+    if (clean == null) return 'Не удалось убрать из видео скрытые сведения (место съёмки и др.) — видео не отправлено. Можно отправить его как файл';
+    final mov = tmp == null && name.toLowerCase().endsWith('.mov');
+    final base = name.contains('.') ? name.substring(0, name.lastIndexOf('.')) : 'Видео';
+    // превью-кадр, чтобы у собеседника видео выглядело как в Telegram, а не как файл
+    final frame = await videoFrame(path);
+    await room.sendFileEvent(
+      MatrixVideoFile(
+        bytes: clean,
+        name: round ? 'Видеосообщение.mp4' : '$base.${mov ? 'mov' : 'mp4'}',
+        mimeType: mov ? 'video/quicktime' : 'video/mp4',
+        width: frame != null && frame.videoW > 0 ? frame.videoW : null,
+        height: frame != null && frame.videoH > 0 ? frame.videoH : null,
+        duration: frame != null && frame.durationMs > 0 ? frame.durationMs : await _durationOf(path),
+      ),
+      thumbnail: frame == null ? null : MatrixImageFile(bytes: frame.jpeg, name: 'thumbnail.jpg', mimeType: 'image/jpeg', width: frame.w, height: frame.h),
+      inReplyTo: inReplyTo,
+      extraContent: {if (round) 'body': 'Видеосообщение', if (round) roundKey: true, ...extra, ...ttlExtra(room)},
+    );
+    return null;
+  } finally {
+    if (tmp != null) {
+      try {
+        await File(tmp).delete();
+      } catch (_) {}
+    }
+  }
+}
 
 // Превью видео в ленте: уменьшенная копия от отправителя, а если её нет (Element, мосты) —
 // небольшое видео скачивается и кадр берётся из него, как в Telegram.
@@ -178,7 +228,10 @@ class VideoPreview extends StatelessWidget {
   final Event event;
   final double maxWidth;
   final VoidCallback onOpen;
-  const VideoPreview({super.key, required this.event, required this.maxWidth, required this.onOpen});
+  /// В альбоме: точная высота плитки и без скругления (скругляется весь альбом).
+  final double? height;
+  final double radius;
+  const VideoPreview({super.key, required this.event, required this.maxWidth, required this.onOpen, this.height, this.radius = 13});
 
   @override
   Widget build(BuildContext context) {
@@ -196,15 +249,16 @@ class VideoPreview extends StatelessWidget {
             : 16 / 9;
     final decodeW = (maxWidth * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(64, 1200);
     final chip = [if (dur != null && dur > 0) fmtDur(dur), if (size != null && size > 0) _mb(size)].join(' · ');
+    Widget box(Widget child) => height != null
+        ? SizedBox(width: maxWidth, height: height, child: child)
+        : SizedBox(width: maxWidth, child: AspectRatio(aspectRatio: ratio.clamp(0.6, 1.9), child: child));
+    final small = height != null && height! < 120;
     return GestureDetector(
       onTap: onOpen,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(13),
-        child: SizedBox(
-          width: maxWidth,
-          child: AspectRatio(
-            aspectRatio: ratio.clamp(0.6, 1.9),
-            child: Stack(fit: StackFit.expand, children: [
+        borderRadius: BorderRadius.circular(radius),
+        child: box(
+            Stack(fit: StackFit.expand, children: [
               const DecoratedBox(
                 decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF2A3440), Color(0xFF151A20)])),
               ),
@@ -216,13 +270,13 @@ class VideoPreview extends StatelessWidget {
               ),
               Center(
                 child: Container(
-                  width: 54,
-                  height: 54,
+                  width: small ? 34 : 54,
+                  height: small ? 34 : 54,
                   decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.45), shape: BoxShape.circle),
-                  child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 38),
+                  child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: small ? 24 : 38),
                 ),
               ),
-              if (chip.isNotEmpty)
+              if (chip.isNotEmpty && !small)
                 Positioned(
                   left: 8,
                   top: 8,
@@ -233,7 +287,6 @@ class VideoPreview extends StatelessWidget {
                   ),
                 ),
             ]),
-          ),
         ),
       ),
     );

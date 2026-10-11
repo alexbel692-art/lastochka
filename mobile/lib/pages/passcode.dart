@@ -31,8 +31,7 @@ class _PasscodePageState extends State<PasscodePage> {
               if (c.mounted) Navigator.pop(c, true);
               return null;
             }
-            final u = lock.blockedUntil;
-            if (u != null && DateTime.now().isBefore(u)) return 'Неверный код. Следующая попытка через ${u.difference(DateTime.now()).inSeconds + 1} с';
+            if (lock.isBlocked) return 'Неверный код. Следующая попытка через ${waitText(lock.blockLeft)}';
             return 'Неверный код';
           },
         ),

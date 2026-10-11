@@ -8,7 +8,9 @@ class _Bubble extends StatelessWidget {
   final bool showName, tail, showAvatar, avatarSpace;
   final void Function(String key) onReact;
   final void Function(String id) onReplyTap;
+  final List<Event>? album; // несколько фото/видео одним сообщением
   const _Bubble({
+    this.album,
     required this.event,
     required this.timeline,
     required this.room,
@@ -106,6 +108,8 @@ class _Bubble extends StatelessWidget {
       ]);
     } else if (isPollStart(e)) {
       content = PollView(event: event, timeline: timeline, accent: mine ? const Color(0xFF4FAE4E) : accent);
+    } else if (album != null && album!.length > 1) {
+      content = _Album(items: album!, width: min(paneWidth(context) * 0.7, 380.0));
     } else if (isRound(e)) {
       content = RoundVideo(event: e, openExternally: () => openAttachment(e, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)))));
     } else if (isImage || isSticker) {

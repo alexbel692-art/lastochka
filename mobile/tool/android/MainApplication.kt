@@ -114,6 +114,21 @@ class MainApplication : Application() {
                     }
                     "tone" -> { Tones.play(ctx, call.arguments as? String ?: ""); result.success(true) }
                     "toneStop" -> { Tones.stop(ctx); result.success(true) }
+                    "compressVideo" -> {
+                        // сжатие видео перед отправкой (Media3 Transformer, аппаратный кодировщик)
+                        try {
+                            VideoCompress.start(ctx, call.argument<String>("src") ?: "", call.argument<String>("dst") ?: "",
+                                call.argument<Int>("short") ?: 720, call.argument<Int>("bitrate") ?: 2_500_000) { ok -> result.success(ok) }
+                        } catch (_: Throwable) {
+                            result.success(false)
+                        }
+                    }
+                    "compressProgress" -> result.success(VideoCompress.progress())
+                    "uptime" -> {
+                        // время с включения телефона: его нельзя «перевести», в отличие от часов
+                        val boot = if (Build.VERSION.SDK_INT >= 24) Settings.Global.getInt(ctx.contentResolver, Settings.Global.BOOT_COUNT, -1) else -1
+                        result.success(mapOf("boot" to boot, "ms" to android.os.SystemClock.elapsedRealtime()))
+                    }
                     "videoFrame" -> {
                         // кадр из видео для превью (как в Telegram); делается в фоне, чтобы не подвешивать экран
                         val path = call.argument<String>("path") ?: ""
@@ -269,5 +284,59 @@ object VideoFrame {
         } finally {
             try { mr.release() } catch (_: Throwable) {}
         }
+    }
+}
+
+/** Сжатие видео: короткая сторона до [short] точек, H.264 + AAC, без сведений из исходного файла. */
+@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
+object VideoCompress {
+    private var current: androidx.media3.transformer.Transformer? = null
+
+    fun start(ctx: Context, src: String, dst: String, short: Int, bitrate: Int, done: (Boolean) -> Unit) {
+        // не увеличиваем видео, которое и так меньше нужного размера
+        var shortSide = 0
+        val mr = android.media.MediaMetadataRetriever()
+        try {
+            mr.setDataSource(src)
+            val w = mr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val h = mr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            shortSide = minOf(w, h)
+        } catch (_: Throwable) {
+        } finally {
+            try { mr.release() } catch (_: Throwable) {}
+        }
+        val listener = object : androidx.media3.transformer.Transformer.Listener {
+            override fun onCompleted(composition: androidx.media3.transformer.Composition, exportResult: androidx.media3.transformer.ExportResult) {
+                current = null
+                done(true)
+            }
+            override fun onError(composition: androidx.media3.transformer.Composition, exportResult: androidx.media3.transformer.ExportResult,
+                                 exportException: androidx.media3.transformer.ExportException) {
+                current = null
+                done(false)
+            }
+        }
+        val encoders = androidx.media3.transformer.DefaultEncoderFactory.Builder(ctx)
+            .setRequestedVideoEncoderSettings(androidx.media3.transformer.VideoEncoderSettings.Builder().setBitrate(bitrate).build())
+            .build()
+        val t = androidx.media3.transformer.Transformer.Builder(ctx)
+            .setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264)
+            .setAudioMimeType(androidx.media3.common.MimeTypes.AUDIO_AAC)
+            .setEncoderFactory(encoders)
+            .addListener(listener)
+            .build()
+        val video = if (shortSide > short) listOf<androidx.media3.common.Effect>(androidx.media3.effect.Presentation.createForShortSide(short)) else emptyList()
+        val item = androidx.media3.transformer.EditedMediaItem.Builder(androidx.media3.common.MediaItem.fromUri(Uri.fromFile(java.io.File(src))))
+            .setEffects(androidx.media3.transformer.Effects(emptyList(), video))
+            .build()
+        current = t
+        t.start(item, dst)
+    }
+
+    /** Готовность в процентах, -1 — сжатие не идёт. */
+    fun progress(): Int {
+        val t = current ?: return -1
+        val h = androidx.media3.transformer.ProgressHolder()
+        return if (t.getProgress(h) == androidx.media3.transformer.Transformer.PROGRESS_STATE_AVAILABLE) h.progress else 0
     }
 }

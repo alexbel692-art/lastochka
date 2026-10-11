@@ -12,7 +12,7 @@ def edit(path, fn):
         print('patched', path)
 
 # --- Android: разрешения и название ---
-PERMS = ['FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_REMOTE_MESSAGING', 'FOREGROUND_SERVICE_MICROPHONE', 'USE_FULL_SCREEN_INTENT', 'RECEIVE_BOOT_COMPLETED', 'VIBRATE', 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', 'REQUEST_INSTALL_PACKAGES', 'INTERNET', 'RECORD_AUDIO', 'CAMERA', 'POST_NOTIFICATIONS', 'MODIFY_AUDIO_SETTINGS', 'ACCESS_NETWORK_STATE', 'CHANGE_NETWORK_STATE', 'WAKE_LOCK', 'BLUETOOTH_CONNECT']
+PERMS = ['FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_REMOTE_MESSAGING', 'FOREGROUND_SERVICE_MICROPHONE', 'USE_FULL_SCREEN_INTENT', 'RECEIVE_BOOT_COMPLETED', 'VIBRATE', 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', 'REQUEST_INSTALL_PACKAGES', 'INTERNET', 'RECORD_AUDIO', 'CAMERA', 'POST_NOTIFICATIONS', 'MODIFY_AUDIO_SETTINGS', 'ACCESS_NETWORK_STATE', 'CHANGE_NETWORK_STATE', 'WAKE_LOCK', 'BLUETOOTH_CONNECT', 'READ_MEDIA_IMAGES', 'READ_MEDIA_VIDEO', 'READ_MEDIA_VISUAL_USER_SELECTED', 'READ_EXTERNAL_STORAGE']
 def manifest(s):
     for p in PERMS:
         line = f'<uses-permission android:name="android.permission.{p}"/>'
@@ -59,7 +59,7 @@ def gradle_fn(s):
     # уведомлениям нужна поддержка новых функций Java на старых Android
     if 'isCoreLibraryDesugaringEnabled' not in s:
         s = s.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true', 1)
-        s += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n    implementation("androidx.appcompat:appcompat:1.7.0")\n}\n'
+        s += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n    implementation("androidx.appcompat:appcompat:1.7.0")\n    // та же версия Media3, что у модуля video_player — иначе части библиотеки не сойдутся\n    implementation("androidx.media3:media3-transformer:1.9.2")\n    implementation("androidx.media3:media3-effect:1.9.2")\n    implementation("androidx.media3:media3-common:1.9.2")\n}\n'
     s = re.sub(r'ndkVersion = .*', 'ndkVersion = "27.0.12077973"', s)
     # сборка под один тип процессора (--target-platform) — и библиотеки плагинов (звонки, сканер QR)
     # кладём только для него, иначе в APK попадают все три набора

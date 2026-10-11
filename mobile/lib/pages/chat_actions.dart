@@ -194,7 +194,7 @@ extension _ChatActions on _ChatPageState {
     _set(() => _sel = s.isEmpty ? null : s);
   }
 
-  List<Event> get _selectedEvents => _events.where((e) => _sel?.contains(e.eventId) == true).toList();
+  List<Event> get _selectedEvents => _events.where((e) => _sel?.contains(e.eventId) == true).expand((e) => _albums[e.eventId] ?? [e]).toList();
 
   Future<void> _selCopy() async {
     final tl = _tl;
@@ -235,6 +235,70 @@ extension _ChatActions on _ChatPageState {
     if (_scroll.hasClients) _scroll.animateTo(0, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
   }
 
+  static bool _isVideoName(String name, String? mime) =>
+      (mime?.startsWith('video/') ?? false) || RegExp(r'\.(mp4|mov|m4v|3gp|webm|mkv|avi)$', caseSensitive: false).hasMatch(name);
+
+  /// Отправить фото и видео; если их несколько — одним альбомом. Ответ цепляется к последнему.
+  Future<void> _sendMedia(List<_Media> items) async {
+    if (items.isEmpty) return;
+    final reply = _replyTo;
+    _set(() => _replyTo = null);
+    final album = items.length > 1 ? <String, Object?>{albumKey: newAlbumId()} : const <String, Object?>{};
+    var failed = 0;
+    for (var i = 0; i < items.length; i++) {
+      final m = items[i];
+      final r = i == items.length - 1 ? reply : null;
+      String? path;
+      try {
+        if (m.video) {
+          path = await m.path!();
+          if (path == null) {
+            failed++;
+            continue;
+          }
+          final err = await sendVideoFile(room, path, m.name, inReplyTo: r, extra: album);
+          if (err != null) {
+            _toast(err);
+            failed++;
+          }
+        } else {
+          final bytes = await m.bytes!();
+          if (bytes == null) {
+            failed++;
+            continue;
+          }
+          // без места съёмки, модели телефона и прочих скрытых сведений
+          final CleanImage clean;
+          try {
+            clean = await cleanPhoto(bytes, m.name);
+          } catch (_) {
+            _toast('Не удалось убрать из фото скрытые сведения (место съёмки и др.) — фото не отправлено');
+            failed++;
+            continue;
+          }
+          await room.sendFileEvent(
+            MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height),
+            inReplyTo: r,
+            extraContent: {...album, ...ttlExtra(room)},
+          );
+        }
+      } catch (e) {
+        failed++;
+        _toast('Не отправлено: ${e is MatrixException ? e.errorMessage : 'ошибка сети'}');
+      } finally {
+        // временные копии, сделанные выбором файлов, не оставляем в кэше
+        final del = m.video && m.temp ? path : m.tempPath;
+        if (del != null) {
+          try {
+            await File(del).delete();
+          } catch (_) {}
+        }
+      }
+    }
+    if (failed > 0 && items.length > 1) _toast('Не отправлено: $failed из ${items.length}');
+    _toBottom();
+  }
+
   Future<void> _attach() async {
     final items = <_AttachItem>[
       const _AttachItem(Icons.photo_library_rounded, 'Галерея', 'photo', [Color(0xFF4FA3FF), Color(0xFF2A6FE0)]),
@@ -244,31 +308,41 @@ extension _ChatActions on _ChatPageState {
       const _AttachItem(Icons.description_rounded, 'Файл', 'file', [Color(0xFF3DD6B0), Color(0xFF14A386)]),
       const _AttachItem(Icons.bar_chart_rounded, 'Опрос', 'poll', [Color(0xFFFFB547), Color(0xFFF08A1C)]),
     ];
-    final a = await showModalBottomSheet<String>(
+    final picked = ValueNotifier<List<AssetEntity>>(const []);
+    final res = await showModalBottomSheet<Object>(
       context: context,
       backgroundColor: Colors.transparent,
       elevation: 0,
-      builder: (c) => _AttachSheet(items: items),
+      isScrollControlled: true,
+      builder: (c) => _AttachSheet(items: items, picked: picked),
     );
+    final a = res is String ? res : null;
     final reply = _replyTo;
     try {
-      if (a == 'photo' || a == 'camera') {
+      if (res is List<AssetEntity> && res.isNotEmpty) {
+        // из ленты галереи: фото — копия до 2560 точек (уже в JPEG), видео — исходный файл (его не удаляем)
+        await _sendMedia([
+          for (final x in res)
+            x.type == AssetType.video
+                ? _Media(x.title ?? 'Видео.mp4', video: true, path: () async => (await x.file)?.path)
+                : _Media('${x.title ?? 'photo'}.jpg', bytes: () => x.thumbnailDataWithSize(const ThumbnailSize(2560, 2560), quality: 92)),
+        ]);
+      } else if (a == 'photo') {
+        // системный выбор: можно отметить несколько фото и видео — уйдут альбомом
+        final xs = await ImagePicker().pickMultipleMedia(limit: maxAlbum, imageQuality: 95, requestFullMetadata: false);
+        if (xs.isEmpty) return;
+        final temp = Platform.isAndroid || Platform.isIOS;
+        await _sendMedia([
+          for (final x in xs.take(maxAlbum))
+            _isVideoName(x.name, x.mimeType)
+                ? _Media(x.name, video: true, temp: temp, path: () async => x.path)
+                : _Media(x.name, bytes: () => x.readAsBytes(), tempPath: temp ? x.path : null),
+        ]);
+      } else if (a == 'camera') {
         // imageQuality — чтобы HEIC с iPhone и Android пришёл как JPEG, который можно очистить
-        final x = await ImagePicker().pickImage(source: a == 'camera' ? ImageSource.camera : ImageSource.gallery, imageQuality: 95, requestFullMetadata: false);
+        final x = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 95, requestFullMetadata: false);
         if (x == null) return;
-        // без места съёмки, модели телефона и прочих скрытых сведений
-        final CleanImage clean;
-        try {
-          clean = await cleanPhoto(await x.readAsBytes(), x.name);
-        } catch (_) {
-          return _toast('Не удалось убрать из фото скрытые сведения (место съёмки и др.) — фото не отправлено');
-        }
-        _set(() => _replyTo = null);
-        await room.sendFileEvent(
-          MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height),
-          inReplyTo: reply,
-          extraContent: ttlExtra(room),
-        );
+        await _sendMedia([_Media(x.name, bytes: () => x.readAsBytes())]);
       } else if (a == 'video') {
         final err = await pickAndSendVideo(room, inReplyTo: reply);
         if (err != null) _toast(err);
@@ -295,6 +369,15 @@ extension _ChatActions on _ChatPageState {
 
 }
 
+class _Media {
+  final String name;
+  final bool video, temp;
+  final Future<String?> Function()? path;
+  final Future<Uint8List?> Function()? bytes;
+  final String? tempPath;
+  const _Media(this.name, {this.video = false, this.temp = false, this.path, this.bytes, this.tempPath});
+}
+
 class _AttachItem {
   final IconData icon;
   final String label, value;
@@ -305,7 +388,8 @@ class _AttachItem {
 /// Меню «Прикрепить»: плавающая карточка с плитками-градиентами, плитки появляются по очереди.
 class _AttachSheet extends StatelessWidget {
   final List<_AttachItem> items;
-  const _AttachSheet({required this.items});
+  final ValueNotifier<List<AssetEntity>> picked;
+  const _AttachSheet({required this.items, required this.picked});
 
   @override
   Widget build(BuildContext context) {
@@ -326,7 +410,28 @@ class _AttachSheet extends StatelessWidget {
               Container(width: 38, height: 4, decoration: BoxDecoration(color: t.hintColor.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(2))),
               const SizedBox(height: 12),
               Text('Прикрепить', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: t.textTheme.titleMedium?.color)),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+              if (galleryStripSupported) ...[
+                GalleryStrip(picked: picked),
+                ValueListenableBuilder<List<AssetEntity>>(
+                  valueListenable: picked,
+                  builder: (_, l, __) => AnimatedSize(
+                    duration: const Duration(milliseconds: 180),
+                    child: l.isEmpty
+                        ? const SizedBox(width: double.infinity, height: 4)
+                        : Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: FilledButton.icon(
+                              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                              onPressed: () => Navigator.pop(context, l),
+                              icon: const Icon(Icons.send_rounded),
+                              label: Text(l.length == 1 ? 'Отправить' : 'Отправить альбомом (${l.length})'),
+                            ),
+                          ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
               LayoutBuilder(builder: (_, c) {
                 final cols = c.maxWidth >= 520 ? 6 : 3;
                 final w = c.maxWidth / cols;
