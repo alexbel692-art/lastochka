@@ -142,7 +142,10 @@ Future<String?> compressVideo(String src, {bool round = false}) async {
         .invokeMethod<bool>(Platform.isAndroid ? 'compressVideo' : 'compress', {'src': src, 'dst': dst, 'short': round ? 480 : 720, 'bitrate': round ? 1200000 : 2500000})
         .timeout(const Duration(minutes: 20));
     if (ok == true && File(dst).existsSync() && File(dst).lengthSync() > 0) return dst;
-  } catch (_) {}
+  } catch (_) {
+  } finally {
+    t.cancel();
+  }
   try {
     File(dst).deleteSync();
   } catch (_) {}
@@ -202,6 +205,21 @@ Future<String?> sendVideoFile(Room room, String path, String name, {Event? inRep
     }
   }
 }
+
+final _files = Lru<String, Future<File?>>(20)..register();
+
+Future<File?> _decrypted(Event e) => _files.putIfAbsent(e.eventId, () async {
+      try {
+        final f = await e.downloadAndDecryptAttachment();
+        final name = (e.content.tryGet<String>('filename') ?? e.body).toLowerCase();
+        final ext = name.endsWith('.mov') ? 'mov' : name.endsWith('.webm') ? 'webm' : name.endsWith('.mkv') ? 'mkv' : 'mp4';
+        final path = p.join((await privateTemp()).path, 'video_${e.eventId.hashCode.abs()}.$ext');
+        return File(path)..writeAsBytesSync(f.bytes, flush: true);
+      } catch (_) {
+        _files.remove(e.eventId);
+        return null;
+      }
+    });
 
 // Превью видео в ленте: уменьшенная копия от отправителя, а если её нет (Element, мосты) —
 // небольшое видео скачивается и кадр берётся из него, как в Telegram.

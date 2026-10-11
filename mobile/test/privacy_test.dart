@@ -75,15 +75,15 @@ void main() {
         expect(await lock.check('0000'), isFalse);
       }
       expect(lock.fails, 5);
-      expect(lock.blockedUntil!.isAfter(DateTime.now()), isTrue);
+      expect(lock.isBlocked, isTrue);
+      expect(lock.blockLeft.inSeconds, greaterThan(20));
       // во время паузы даже верный код не принимается
       expect(await lock.check('1234'), isFalse);
       expect(await lock.setDuress('1234'), isFalse); // не может совпадать с обычным
       expect(await lock.setDuress('9999'), isTrue);
       var wiped = false;
       lock.onWipe = () async => wiped = true;
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('lock.blockedUntil');
+      lock.debugClearBlock();
       expect(await lock.check('9999'), isFalse);
       expect(wiped, isTrue);
     });

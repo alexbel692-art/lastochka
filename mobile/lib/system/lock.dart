@@ -53,6 +53,9 @@ class AppLock {
 
   bool get isBlocked => blockLeft > Duration.zero;
 
+  @visibleForTesting
+  void debugClearBlock() => _blockBase = 0;
+
   static const _ch = MethodChannel('lastochka/system');
 
   Future<(int, int)?> _uptime() async {
