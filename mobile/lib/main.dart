@@ -115,6 +115,7 @@ Future<void> main(List<String> args) async {
   // запуск в фоне (после перезагрузки, из трея): кадры не рисуются — дорисовываем принудительно,
   // иначе приложение (фоновая служба, подписки) не запустится, пока не откроют окно
   SchedulerBinding.instance.scheduleForcedFrame();
+  debugPrint('LASTOCHKA_UI_READY');
   // Android может запустить Ласточку в фоне (после перезагрузки, фоновой службой) — окна нет
   if (!isDesktopOS) appVisible = WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
   // автозапуск с Windows — сразу в трей, без окна

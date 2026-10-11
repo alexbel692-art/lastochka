@@ -35,9 +35,12 @@ if grep -q "ANR in $PKG" smoke/logcat.txt; then
 fi
 errs=$(grep -E "E/flutter|\[ERROR:flutter" smoke/logcat.txt | head -10)
 [ -n "$errs" ] && echo "::warning title=Android 7::ошибки Flutter: $(echo "$errs" | tr '\n' ' ' | cut -c1-600)"
-if grep -q "Имя сервера" smoke/ui.xml 2>/dev/null; then
+if ! grep -q "LASTOCHKA_UI_READY" smoke/logcat.txt; then
+  echo "::error title=Android 7::приложение не дошло до готового интерфейса за 45 секунд"
+  fail=1
+elif grep -q "LASTOCHKA_LOGIN_SHOWN" smoke/logcat.txt; then
   echo "::notice title=Android 7::установка, запуск и экран входа — в порядке"
 else
-  echo "::warning title=Android 7::экран входа не найден в дереве элементов — посмотрите снимок screen.png"
+  echo "::warning title=Android 7::интерфейс готов, но экран входа не показан"
 fi
 exit $fail

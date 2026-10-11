@@ -28,6 +28,8 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
+    // метка для автопроверки на эмуляторе (системный журнал; ничего личного)
+    debugPrint('LASTOCHKA_LOGIN_SHOWN');
     SharedPreferences.getInstance().then((p) => setState(() => _server.text = p.getString('server') ?? ''));
   }
 
