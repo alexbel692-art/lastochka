@@ -129,9 +129,18 @@ class AppLock {
   bool get duressEnabled => (_p?.getString('lock.duress') ?? '').isNotEmpty;
   Future<void> setWipe(bool v) => _p!.setBool('lock.wipe', v);
 
+  /// С код-паролем переписку не видно в списке «недавних» (Android 13+).
+  Future<void> _syncRecents() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await const MethodChannel('lastochka/system').invokeMethod('hideRecents', enabled);
+    } catch (_) {}
+  }
+
   Future<void> init() async {
     _p = await SharedPreferences.getInstance();
     if (enabled) locked.value = true;
+    unawaited(_syncRecents());
     await _loadBlock();
     visibility.addListener(_onVisibility);
   }
@@ -174,6 +183,7 @@ class AppLock {
     await _p!.setString('lock.hash', _hash(pin, salt));
     await _p!.setInt('lock.len', pin.length);
     await _p!.remove('lock.duress'); // код экстренного удаления привязан к прежней «соли» — задаётся заново
+    unawaited(_syncRecents());
   }
 
   Future<void> disable() async {
@@ -183,6 +193,7 @@ class AppLock {
     _blockBase = 0;
     await _saveBlock();
     locked.value = false;
+    unawaited(_syncRecents());
   }
 
   /// Код для экстренного удаления: при его вводе Ласточка тихо стирает все данные на устройстве.

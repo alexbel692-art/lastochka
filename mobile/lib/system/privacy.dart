@@ -3,9 +3,11 @@
 //   Windows — окно исключается из захвата экрана, macOS — окно не попадает в снимки и трансляции,
 //   iPhone — при сворачивании содержимое закрывается заставкой.
 // • Расшифрованные временные файлы (голосовые, открытые вложения) удаляются при запуске и выходе.
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -68,7 +70,12 @@ void _windowsAffinity(bool on) {
 
 /// Папка для расшифрованных временных файлов — только внутри приложения
 /// (на телефоне — в кэше приложения, откуда их может открыть просмотрщик).
-Future<Directory> _privateBase() async => Platform.isAndroid || Platform.isIOS ? await getTemporaryDirectory() : await getApplicationSupportDirectory();
+/// Windows — личная временная папка пользователя (не «Roaming»: она уезжает на сервер профилей при выходе из RDP).
+Future<Directory> _privateBase() async =>
+    Platform.isAndroid || Platform.isIOS || Platform.isWindows ? await getTemporaryDirectory() : await getApplicationSupportDirectory();
+
+/// Имя временного файла по id сообщения — без совпадений между разными сообщениями.
+String tempKey(String id) => sha256.convert(utf8.encode(id)).toString().substring(0, 32);
 
 Future<Directory> privateTemp() async {
   final base = await _privateBase();
@@ -81,6 +88,13 @@ Future<void> purgeDecryptedFiles() async {
     final d = Directory(p.join((await _privateBase()).path, 'tmp-open'));
     if (await d.exists()) await d.delete(recursive: true);
   } catch (_) {}
+  // прежнее место на Windows (до 4.18) — в «Roaming»
+  if (Platform.isWindows) {
+    try {
+      final old = Directory(p.join((await getApplicationSupportDirectory()).path, 'tmp-open'));
+      if (await old.exists()) await old.delete(recursive: true);
+    } catch (_) {}
+  }
   // незавершённые отправки: SDK держит здесь открытую копию файла до успешной отправки
   try {
     final c = Directory(p.join((await getTemporaryDirectory()).path, 'lastochka_files'));

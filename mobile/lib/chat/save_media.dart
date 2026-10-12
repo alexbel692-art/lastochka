@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import '../system/diag.dart';
+import '../system/file_safety.dart';
 
 bool canSaveMedia(Event e) =>
     !e.redacted &&
@@ -22,7 +23,8 @@ String get saveMediaLabel => Platform.isAndroid || Platform.isIOS ? 'Сохра�
 
 String _fileName(Event e, String fallback) {
   var n = e.content.tryGet<String>('filename') ?? (e.body.contains('.') ? e.body : fallback);
-  n = n.replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), '_').trim();
+  n = n.replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), '_').replaceAll(RegExp(r'[\u202a-\u202e\u2066-\u2069]'), '').trim();
+  n = safeFileName(n);
   if (n.isEmpty) n = fallback;
   if (!n.contains('.')) {
     final mime = e.content.tryGetMap<String, Object?>('info')?.tryGet<String>('mimetype') ?? '';
@@ -84,6 +86,7 @@ Future<void> saveMedia(BuildContext context, Event e) async {
     final f = await e.downloadAndDecryptAttachment();
     final where = await FilePicker.saveFile(dialogTitle: 'Сохранить как', fileName: name, bytes: f.bytes);
     if (where == null) return;
+    if (where.isScheme('file')) await markFromInternet(where.toFilePath());
     final saved = where.pathSegments.isEmpty ? name : where.pathSegments.last;
     toast('Сохранено: $saved');
   } catch (err, st) {

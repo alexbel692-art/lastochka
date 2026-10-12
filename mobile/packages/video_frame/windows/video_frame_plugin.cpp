@@ -13,6 +13,7 @@
 #include <mfreadwrite.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -100,7 +101,10 @@ EncodableValue Grab(const std::wstring& path, int max_side) {
       DWORD len = 0;
       if (FAILED(buf->Lock(&data, nullptr, &len))) break;
       const LONG abs_stride = stride < 0 ? -stride : stride;
-      if (static_cast<size_t>(len) < static_cast<size_t>(abs_stride) * h || abs_stride < static_cast<LONG>(w) * 4) {
+      // размеры — в 64-битной арифметике: огромные ширина/высота из подделанного файла не переполнят проверку
+      if (w == 0 || h == 0 || w > 16384 || h > 16384 || max_side <= 0 ||
+          static_cast<uint64_t>(len) < static_cast<uint64_t>(abs_stride) * h ||
+          static_cast<uint64_t>(abs_stride) < static_cast<uint64_t>(w) * 4) {
         buf->Unlock();
         break;
       }

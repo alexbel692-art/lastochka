@@ -10,6 +10,7 @@ import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'calls/voip.dart';
+import 'calls/locked_call.dart';
 import 'chat/autodelete.dart';
 import 'chat/outbox.dart';
 import 'chat/polls.dart' show startPollCloser;
@@ -251,14 +252,16 @@ class _LastochkaAppState extends State<LastochkaApp> {
         data: MediaQuery.of(context).copyWith(
             textScaler: TextScaler.linear(MediaQuery.textScalerOf(context).scale(1) * Appearance.instance.textScale.value), disableAnimations: remoteSession || MediaQuery.of(context).disableAnimations),
         child: ListenableBuilder(
-        listenable: Listenable.merge([AppLock.instance.locked, callActive, screenProtect, _switcherCover, CertPinning.instance.alert]),
+        listenable: Listenable.merge([AppLock.instance.locked, callActive, currentCall, screenProtect, _switcherCover, CertPinning.instance.alert]),
         builder: (context, _) {
-          // во время звонка экран звонка не закрываем блокировкой — иначе нельзя ответить
-          final locked = AppLock.instance.locked.value && client.isLogged() && !callActive.value;
+          // звонок блокировку не снимает (иначе позвонивший получал доступ ко всем чатам);
+          // ответить, отклонить и завершить можно с панели поверх экрана блокировки
+          final locked = AppLock.instance.locked.value && client.isLogged();
+          final call = currentCall.value;
           return Stack(children: [
             ExcludeFocus(excluding: locked, child: child ?? const SizedBox.shrink()),
             // iPhone: в переключателе приложений вместо переписки — заставка
-            if (_switcherCover.value && screenProtect.value && !locked)
+            if (_switcherCover.value && (screenProtect.value || AppLock.instance.enabled) && !locked)
               Positioned.fill(child: ColoredBox(color: Theme.of(context).scaffoldBackgroundColor, child: Center(child: Image.asset('assets/icon.png', width: 96)))),
             if (CertPinning.instance.alert.value != null && !locked) Positioned.fill(child: _CertAlertScreen(CertPinning.instance.alert.value!)),
             if (locked)
@@ -268,6 +271,7 @@ class _LastochkaAppState extends State<LastochkaApp> {
                   await AppLock.instance.disable();
                 }),
               ),
+            if (locked && call != null && callActive.value) Positioned(left: 0, right: 0, top: 0, child: LockedCallPanel(session: call)),
           ]);
         },
       ),
@@ -290,6 +294,10 @@ void autoAcceptDirectInvites() {
       final isDirect = me?.content['is_direct'] == true;
       final inviter = me?.senderId;
       if (!isDirect || inviter == null || inviter.domain != myDomain) continue;
+      // «личный» чат, который на деле группа (много участников или создал не пригласивший), — спрашиваем
+      final creator = r.getState(EventTypes.RoomCreate)?.senderId;
+      final joined = r.summary.mJoinedMemberCount ?? 0;
+      if ((creator != null && creator != inviter) || joined > 1) continue;
       try {
         await r.join();
       } catch (_) {

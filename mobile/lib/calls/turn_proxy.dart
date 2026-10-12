@@ -231,11 +231,16 @@ class TurnProxy {
     return server.port;
   }
 
+  int _open = 0;
+
   Future<void> _handle(Socket sock) async {
-    if (!await _own(sock.remoteAddress)) {
+    // только с этого устройства и не больше 8 соединений сразу (звонку хватает 1–2)
+    if (_open >= 8 || !await _own(sock.remoteAddress)) {
       sock.destroy();
       return;
     }
+    _open++;
+    sock.done.whenComplete(() => _open--).ignore();
     Socket up;
     try {
       up = await Socket.connect(_ip!, _port, timeout: const Duration(seconds: 8));

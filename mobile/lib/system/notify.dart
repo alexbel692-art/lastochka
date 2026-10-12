@@ -4,6 +4,7 @@
 // Windows/macOS: при закрытии окна Ласточка остаётся в трее/строке меню.
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -126,6 +127,20 @@ Future<void> requestNotificationPermission() async {
   } catch (_) {}
 }
 
+/// Случайная метка в уведомлении звонка: «Ответить» принимается только из нашего уведомления.
+/// Другое приложение на телефоне может прислать Ласточке поддельное «нажатие», но метку не знает.
+final _callNonce = List.generate(16, (_) => Random.secure().nextInt(36).toRadixString(36)).join();
+
+/// Телефон заблокирован (экран блокировки системы). Только Android; на остальных — false.
+Future<bool> keyguardLocked() async {
+  if (!Platform.isAndroid) return false;
+  try {
+    return await _system.invokeMethod<bool>('keyguardLocked') ?? false;
+  } catch (_) {
+    return false;
+  }
+}
+
 String _lastTap = '';
 DateTime _lastTapAt = DateTime(2000);
 
@@ -136,7 +151,10 @@ void _handle(String action, String payload) {
   _lastTap = key;
   _lastTapAt = DateTime.now();
   if (payload.startsWith('call:')) {
-    onCallAction?.call(action.isEmpty ? 'open' : action, payload.substring(5));
+    final parts = payload.substring(5).split(':');
+    // без верной метки — не наше уведомление: ничего не делаем со звонком
+    if (parts.length != 2 || parts[1] != _callNonce) return;
+    onCallAction?.call(action.isEmpty ? 'open' : action, parts[0]);
     if (action != 'decline') showMainWindow();
     return;
   }
@@ -233,7 +251,7 @@ Future<void> showCallNotification(CallSession call) async {
       id: _callId,
       title: name,
       body: video ? 'Входящий видеозвонок' : 'Входящий звонок',
-      payload: 'call:${call.callId}',
+      payload: 'call:${call.callId}:$_callNonce',
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           'calls',
@@ -260,6 +278,13 @@ Future<void> showCallNotification(CallSession call) async {
   } catch (e) {
     Logs().w('[Ласточка] уведомление о звонке не показано', e);
   }
+}
+
+/// Убрать все уведомления Ласточки (выход, экстренное удаление).
+Future<void> clearAllNotifications() async {
+  try {
+    await _fln.cancelAll();
+  } catch (_) {}
 }
 
 Future<void> clearCallNotification() async {

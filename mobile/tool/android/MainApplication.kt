@@ -164,6 +164,11 @@ class MainApplication : Application() {
                         MainActivity.current?.applySecure()
                         result.success(true)
                     }
+                    "hideRecents" -> {
+                        MainActivity.hideRecents = call.arguments == true
+                        MainActivity.current?.applySecure()
+                        result.success(true)
+                    }
                     "callMode" -> {
                         // ответ — сразу, а флаги окна меняются после текущего кадра (см. applyCallMode)
                         MainActivity.callMode = call.arguments == true
@@ -174,6 +179,10 @@ class MainApplication : Application() {
                     // обращаются к звуковой службе и на некоторых телефонах отвечают сотни миллисекунд
                     "tone" -> { val k = call.arguments as? String ?: ""; Tones.post { Tones.play(ctx, k) }; result.success(true) }
                     "toneStop" -> { Tones.post { Tones.stop(ctx) }; result.success(true) }
+                    "keyguardLocked" -> {
+                        val km = ctx.getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+                        result.success(km.isKeyguardLocked)
+                    }
                     // самообновление через системный установщик (Android 12+ — без вопросов, если разрешено)
                     "installApk" -> SelfUpdate.install(ctx, call.arguments as? String ?: "") { result.success(it) }
                     "compressVideo" -> {
@@ -415,16 +424,22 @@ object VideoCompress {
  * окно «Обновить» показывается сразу (Ласточка открыта) или при следующем открытии.
  */
 object SelfUpdate {
-    private const val ACTION = "app.lastochka.lastochka.INSTALL_STATUS"
     var pending: Intent? = null
-    private var registered = false
 
-    private val receiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(ctx: Context, intent: Intent) {
+    /** Ответ системного установщика. Приходит только через наш явный PendingIntent в неэкспортируемый приёмник. */
+    fun onStatus(ctx: Context, intent: Intent) {
+        run {
             when (val st = intent.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS, -999)) {
                 android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                     val ask: Intent? = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
                         else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_INTENT)
+                    // запускаем только окно подтверждения установки системы и без выдачи доступа к файлам
+                    if (ask != null && !isSystemInstaller(ctx, ask)) {
+                        MainApplication.installStatus("fail:unexpected")
+                        return
+                    }
+                    ask?.flags = (ask?.flags ?: 0) and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION).inv()
                     ask?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     val act = MainActivity.current
                     if (ask != null && act != null && MainActivity.resumed) {
@@ -439,6 +454,10 @@ object SelfUpdate {
             }
         }
     }
+
+    /** Окно подтверждения от системного установщика. Сам приёмник неэкспортируемый — это вторая линия защиты. */
+    private fun isSystemInstaller(@Suppress("UNUSED_PARAMETER") ctx: Context, i: Intent): Boolean =
+        i.action?.startsWith("android.content.pm.action.CONFIRM_") == true
 
     /** Открыли Ласточку — показать отложенное окно установки. */
     fun showPending(act: android.app.Activity) {
@@ -464,16 +483,9 @@ object SelfUpdate {
                             s.fsync(out)
                         }
                     }
-                    synchronized(this) {
-                        if (!registered) {
-                            val f = android.content.IntentFilter(ACTION)
-                            if (Build.VERSION.SDK_INT >= 33) ctx.registerReceiver(receiver, f, Context.RECEIVER_NOT_EXPORTED)
-                            else ctx.registerReceiver(receiver, f)
-                            registered = true
-                        }
-                    }
                     val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
-                    val cb = PendingIntent.getBroadcast(ctx, id, Intent(ACTION).setPackage(ctx.packageName), flags)
+                    // явный адрес — неэкспортируемый приёмник из манифеста: чужие приложения туда не достучатся
+                    val cb = PendingIntent.getBroadcast(ctx, id, Intent(ctx, InstallStatusReceiver::class.java), flags)
                     s.commit(cb.intentSender)
                 }
                 "started"
@@ -483,4 +495,9 @@ object SelfUpdate {
             main.post { done(r) }
         }, "self-update").start()
     }
+}
+
+/** Приёмник ответа установщика (exported=false в манифесте). */
+class InstallStatusReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) = SelfUpdate.onStatus(context, intent)
 }

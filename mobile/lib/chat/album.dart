@@ -26,11 +26,15 @@ bool _media(Event e) => !e.redacted && (e.messageType == MessageTypes.Image || e
   }
   final albums = <String, List<Event>>{};
   final hidden = <String>{};
-  for (final list in byKey.values) {
-    if (list.length < 2) continue;
-    albums[list.first.eventId] = list.reversed.toList();
-    for (final e in list.skip(1)) {
-      hidden.add(e.eventId);
+  for (final all in byKey.values) {
+    // не больше [maxAlbum] в одной сетке: чужой «альбом» из тысяч снимков делится на части
+    for (var i = 0; i < all.length; i += maxAlbum) {
+      final list = all.sublist(i, min(i + maxAlbum, all.length));
+      if (list.length < 2) continue;
+      albums[list.first.eventId] = list.reversed.toList();
+      for (final e in list.skip(1)) {
+        hidden.add(e.eventId);
+      }
     }
   }
   if (hidden.isEmpty) return (events, albums);

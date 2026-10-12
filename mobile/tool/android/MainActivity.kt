@@ -52,6 +52,8 @@ class MainActivity : FlutterFragmentActivity() {
     fun applySecure() {
         if (secure) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        // при код-пароле снимок для «недавних приложений» не делается, даже если снимки экрана разрешены
+        if (Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(!(secure || hideRecents))
     }
 
     private var appliedCallMode: Boolean? = null
@@ -92,5 +94,6 @@ class MainActivity : FlutterFragmentActivity() {
         var callMode = false
         var resumed = false
         var secure = false
+        var hideRecents = false
     }
 }

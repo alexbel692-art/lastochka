@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../main.dart';
+import '../system/image_guard.dart';
 import '../system/lru.dart';
 
 // Кэш миниатюр в памяти, чтобы список чатов не мигал при прокрутке.
@@ -24,7 +25,9 @@ Future<Uint8List?> loadThumb(Uri mxc, int size, {String method = 'crop'}) {
       ));
       final res = await client.httpClient.get(url, headers: {'authorization': 'Bearer ${client.accessToken}'});
       if (res.statusCode != 200) return null;
-      return _thumbs[key] = res.bodyBytes;
+      final ok = await guardImage(res.bodyBytes);
+      if (ok == null) return null;
+      return _thumbs[key] = ok;
     } catch (_) {
       return null;
     } finally {
@@ -91,7 +94,7 @@ Future<void> showAvatarViewer(BuildContext context, Uri? mxc, String name, {Void
                           future: loadThumb(mxc, 1024),
                           builder: (_, s) => s.data == null
                               ? Avatar(mxc: mxc, name: name, size: side)
-                              : InteractiveViewer(maxScale: 4, child: Image.memory(s.data!, fit: BoxFit.cover, gaplessPlayback: true)),
+                              : InteractiveViewer(maxScale: 4, child: Image.memory(s.data!, fit: BoxFit.cover, gaplessPlayback: true, cacheWidth: 1024)),
                         ),
                 ),
               ),

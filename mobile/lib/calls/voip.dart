@@ -70,6 +70,7 @@ class LastochkaVoip implements WebRTCDelegate {
     _watchNetwork();
     ringing = session;
     callActive.value = true;
+    currentCall.value = session;
     await setCallMode(true);
     navKey.currentState?.push(MaterialPageRoute(builder: (_) => CallPage(session: session)));
     // приложение свёрнуто или закрыто — полноэкранное уведомление; на компьютере — показать окно
@@ -101,7 +102,12 @@ class LastochkaVoip implements WebRTCDelegate {
     unawaited(stopRingtone());
     CallSounds.hangup(); // сигнал отбоя — для любого завершения (на Android играет в своём потоке)
     callActive.value = voip.currentCID != null && voip.currentCID?.callId != session.callId;
+    if (currentCall.value == session) currentCall.value = null;
     if (ringing == session) ringing = null;
+    // телефон заблокирован — сразу убираем Ласточку с экрана блокировки, не дожидаясь паузы ниже
+    if (await keyguardLocked() && (voip.currentCID == null || voip.currentCID?.callId == session.callId)) {
+      await setCallMode(false);
+    }
     await Future.delayed(const Duration(milliseconds: 1400));
     await clearCallNotification();
     Diag.mark('звонок: уведомление убрано');
@@ -140,8 +146,11 @@ class LastochkaVoip implements WebRTCDelegate {
 /// Входящий звонок, который сейчас звонит.
 CallSession? ringing;
 
-/// Идёт звонок (входящий или исходящий) — экран блокировки его не закрывает.
+/// Идёт звонок (входящий или исходящий).
 final callActive = ValueNotifier<bool>(false);
+
+/// Текущий звонок — для панели звонка поверх экрана блокировки.
+final currentCall = ValueNotifier<CallSession?>(null);
 
 void initVoip() {
   voip = VoIP(client, LastochkaVoip());
@@ -175,6 +184,7 @@ Future<void> startCall(BuildContext context, Room room, {required bool video}) a
   try {
     final session = await voip.inviteToCall(room, video ? CallType.kVideo : CallType.kVoice);
     callActive.value = true;
+    currentCall.value = session;
     if (!context.mounted) return;
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => CallPage(session: session)));
   } catch (e) {

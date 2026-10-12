@@ -219,7 +219,7 @@ Future<File?> _decrypted(Event e) => _files.putIfAbsent(e.eventId, () async {
         final f = await e.downloadAndDecryptAttachment();
         final name = (e.content.tryGet<String>('filename') ?? e.body).toLowerCase();
         final ext = name.endsWith('.mov') ? 'mov' : name.endsWith('.webm') ? 'webm' : name.endsWith('.mkv') ? 'mkv' : 'mp4';
-        final path = p.join((await privateTemp()).path, 'video_${e.eventId.hashCode.abs()}.$ext');
+        final path = p.join((await privateTemp()).path, 'video_${tempKey(e.eventId)}.$ext');
         return File(path)..writeAsBytesSync(f.bytes, flush: true);
       } catch (err, st) {
         Diag.err('Загрузка видео', err, st);

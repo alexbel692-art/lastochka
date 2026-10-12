@@ -12,6 +12,7 @@ import '../chat/video.dart';
 import '../chat/voice.dart' show VoiceMessage;
 import '../widgets/avatar.dart';
 import '../system/diag.dart';
+import '../system/image_guard.dart';
 import '../system/lru.dart';
 import 'chat.dart' show openAttachment;
 
@@ -132,7 +133,7 @@ class _RoomMediaPageState extends State<RoomMediaPage> {
                             child: FutureBuilder<Uint8List?>(
                               future: _thumbs.putIfAbsent(e.eventId, () async {
                                 try {
-                                  return (await e.downloadAndDecryptAttachment(getThumbnail: e.hasThumbnail)).bytes;
+                                  return await guardImage((await e.downloadAndDecryptAttachment(getThumbnail: e.hasThumbnail)).bytes);
                                 } catch (_) {
                                   return null;
                                 }

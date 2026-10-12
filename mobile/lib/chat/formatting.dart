@@ -131,9 +131,19 @@ String prettyUrl(String u, {int max = 60}) {
   try {
     s = Uri.decodeFull(s);
   } catch (_) {}
+  // невидимые символы и «переворот» текста — убираем, чтобы адрес нельзя было показать задом наперёд
+  s = s.replaceAll(RegExp(r'[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]'), '');
   s = s.replaceFirst(RegExp(r'^https?://', caseSensitive: false), '').replaceFirst(RegExp(r'^www\.', caseSensitive: false), '');
   if (s.endsWith('/')) s = s.substring(0, s.length - 1);
-  return s.length > max ? '${s.substring(0, max - 1)}…' : s;
+  if (s.length <= max) return s;
+  // длинный адрес сокращаем так, чтобы настоящий сайт (конец имени) всегда был виден:
+  // «sberbank.ru.secure-login….evil.com» не превратится в безобидное «sberbank.ru…»
+  final slash = s.indexOf('/');
+  final host = slash < 0 ? s : s.substring(0, slash);
+  if (host.length >= max - 1) return '…${host.substring(host.length - (max - 1))}';
+  final room = max - host.length - 1;
+  final rest = s.substring(host.length);
+  return room <= 0 ? '$host/…' : '$host…${rest.substring(rest.length - room)}';
 }
 
 /// Сайт и путь для карточки ссылки.

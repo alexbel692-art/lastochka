@@ -37,6 +37,7 @@ def manifest(s):
             </intent-filter>
         </receiver>
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"/>
+        <receiver android:exported="false" android:name=".InstallStatusReceiver"/>
 '''
     if '.SyncService' not in s:
         s = s.replace('</application>', comps + '    </application>', 1)

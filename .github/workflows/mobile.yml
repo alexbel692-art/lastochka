@@ -319,19 +319,40 @@ jobs:
       run:
         working-directory: .
     steps:
+      # каждая сборка — в свою папку; к подписи берутся только ожидаемые файлы от «своей» сборки:
+      # чужая сборка не сможет подложить или подменить файл другой платформы
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: dist
-          merge-multiple: true
+          path: art
+      - name: Отбор файлов для выпуска
+        env:
+          V: ${{ inputs.version }}
+        run: |
+          echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::Неверный номер версии: $V"; exit 1; }
+          mkdir -p dist
+          take() {
+            src="art/$1"; shift
+            for n in "$@"; do
+              [ -f "$src/$n" ] || continue
+              [ -e "dist/$n" ] && { echo "::error::Файл $n пришёл дважды"; exit 1; }
+              cp "$src/$n" dist/
+            done
+          }
+          take android "Lastochka-$V-Android-arm64.apk" "Lastochka-$V-Android-arm.apk" "Lastochka-$V-Android.apk"
+          take ios "Lastochka-$V-iPhone-unsigned.ipa"
+          take macos "Lastochka-$V-arm64.dmg" "Lastochka-$V-x64.dmg"
+          take windows "Lastochka-Setup-$V.exe" "Lastochka-$V-Windows-portable.zip"
+          ls -la dist
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: src
+          persist-credentials: false
       - name: Подпись файлов
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          V: ${{ inputs.version }}
         run: |
-          rm -f dist/pubspec.lock
-          node src/scripts/sign-files.cjs dist "${{ inputs.version }}"
+          node src/scripts/sign-files.cjs dist "$V"
           cd dist && sha256sum $(ls | grep -v '\.sig$') > SHA256SUMS.txt && ls -la
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:

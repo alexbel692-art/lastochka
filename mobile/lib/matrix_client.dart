@@ -51,7 +51,16 @@ Future<String> _databaseKey(bool dbExists) async {
       await Future.delayed(const Duration(milliseconds: 400));
     }
   }
-  if (key == null && await fallback.exists()) key = (await fallback.readAsString()).trim();
+  if (key == null && await fallback.exists()) {
+    key = (await fallback.readAsString()).trim();
+    // ключ лежал в файле (защищённое хранилище было недоступно) — переносим туда и удаляем файл
+    if (key.isNotEmpty) {
+      try {
+        await _secure.write(key: _dbKeyName, value: key);
+        if (await _secure.read(key: _dbKeyName) == key) await fallback.delete();
+      } catch (_) {}
+    }
+  }
   if (key != null && key.isNotEmpty) return key;
   if (dbExists && readError != null) {
     throw StateError('Нет доступа к ключу базы в защищённом хранилище системы. Разрешите Ласточке доступ к связке ключей и перезапустите её.');
@@ -201,9 +210,9 @@ Future<Client> createClient() async {
     importantStateEvents: {'im.ponies.room_emotes'},
     supportedLoginTypes: {AuthenticationTypes.password},
     // ключи сообщений получают только устройства, подтверждённые их владельцем (подписанные).
-    // Вошедший по украденному паролю без ключа восстановления и без подтверждения
-    // с другого устройства ключей не получит. Ласточка требует подтверждать каждый вход,
-    // поэтому у своих в группах «не удалось расшифровать» не возникает.
+    // Вошедший по украденному паролю ключей не получит, пока не подтвердит вход: секретной фразой
+    // или с другого устройства (там показывается, какое устройство просит, и предупреждение).
+    // Сброс ключей («Забыли фразу?») недоступен, пока у владельца есть активное подтверждённое устройство.
     shareKeysWith: ShareKeysWith.crossVerifiedIfEnabled,
     nativeImplementations: NativeImplementationsIsolate(compute, vodozemacInit: () => vod.init()),
     logLevel: kReleaseMode ? Level.warning : Level.info,

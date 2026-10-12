@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:matrix/matrix.dart';
 
+import '../system/image_guard.dart';
 import '../system/lru.dart';
 import 'forward.dart' show forwardEvents;
 import 'save_media.dart';
@@ -15,7 +16,7 @@ final _full = Lru<String, Future<Uint8List?>>(12)..register();
 
 Future<Uint8List?> _load(Event e) => _full.putIfAbsent(e.eventId, () async {
       try {
-        return (await e.downloadAndDecryptAttachment()).bytes;
+        return await guardImage((await e.downloadAndDecryptAttachment()).bytes);
       } catch (_) {
         _full.remove(e.eventId);
         return null;

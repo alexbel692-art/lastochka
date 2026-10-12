@@ -191,7 +191,7 @@ class VoicePlayback extends ChangeNotifier {
         final f = await e.downloadAndDecryptAttachment();
         final mime = e.content.tryGetMap<String, Object?>('info')?['mimetype']?.toString() ?? '';
         final ext = mime.contains('ogg') ? 'ogg' : mime.contains('webm') ? 'webm' : mime.contains('mpeg') ? 'mp3' : mime.contains('wav') ? 'wav' : 'm4a';
-        path = p.join((await privateTemp()).path, 'play_${e.eventId.hashCode.abs()}.$ext');
+        path = p.join((await privateTemp()).path, 'play_${tempKey(e.eventId)}.$ext');
         await File(path).writeAsBytes(f.bytes, flush: true);
         _files[e.eventId] = path;
       }

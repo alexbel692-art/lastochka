@@ -10,11 +10,13 @@ Future<void> openAttachment(Event e, void Function(String) toast, {BuildContext?
     var name = (e.content.tryGet<String>('filename') ?? e.body).replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
     name = name.replaceAll(RegExp(r'[\x00-\x1f\u202a-\u202e\u2066-\u2069]'), '').trim(); // без «переворота» текста: «txt.exe» → «exe.txt»
     if (name.length > 120) name = name.substring(name.length - 120);
+    name = safeFileName(name);
     if (name.isEmpty || RegExp(r'^\.+$').hasMatch(name)) name = 'файл';
     final danger = isDangerousFile(name);
     // на компьютере — сразу в «Загрузки» (как в Telegram Desktop), на телефоне — во внутреннюю
     // папку приложения (удаляется при следующем запуске)
-    final downloads = isDesktop ? await getDownloadsDirectory() : null;
+    // программы и скрипты в «Загрузки» сами не кладём (рядом с установщиками это опасно) — только во внутреннюю папку
+    final downloads = isDesktop && !danger ? await getDownloadsDirectory() : null;
     final dir = downloads ?? await privateTemp();
     var path = p.join(dir.path, name);
     if (downloads != null) {
@@ -84,7 +86,7 @@ class _ImageState extends State<_Image> {
   Future<Uint8List?> _load({bool full = false}) => _images.putIfAbsent('${event.eventId}$full', () async {
         try {
           final f = await event.downloadAndDecryptAttachment(getThumbnail: !full && event.hasThumbnail);
-          return f.bytes;
+          return await guardImage(f.bytes);
         } catch (e) {
           Diag.err('Загрузка фото', e);
           return null;
@@ -103,14 +105,16 @@ class _ImageState extends State<_Image> {
     // декодируем не больше, чем нужно для показа, — огромная картинка не съест память
     final decodeW = (maxW * dpr).ceil().clamp(64, 1600);
     // размер указывает отправитель: если не указан — тоже не грузим сами
-    final big = !sticker && !event.hasThumbnail && (size <= 0 || size > _autoLoadLimit) && !_manualLoaded.contains(event.eventId);
+    // стикер тоже может оказаться огромным файлом — свыше 3 МБ только по нажатию
+    final big = !_manualLoaded.contains(event.eventId) &&
+        (sticker ? size > 3 * 1024 * 1024 : (!event.hasThumbnail && (size <= 0 || size > _autoLoadLimit)));
     Widget frame(Widget child) => box != null
         ? SizedBox(width: box!.width, height: box!.height, child: child)
         : SizedBox(width: maxW, child: AspectRatio(aspectRatio: sticker ? 1 : ratio.clamp(0.5, 2.5), child: child));
     return MouseRegion(
       cursor: sticker ? MouseCursor.defer : SystemMouseCursors.click,
       child: GestureDetector(
-      onTap: sticker
+      onTap: sticker && !big
           ? null
           : big
               ? () => setState(() => _manualLoaded.add(event.eventId))

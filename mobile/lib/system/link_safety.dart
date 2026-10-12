@@ -76,6 +76,9 @@ List<String> linkWarnings(Uri uri, {String? shown}) {
   }
   if (uri.host.contains('xn--') && !_cyr.hasMatch(host)) {
     out.add('Адрес закодирован (xn--…) и содержит необычные символы');
+  } else if (out.isEmpty && RegExp(r'[^\x00-\x7f]').hasMatch(host) && labels.any((l) => RegExp(r'[^a-z0-9а-яё-]').hasMatch(l))) {
+    // буквы-двойники из других алфавитов (ѕ, і, ј, греческая ο…), которые не попадают в «русские»
+    out.add('В адресе необычные буквы, похожие на латинские, — так подделывают известные сайты');
   }
   if (_ipv4.hasMatch(uri.host) || uri.host.startsWith('[')) {
     out.add('Вместо имени сайта — числовой адрес');

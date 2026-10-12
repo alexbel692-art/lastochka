@@ -96,7 +96,46 @@ class _VerifyGateState extends State<VerifyGate> {
   /// «Забыли секретную фразу?» — новая фраза вместо старой, со сбросом ключей (после двух предупреждений).
   bool _resetting = false;
 
+  /// Есть ли другое подтверждённое устройство, которое заходило недавно. Тогда сброс не нужен (и опасен:
+  /// так поступил бы и злоумышленник, узнавший пароль) — подтверждать нужно с того устройства.
+  Future<String?> _activeTrustedDevice() async {
+    try {
+      final me = client.userID!;
+      final keys = client.userDeviceKeys[me]?.deviceKeys ?? const {};
+      final devices = await client.getDevices() ?? const [];
+      final now = DateTime.now().millisecondsSinceEpoch;
+      for (final d in devices) {
+        if (d.deviceId == client.deviceID) continue;
+        final seen = d.lastSeenTs;
+        final recent = seen != null && now - seen < const Duration(days: 14).inMilliseconds;
+        if (recent && keys[d.deviceId]?.verified == true) return d.displayName?.isNotEmpty == true ? d.displayName! : d.deviceId;
+      }
+    } catch (e) {
+      Diag.err('Проверка устройств перед сбросом', e);
+    }
+    return null;
+  }
+
   Future<void> _forgot() async {
+    final other = await _activeTrustedDevice();
+    if (!mounted) return;
+    if (other != null) {
+      await showDialog<void>(
+        context: context,
+        builder: (d) => AlertDialog(
+          icon: const Icon(Icons.devices_outlined, size: 36),
+          title: const Text('Подтвердите с другого устройства'),
+          content: Text(
+            'У вас есть подтверждённое устройство «$other», которое недавно было в сети. '
+            'Нажмите «С другого устройства» и подтвердите вход там — секретная фраза не понадобится, переписка сохранится.\n\n'
+            'Сброс ключей доступен, только если других подтверждённых устройств нет или они не заходили 14 дней. '
+            'Так злоумышленник, узнавший пароль, не сможет сбросить ваши ключи, пока вы пользуетесь Ласточкой.',
+          ),
+          actions: [FilledButton(onPressed: () => Navigator.pop(d), child: const Text('Понятно'))],
+        ),
+      );
+      return;
+    }
     final first = await showDialog<bool>(
       context: context,
       builder: (d) => AlertDialog(
@@ -390,7 +429,21 @@ class _VerificationDialogState extends State<_VerificationDialog> {
     } else {
       switch (req.state) {
         case KeyVerificationState.askAccept:
-          body = Text('$who запрашивает подтверждение. Принять?');
+          final own = req.userId == client.userID;
+          final devId = req.deviceId;
+          final dev = devId == null ? null : client.userDeviceKeys[req.userId]?.deviceKeys[devId];
+          final devName = dev?.deviceDisplayName?.isNotEmpty == true ? '«${dev!.deviceDisplayName}» ' : '';
+          body = Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(own ? 'Устройство $devName(${devId ?? '?'}) запрашивает подтверждение. Принять?' : '$who запрашивает подтверждение. Принять?'),
+            if (own) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Принимайте, только если прямо сейчас сами входите в Ласточку на этом устройстве. '
+                'Подтверждённое устройство получит доступ ко всей вашей переписке.',
+                style: TextStyle(color: Colors.orange.shade800, fontSize: 13),
+              ),
+            ],
+          ]);
           actions = [
             TextButton(onPressed: () { req.rejectVerification(); _close(); }, child: const Text('Отклонить')),
             FilledButton(onPressed: () => req.acceptVerification(), child: const Text('Принять')),

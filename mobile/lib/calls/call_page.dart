@@ -9,6 +9,7 @@ import 'package:matrix/matrix.dart';
 import '../widgets/avatar.dart';
 import '../system/diag.dart';
 import 'sounds.dart';
+import '../system/notify.dart' show keyguardLocked;
 
 const _reasons = {
   CallErrorCode.userHangup: 'Звонок завершён',
@@ -37,6 +38,7 @@ class _CallPageState extends State<CallPage> {
   bool _speaker = false;
   bool _closing = false;
   bool _renderers = false; // видео можно подключать только после initialize()
+  bool _keyguard = false; // телефон заблокирован: «Назад» не открывает чаты поверх экрана блокировки
 
   @override
   void initState() {
@@ -51,9 +53,11 @@ class _CallPageState extends State<CallPage> {
     _subs.add(call.onCallStreamsChanged.stream.listen((_) => _bindStreams()));
     _subs.add(call.onStreamAdd.stream.listen((_) => _bindStreams()));
     _subs.add(call.onStreamRemoved.stream.listen((_) => _bindStreams()));
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && _connectedAt != null && !_closing) setState(() {});
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) async {
+      final k = await keyguardLocked();
+      if (mounted && (k != _keyguard || (_connectedAt != null && !_closing))) setState(() => _keyguard = k);
     });
+    keyguardLocked().then((k) => mounted ? setState(() => _keyguard = k) : null);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onState(call.state));
   }
 
@@ -239,7 +243,7 @@ class _CallPageState extends State<CallPage> {
     final ended = _closing || call.callHasEnded;
 
     return PopScope(
-      canPop: true,
+      canPop: !_keyguard,
       child: Scaffold(
         backgroundColor: const Color(0xFF1C2733),
         body: Stack(children: [

@@ -48,6 +48,8 @@ Future<void> logout(BuildContext context) async {
 
 /// Выйти без вопросов (после подтверждения).
 Future<void> logoutNow() async {
+  await clearAllNotifications();
+  await Diag.wipeLocal();
   await purgeDecryptedFiles();
   await Trust.instance.resetOwnDevices();
   await Drafts.instance.clearAll().catchError((_) {});
@@ -57,6 +59,13 @@ Future<void> logoutNow() async {
   } catch (_) {
     await client.clear();
   }
+  // список собеседников и отметки о проверке ключей — не оставляем после выхода
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    for (final k in prefs.getKeys().where((k) => k.startsWith('trust.') || k.startsWith('lastochka.stk.')).toList()) {
+      await prefs.remove(k);
+    }
+  } catch (_) {}
   navKey.currentState?.pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginPage()), (_) => false);
 }
 
@@ -71,6 +80,8 @@ Future<void> wipeDevice() async {
   try {
     await client.dispose(closeDatabase: true);
   } catch (_) {}
+  await clearAllNotifications();
+  await Diag.wipeLocal();
   await purgeDecryptedFiles();
   await wipeLocalStorage();
   try {

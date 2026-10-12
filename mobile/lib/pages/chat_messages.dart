@@ -252,7 +252,9 @@ extension _ChatMessages on _ChatPageState {
 
   /// Все версии изменённого сообщения: исходная и каждая правка со временем.
   Future<void> _showEditHistory(Event e, Timeline tl) async {
-    final edits = e.aggregatedEvents(tl, RelationshipTypes.edit).toList()..sort((a, b) => a.originServerTs.compareTo(b.originServerTs));
+    // правки только от автора сообщения — чужие «правки» не показываем
+    final edits = e.aggregatedEvents(tl, RelationshipTypes.edit).where((x) => x.senderId == e.senderId).toList()
+      ..sort((a, b) => a.originServerTs.compareTo(b.originServerTs));
     String textOf(Event x) {
       final nc = x.content.tryGetMap<String, Object?>('m.new_content');
       return stripMarkdown('${nc?['body'] ?? x.body}');

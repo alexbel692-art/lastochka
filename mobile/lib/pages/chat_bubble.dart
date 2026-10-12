@@ -58,13 +58,16 @@ class _Bubble extends StatelessWidget {
     final name = sender.calcDisplayname();
     final isSticker = e.type == EventTypes.Sticker && !event.redacted;
     final isImage = e.messageType == MessageTypes.Image && !event.redacted;
-    final edited = !event.redacted && (e.eventId != event.eventId || event.hasAggregatedEvents(timeline, RelationshipTypes.edit));
+    final edited = !event.redacted && (e.eventId != event.eventId || event.aggregatedEvents(timeline, RelationshipTypes.edit).any((x) => x.senderId == event.senderId));
 
     // реакции
     final reactions = <String, List<Event>>{};
     for (final r in event.aggregatedEvents(timeline, RelationshipTypes.reaction)) {
-      final k = r.content.tryGetMap<String, Object?>('m.relates_to')?['key'];
-      if (k is String) (reactions[k] ??= []).add(r);
+      var k = r.content.tryGetMap<String, Object?>('m.relates_to')?['key'];
+      if (k is! String || k.isEmpty) continue;
+      if (k.characters.length > 16) k = '${k.characters.take(16)}…'; // длинные «реакции»-тексты обрезаем
+      final list = reactions[k] ??= [];
+      if (!list.any((x) => x.senderId == r.senderId)) list.add(r); // один человек — один голос за реакцию
     }
 
     final exp = expiryOf(event);

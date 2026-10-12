@@ -13,8 +13,15 @@ const forwardedKey = 'ru.lastochka.forwarded';
 String? forwardedFrom(Event e) {
   final f = e.content[forwardedKey];
   if (f is! Map) return null;
+  final from = f['from'];
+  // имя берём из участников чата по адресу, а не из текста отправителя — его можно написать любым
+  if (from is String && from.startsWith('@') && from.contains(':')) {
+    final u = e.room.unsafeGetUserFromMemoryOrFallback(from);
+    final name = u.calcDisplayname();
+    return name == from.localpart ? from : '$name ($from)';
+  }
   final n = f['name'];
-  return n is String && n.isNotEmpty ? n : f['from'] is String ? f['from'] as String : null;
+  return n is String && n.isNotEmpty ? '«${n.characters.take(40)}» (не проверено)' : null;
 }
 
 bool canForward(Event e) => !e.redacted && (e.type == EventTypes.Message || e.type == EventTypes.Sticker);

@@ -51,6 +51,23 @@ class Diag {
   static const _logMax = 128 * 1024;
   static final _aes = AesGcm.with256bits();
 
+  /// Выход из аккаунта или экстренное удаление: журнал и следы шагов стираются с устройства.
+  static Future<void> wipeLocal() async {
+    _saveTimer?.cancel();
+    _session.clear();
+    _buf.clear();
+    _prev = const [];
+    lastCall = null;
+    final dir = _dir;
+    if (dir == null) return;
+    for (final n in ['diag_log.bin', 'diag_log.bin.tmp', 'diag_log.txt', 'diag_trail.txt', 'hang.txt', 'anr_trace.txt', 'native_crash.txt']) {
+      try {
+        final f = File(p.join(dir, n));
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
+  }
+
   static void _persist(String line) {
     _session.add(scrub(line).replaceAll('\n', '\n    '));
     if (_session.length > 600) _session.removeRange(0, _session.length - 600);
