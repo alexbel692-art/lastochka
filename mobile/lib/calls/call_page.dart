@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -95,7 +96,7 @@ class _CallPageState extends State<CallPage> {
     if (!mounted) return;
     if (s == CallState.kConnected && _connectedAt == null) {
       _connectedAt = DateTime.now();
-      rtc.Helper.setSpeakerphoneOn(_speaker).catchError((_) {});
+      if (Platform.isAndroid || Platform.isIOS) rtc.Helper.setSpeakerphoneOn(_speaker).catchError((_) {});
     }
     if (s == CallState.kInviteSent && call.isOutgoing) CallSounds.outgoing();
     if (s == CallState.kConnecting || s == CallState.kConnected) CallSounds.stop();
@@ -276,10 +277,12 @@ class _CallPageState extends State<CallPage> {
                   padding: const EdgeInsets.only(bottom: 40, left: 12, right: 12),
                   child: Column(children: [
                     Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                      _btn(_speaker ? Icons.volume_up : Icons.volume_down, 'Динамик', () {
-                        setState(() => _speaker = !_speaker);
-                        rtc.Helper.setSpeakerphoneOn(_speaker).catchError((_) {});
-                      }, active: _speaker),
+                      // громкая связь есть только на телефоне
+                      if (Platform.isAndroid || Platform.isIOS)
+                        _btn(_speaker ? Icons.volume_up : Icons.volume_down, 'Динамик', () {
+                          setState(() => _speaker = !_speaker);
+                          rtc.Helper.setSpeakerphoneOn(_speaker).catchError((_) {});
+                        }, active: _speaker),
                       _btn(call.isLocalVideoMuted || !localVideo ? Icons.videocam_off : Icons.videocam, 'Видео', () async {
                         final on = !localVideo;
                         try {
@@ -300,7 +303,7 @@ class _CallPageState extends State<CallPage> {
                             // с видео удобнее говорить по громкой связи, как в Telegram
                             if (!_speaker) {
                               setState(() => _speaker = true);
-                              rtc.Helper.setSpeakerphoneOn(true).catchError((_) {});
+                              if (Platform.isAndroid || Platform.isIOS) rtc.Helper.setSpeakerphoneOn(true).catchError((_) {});
                             }
                           }
                         }

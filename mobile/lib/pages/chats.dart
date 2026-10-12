@@ -22,6 +22,7 @@ import '../widgets/login_banner.dart';
 import '../widgets/clock_banner.dart';
 import '../widgets/update_banner.dart';
 import 'chat.dart';
+import 'home.dart' show ContactsPage, CallsPage;
 import 'settings.dart';
 
 String previewText(Room room) {
@@ -124,6 +125,10 @@ class _ChatsPageState extends State<ChatsPage> {
   bool _searching = false;
   // на широком экране меню выезжает поверх всего окна (а не только списка чатов) и закрывается кликом в любом месте
   final _outer = GlobalKey<ScaffoldState>();
+  final _inner = GlobalKey<ScaffoldState>();
+  int _leftTab = 0; // компьютер: 0 — чаты, 1 — контакты, 2 — звонки (настройки — окном)
+  Future<Profile>? _me;
+  void _openMenu() => (_wide ? _outer : _inner).currentState?.openDrawer();
   final _q = TextEditingController();
   List<Profile> _people = [];
   Timer? _peopleTimer;
@@ -206,6 +211,7 @@ class _ChatsPageState extends State<ChatsPage> {
       if (s.rooms != null || s.accountData != null || s.presence != null) _redraw();
     });
     Drafts.instance.changed.addListener(_redraw);
+    _me = client.fetchOwnProfile();
   }
 
   Timer? _redrawTimer;
@@ -511,7 +517,7 @@ class _ChatsPageState extends State<ChatsPage> {
         body: Row(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 8, 4, 8),
-          child: ClipRRect(borderRadius: BorderRadius.circular(18), child: SizedBox(width: listW - 12, child: _list(context))),
+          child: ClipRRect(borderRadius: BorderRadius.circular(18), child: SizedBox(width: listW - 12, child: _leftPane(context))),
         ),
         Expanded(
           child: Padding(
@@ -528,13 +534,47 @@ class _ChatsPageState extends State<ChatsPage> {
     });
   }
 
+  /// Компьютер и Mac: слева — чаты, контакты или звонки, внизу — переключатель, как в Telegram Desktop.
+  Widget _leftPane(BuildContext context) {
+    return Column(children: [
+      Expanded(
+        child: IndexedStack(index: _leftTab, children: [
+          _list(context),
+          _leftTab == 1 ? ContactsPage(onOpen: (r) => _open(r)) : const SizedBox.shrink(),
+          _leftTab == 2 ? CallsPage(onOpen: (r) => _open(r)) : const SizedBox.shrink(),
+        ]),
+      ),
+      NavigationBar(
+        height: 62,
+        selectedIndex: _leftTab,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        onDestinationSelected: (i) {
+          if (i == 3) {
+            pushAdaptive<void>(context, (_) => const SettingsPage(), maxWidth: 620);
+            return;
+          }
+          setState(() => _leftTab = i);
+        },
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.chat_bubble_outline_rounded), selectedIcon: Icon(Icons.chat_bubble_rounded), label: 'Чаты'),
+          NavigationDestination(icon: Icon(Icons.person_outline_rounded), selectedIcon: Icon(Icons.person_rounded), label: 'Контакты'),
+          NavigationDestination(icon: Icon(Icons.call_outlined), selectedIcon: Icon(Icons.call_rounded), label: 'Звонки'),
+          NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings_rounded), label: 'Настройки'),
+        ],
+      ),
+    ]);
+  }
+
   Widget _list(BuildContext context) {
     final rooms = _rooms;
     final hint = Theme.of(context).hintColor;
     final accent = Theme.of(context).colorScheme.primary;
     return Scaffold(
+      key: _inner,
       appBar: AppBar(
-        leading: _wide ? IconButton(icon: const Icon(Icons.menu), tooltip: 'Меню', onPressed: () => _outer.currentState?.openDrawer()) : null,
+        // вместо «трёх полосок» — своя аватарка и имя (нажатие открывает меню), над именем — «Ласточка»
+        automaticallyImplyLeading: false,
+        titleSpacing: 12,
         title: _searching
             ? TextField(enableIMEPersonalizedLearning: false, 
                 controller: _q,
@@ -549,7 +589,7 @@ class _ChatsPageState extends State<ChatsPage> {
                   suffixIcon: _q.text.isEmpty ? null : IconButton(icon: const Icon(Icons.close), onPressed: () => setState(_q.clear)),
                 ),
               )
-            : const Text('Ласточка', style: TextStyle(fontWeight: FontWeight.w600)),
+            : _Header(me: _me, onTap: _openMenu),
         actions: [
           IconButton(
             icon: Icon(_searching ? Icons.arrow_forward : Icons.search),
@@ -801,6 +841,53 @@ class _ChatsPageState extends State<ChatsPage> {
           pushAdaptive<void>(context, (_) => const SettingsPage(), maxWidth: 620);
         }),
       ]),
+    );
+  }
+}
+
+/// Шапка списка чатов: аватарка, «Ласточка» фирменной надписью и отображаемое имя.
+class _Header extends StatelessWidget {
+  final Future<Profile>? me;
+  final VoidCallback onTap;
+  const _Header({required this.me, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.primary;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return FutureBuilder<Profile>(
+      future: me,
+      builder: (context, s) {
+        final id = client.userID ?? '';
+        final name = s.data?.displayName ?? id.localpart ?? '';
+        return Tooltip(
+          message: 'Меню',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(24),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Avatar(mxc: s.data?.avatarUrl, name: name, size: 38),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                    // фирменная надпись: градиент и чуть разреженные буквы
+                    ShaderMask(
+                      blendMode: BlendMode.srcIn,
+                      shaderCallback: (r) => LinearGradient(
+                        colors: dark ? [const Color(0xFF9DB8FF), accent] : [const Color(0xFF2A6FE0), const Color(0xFF6B4FD8)],
+                      ).createShader(r),
+                      child: const Text('Ласточка', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700, letterSpacing: 0.3, height: 1.1)),
+                    ),
+                    Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Theme.of(context).hintColor, height: 1.2)),
+                  ]),
+                ),
+              ]),
+            ),
+          ),
+        );
+      },
     );
   }
 }

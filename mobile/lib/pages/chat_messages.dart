@@ -139,6 +139,8 @@ extension _ChatMessages on _ChatPageState {
           if (isText && !e.redacted) ListTile(leading: const Icon(Icons.copy), title: const Text('Копировать текст'), onTap: () => Navigator.pop(c, 'copy')),
           if (_canPin && !e.redacted)
             ListTile(leading: Icon(pinned ? Icons.push_pin : Icons.push_pin_outlined), title: Text(pinned ? 'Открепить' : 'Закрепить'), onTap: () => Navigator.pop(c, 'pin')),
+          if (canSaveMedia(disp) && (!(Platform.isAndroid || Platform.isIOS) || isImg || disp.messageType == MessageTypes.Video))
+            ListTile(leading: const Icon(Icons.download_rounded), title: Text(saveMediaLabel), onTap: () => Navigator.pop(c, 'save')),
           if (isImg && !e.redacted) ListTile(leading: const Icon(Icons.emoji_emotions_outlined), title: const Text('В мои стикеры'), onTap: () => Navigator.pop(c, 'sticker')),
           if (disp.hasAttachment && !isImg && !e.redacted) ListTile(leading: const Icon(Icons.download_outlined), title: const Text('Открыть файл'), onTap: () => Navigator.pop(c, 'open')),
           if (e.canRedact && !e.redacted)
@@ -191,6 +193,8 @@ extension _ChatMessages on _ChatPageState {
         _toast(await addToOwnPack(disp));
       case 'open':
         await openAttachment(disp, _toast, context: context);
+      case 'save':
+        if (mounted) await saveMedia(context, disp);
       case 'del':
         final ok = await showDialog<bool>(
           context: context,

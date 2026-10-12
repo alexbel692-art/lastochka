@@ -243,6 +243,10 @@ class Diag {
       prev?.call(d);
     };
     PlatformDispatcher.instance.onError = (e, st) {
+      final t = '$e';
+      // известный безвредный шум: на компьютере нет «громкой связи» (модуль звонков всё равно её включает),
+      // кандидаты соединения пришли раньше ответа собеседника — модуль звонков применит их позже
+      if (t.contains('enableSpeakerphone') || t.contains('not remote description')) return true;
       add('Dart: $e\n$st');
       return false;
     };

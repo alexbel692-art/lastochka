@@ -7,6 +7,8 @@ import 'package:intl/intl.dart';
 import 'package:matrix/matrix.dart';
 
 import '../system/lru.dart';
+import 'forward.dart' show forwardEvents;
+import 'save_media.dart';
 import 'video.dart';
 
 final _full = Lru<String, Future<Uint8List?>>(12)..register();
@@ -73,6 +75,11 @@ class _MediaViewerState extends State<_MediaViewer> {
           appBar: AppBar(
             backgroundColor: Colors.black,
             foregroundColor: Colors.white,
+            actions: [
+              IconButton(tooltip: saveMediaLabel, icon: const Icon(Icons.download_rounded), onPressed: () => saveMedia(context, widget.items[_i])),
+              IconButton(tooltip: 'Переслать', icon: const Icon(Icons.shortcut_rounded), onPressed: () => forwardEvents(context, [widget.items[_i]], null)),
+              const SizedBox(width: 4),
+            ],
             title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(widget.items.length > 1 ? '${_i + 1} из ${widget.items.length}' : who, style: const TextStyle(fontSize: 17)),
               Text('${widget.items.length > 1 ? '$who · ' : ''}${DateFormat('d MMM, HH:mm', 'ru').format(e.originServerTs)}',

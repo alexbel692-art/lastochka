@@ -278,7 +278,9 @@ class VideoPreview extends StatelessWidget {
         ? SizedBox(width: maxWidth, height: height, child: child)
         : SizedBox(width: maxWidth, child: AspectRatio(aspectRatio: ratio.clamp(0.6, 1.9), child: child));
     final small = height != null && height! < 120;
-    return GestureDetector(
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
       onTap: onOpen,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(radius),
@@ -313,6 +315,7 @@ class VideoPreview extends StatelessWidget {
                 ),
             ]),
         ),
+      ),
       ),
     );
   }

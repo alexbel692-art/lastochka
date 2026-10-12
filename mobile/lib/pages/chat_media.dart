@@ -107,7 +107,9 @@ class _ImageState extends State<_Image> {
     Widget frame(Widget child) => box != null
         ? SizedBox(width: box!.width, height: box!.height, child: child)
         : SizedBox(width: maxW, child: AspectRatio(aspectRatio: sticker ? 1 : ratio.clamp(0.5, 2.5), child: child));
-    return GestureDetector(
+    return MouseRegion(
+      cursor: sticker ? MouseCursor.defer : SystemMouseCursors.click,
+      child: GestureDetector(
       onTap: sticker
           ? null
           : big
@@ -143,6 +145,7 @@ class _ImageState extends State<_Image> {
                           ),
                   ),
         ),
+      ),
       ),
     );
   }

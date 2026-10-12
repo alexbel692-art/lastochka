@@ -51,10 +51,11 @@ class _HomeShellState extends State<HomeShell> {
       });
 }
 
-Future<void> _openDm(BuildContext context, String userId) async {
+Future<void> _openDm(BuildContext context, String userId, [void Function(Room)? onOpen]) async {
   try {
     final id = client.getDirectChatFromUserId(userId) ?? await client.startDirectChat(userId, enableEncryption: true);
     final room = client.getRoomById(id) ?? await client.waitForRoomInSync(id).then((_) => client.getRoomById(id));
+    if (room != null && onOpen != null) return onOpen(room);
     if (room != null && context.mounted) await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatPage(room: room)));
   } catch (e) {
     Diag.err('Открытие личного чата', e);
@@ -65,7 +66,9 @@ Future<void> _openDm(BuildContext context, String userId) async {
 // ---------------- Контакты ----------------
 
 class ContactsPage extends StatefulWidget {
-  const ContactsPage({super.key});
+  /// Компьютер: открыть чат справа, а не новым экраном.
+  final void Function(Room)? onOpen;
+  const ContactsPage({super.key, this.onOpen});
   @override
   State<ContactsPage> createState() => _ContactsPageState();
 }
@@ -167,7 +170,7 @@ class _ContactsPageState extends State<ContactsPage> {
                               },
                             )
                           : null,
-                      onTap: () => _openDm(context, id),
+                      onTap: () => _openDm(context, id, widget.onOpen),
                     );
                   },
                 ),
@@ -187,7 +190,8 @@ class _CallItem {
 }
 
 class CallsPage extends StatefulWidget {
-  const CallsPage({super.key});
+  final void Function(Room)? onOpen;
+  const CallsPage({super.key, this.onOpen});
   @override
   State<CallsPage> createState() => _CallsPageState();
 }
@@ -268,7 +272,7 @@ class _CallsPageState extends State<CallsPage> {
                                   onPressed: () => startCall(context, c.room, video: c.video),
                                 )
                               : null,
-                          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatPage(room: c.room))),
+                          onTap: () => widget.onOpen != null ? widget.onOpen!(c.room) : Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatPage(room: c.room))),
                         );
                       },
                     ),

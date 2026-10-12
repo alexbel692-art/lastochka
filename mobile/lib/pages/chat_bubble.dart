@@ -66,7 +66,7 @@ class _Bubble extends StatelessWidget {
     final exp = expiryOf(event);
     // проверяем и исходное сообщение, и показанную правку (её мог прислать другой отправитель-устройство)
     final warn = event.redacted ? null : (Trust.instance.senderWarning(event) ?? (e.eventId != event.eventId ? Trust.instance.senderWarning(e) : null));
-    final meta = Row(mainAxisSize: MainAxisSize.min, children: [
+    Widget metaOf(Color mc) => Row(mainAxisSize: MainAxisSize.min, children: [
       if (warn != null)
         Tooltip(
           message: warn,
@@ -76,10 +76,10 @@ class _Bubble extends StatelessWidget {
       if (exp > 0)
         ValueListenableBuilder<int>(
           valueListenable: ttlTick,
-          builder: (_, __, ___) => Text('🔥${fmtLeft(exp - DateTime.now().millisecondsSinceEpoch)} ', style: TextStyle(fontSize: 11.5, color: metaColor)),
+          builder: (_, __, ___) => Text('🔥${fmtLeft(exp - DateTime.now().millisecondsSinceEpoch)} ', style: TextStyle(fontSize: 11.5, color: mc)),
         ),
-      if (edited) Text('изм. ', style: TextStyle(fontSize: 11.5, color: metaColor)),
-      Text(time, style: TextStyle(fontSize: 11.5, color: metaColor)),
+      if (edited) Text('изм. ', style: TextStyle(fontSize: 11.5, color: mc)),
+      Text(time, style: TextStyle(fontSize: 11.5, color: mc)),
       if (mine) ...[
         const SizedBox(width: 3),
         Icon(
@@ -91,10 +91,18 @@ class _Bubble extends StatelessWidget {
                       ? Icons.done_all
                       : Icons.done,
           size: 15,
-          color: event.status.isError ? Colors.redAccent : metaColor,
+          color: event.status.isError ? Colors.redAccent : mc,
         ),
       ],
     ]);
+
+    final meta = metaOf(metaColor);
+    // время поверх фото, видео и на стикере — белое на тёмной подложке, как в Telegram
+    final metaOnMedia = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.38), borderRadius: BorderRadius.circular(10)),
+      child: metaOf(Colors.white),
+    );
 
     Widget content;
     if (event.redacted) {
@@ -199,6 +207,7 @@ class _Bubble extends StatelessWidget {
     final bareMedia = isSticker || (isRound(e) && !event.redacted); // стикер и «кружок» без пузыря, как в Telegram
     final isText = !isImage && !isSticker && !isPollStart(e) && e.messageType != MessageTypes.Audio && e.messageType != MessageTypes.File && e.messageType != MessageTypes.Video;
     final fwd = event.redacted ? null : forwardedFrom(e);
+    final mediaOnly = !event.redacted && (isImage || e.messageType == MessageTypes.Video || (album != null && album!.length > 1)) && !isRound(e);
 
     final reactRow = reactions.isEmpty
         ? null
@@ -227,12 +236,7 @@ class _Bubble extends StatelessWidget {
         if (replyId != null) _ReplyPreview(room: room, timeline: timeline, eventId: replyId, onTap: onReplyTap, boxed: true),
         content,
         if (reactRow != null) reactRow,
-        Container(
-          margin: const EdgeInsets.only(top: 2),
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.25), borderRadius: BorderRadius.circular(10)),
-          child: DefaultTextStyle.merge(style: const TextStyle(color: Colors.white), child: IconTheme.merge(data: const IconThemeData(color: Colors.white), child: meta)),
-        ),
+        Padding(padding: const EdgeInsets.only(top: 2), child: metaOnMedia),
       ]);
     } else {
       final inner = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
@@ -250,6 +254,9 @@ class _Bubble extends StatelessWidget {
         if (isText)
           // время «обтекается» текстом, как в Telegram
           Wrap(alignment: WrapAlignment.end, crossAxisAlignment: WrapCrossAlignment.end, spacing: 8, children: [content, Padding(padding: const EdgeInsets.only(top: 4), child: meta)])
+        else if (mediaOnly && reactRow == null)
+          // фото и видео без подписи — время прямо на картинке, пузырь ровно по её размеру
+          Stack(children: [content, Positioned(right: 6, bottom: 6, child: metaOnMedia)])
         else ...[
           content,
           if (reactRow == null) Align(alignment: Alignment.bottomRight, child: Padding(padding: const EdgeInsets.only(top: 3), child: meta)),
@@ -282,8 +289,9 @@ class _Bubble extends StatelessWidget {
           shadows: const [BoxShadow(color: Color(0x14000000), blurRadius: 1.5, offset: Offset(0, 1))],
         ),
         child: Padding(
-          padding: EdgeInsets.fromLTRB(isImage ? 4 : 10, isImage ? 4 : 6, isImage ? 4 : 10, isImage ? 4 : 6).add(TgBubbleBorder(mine: mine, tail: tail).dimensions),
-          child: inner,
+          padding: EdgeInsets.fromLTRB(mediaOnly ? 3 : 10, mediaOnly ? 3 : 6, mediaOnly ? 3 : 10, mediaOnly ? 3 : 6).add(TgBubbleBorder(mine: mine, tail: tail).dimensions),
+          // не текст — ширина пузыря по содержимому, а не по самой широкой строке времени
+          child: isText || e.messageType == MessageTypes.Audio || event.redacted ? inner : IntrinsicWidth(child: inner),
         ),
       );
     }
