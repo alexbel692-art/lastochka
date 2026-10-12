@@ -517,8 +517,6 @@ class _ChatsPageState extends State<ChatsPage> {
     });
   }
 
-  Color hint(BuildContext context) => Theme.of(context).hintColor;
-
   Widget _list(BuildContext context) {
     final rooms = _rooms;
     final hint = Theme.of(context).hintColor;
@@ -680,10 +678,12 @@ class _ChatsPageState extends State<ChatsPage> {
                     final typing = r.typingUsers.where((u) => u.id != client.userID).toList();
                     // выбранный чат на компьютере — залит цветом, как в Telegram Desktop
                     final sel = _wide && _selected?.id == r.id;
-                    final hint = sel ? Colors.white.withValues(alpha: 0.78) : this.hint(context);
-                    final accent = sel ? Colors.white : Theme.of(context).colorScheme.primary;
+                    final tHint = sel ? Colors.white.withValues(alpha: 0.78) : hint;
+                    final tAccent = sel ? Colors.white : accent;
                     return Padding(
                       padding: EdgeInsets.symmetric(horizontal: _wide ? 6 : 0, vertical: _wide ? 1 : 0),
+                      child: GestureDetector(
+                      onSecondaryTap: () => _menu(r), // правая кнопка мыши — меню чата
                       child: ListTile(
                       selected: sel,
                       selectedTileColor: Theme.of(context).colorScheme.primary,
@@ -695,9 +695,9 @@ class _ChatsPageState extends State<ChatsPage> {
                       title: Row(children: [
                         if (r.encrypted && r.isDirectChat) Padding(padding: const EdgeInsets.only(right: 3), child: Icon(Icons.lock, size: 14, color: Colors.green.shade600)),
                         Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16.5))),
-                        if (muted) Padding(padding: const EdgeInsets.only(left: 3), child: Icon(Icons.volume_off, size: 15, color: hint)),
+                        if (muted) Padding(padding: const EdgeInsets.only(left: 3), child: Icon(Icons.volume_off, size: 15, color: tHint)),
                         if (mineLast) Padding(padding: const EdgeInsets.only(left: 6), child: Icon(readLast ? Icons.done_all : Icons.done, size: 16, color: sel ? Colors.white : Colors.green.shade600)),
-                        if (ts != null) Padding(padding: const EdgeInsets.only(left: 4), child: Text(shortTime(ts), style: TextStyle(fontSize: 12.5, color: unread > 0 && !muted ? accent : hint))),
+                        if (ts != null) Padding(padding: const EdgeInsets.only(left: 4), child: Text(shortTime(ts), style: TextStyle(fontSize: 12.5, color: unread > 0 && !muted ? tAccent : tHint))),
                       ]),
                       subtitle: Padding(
                         padding: const EdgeInsets.only(top: 3),
@@ -711,26 +711,26 @@ class _ChatsPageState extends State<ChatsPage> {
                                     ]),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(color: hint, fontSize: 15),
+                                    style: TextStyle(color: tHint, fontSize: 15),
                                   )
                                 : typing.isNotEmpty
-                                ? Text(r.isDirectChat ? 'печатает…' : '${typing.first.calcDisplayname()} печатает…', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: accent))
-                                : Text(previewText(r), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: hint, fontSize: 15)),
+                                ? Text(r.isDirectChat ? 'печатает…' : '${typing.first.calcDisplayname()} печатает…', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: tAccent))
+                                : Text(previewText(r), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: tHint, fontSize: 15)),
                           ),
-                          if (r.isFavourite && unread == 0) Icon(Icons.push_pin, size: 16, color: hint),
+                          if (r.isFavourite && unread == 0) Icon(Icons.push_pin, size: 16, color: tHint),
                           if (unread > 0 || r.membership == Membership.invite)
                             Container(
                               margin: const EdgeInsets.only(left: 6),
                               constraints: const BoxConstraints(minWidth: 22),
                               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                              decoration: BoxDecoration(color: sel ? Colors.white : muted ? hint.withValues(alpha: 0.6) : accent, borderRadius: BorderRadius.circular(12)),
+                              decoration: BoxDecoration(color: sel ? Colors.white : muted ? tHint.withValues(alpha: 0.6) : tAccent, borderRadius: BorderRadius.circular(12)),
                               child: Text(unread > 0 ? '$unread' : '•', textAlign: TextAlign.center, style: TextStyle(color: sel ? Theme.of(context).colorScheme.primary : Colors.white, fontSize: 12.5, fontWeight: FontWeight.w600)),
                             ),
                         ]),
                       ),
                       onTap: () => _open(r),
                       onLongPress: () => _menu(r),
-                      onSecondaryTap: () => _menu(r),
+                    ),
                     ),
                     );
                   },
