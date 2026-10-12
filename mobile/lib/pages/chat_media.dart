@@ -184,7 +184,12 @@ class _Album extends StatelessWidget {
                               maxWidth: w,
                               height: h,
                               radius: 0,
-                              onOpen: () => openVideo(context, e, () => openAttachment(e, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s))))),
+                              onOpen: () {
+                                void ext(Event m) => openAttachment(m, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s))), context: context);
+                                if (!videoSupported) return ext(e);
+                                final st = context.findAncestorStateOfType<_ChatPageState>();
+                                openMediaViewer(context, st?._mediaList() ?? [e], e, openExternally: ext);
+                              },
                             )
                           : _Image(e, box: Size(w, h)),
                     );

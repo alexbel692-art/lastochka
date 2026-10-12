@@ -22,7 +22,9 @@ import 'voice.dart' show fmtDur;
 import '../system/diag.dart';
 
 const roundKey = 'ru.lastochka.round';
-final bool videoSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
+// Windows — через Media Foundation (video_player_win); если система не умеет (например, Windows Server без
+// компонента «Media Foundation»), видео откроется в проигрывателе системы
+final bool videoSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isWindows;
 final bool canRecordRound = Platform.isAndroid || Platform.isIOS;
 
 const _system = MethodChannel('lastochka/system');
@@ -423,17 +425,33 @@ class _RoundVideoState extends State<RoundVideo> {
 /// Полноэкранный просмотр обычного видео.
 Future<void> openVideo(BuildContext context, Event e, void Function() openExternally) async {
   if (!videoSupported) return openExternally();
-  await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => _VideoPage(event: e)));
+  await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => _VideoPage(event: e, openExternally: openExternally)));
 }
 
-class _VideoPage extends StatefulWidget {
+class _VideoPage extends StatelessWidget {
   final Event event;
-  const _VideoPage({required this.event});
+  final void Function() openExternally;
+  const _VideoPage({required this.event, required this.openExternally});
+
   @override
-  State<_VideoPage> createState() => _VideoPageState();
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white),
+        body: VideoPlayerView(event: event, openExternally: openExternally),
+      );
 }
 
-class _VideoPageState extends State<_VideoPage> {
+/// Проигрыватель видео внутри Ласточки: нажатие — пауза/воспроизведение, полоса — перемотка.
+class VideoPlayerView extends StatefulWidget {
+  final Event event;
+  final void Function() openExternally;
+  final bool autoplay;
+  const VideoPlayerView({super.key, required this.event, required this.openExternally, this.autoplay = true});
+  @override
+  State<VideoPlayerView> createState() => _VideoPlayerViewState();
+}
+
+class _VideoPlayerViewState extends State<VideoPlayerView> {
   VideoPlayerController? _c;
   bool _failed = false;
 
@@ -445,17 +463,19 @@ class _VideoPageState extends State<_VideoPage> {
       if (f == null) return setState(() => _failed = true);
       final c = VideoPlayerController.file(f);
       try {
-        await c.initialize();
+        await c.initialize().timeout(const Duration(seconds: 20));
         if (!mounted) {
           await c.dispose();
           return;
         }
         c.addListener(() => mounted ? setState(() {}) : null);
         setState(() => _c = c);
-        await c.play();
+        if (widget.autoplay) await c.play();
       } catch (e, st) {
         Diag.err('Воспроизведение видео', e, st);
-        await c.dispose();
+        try {
+          await c.dispose();
+        } catch (_) {}
         if (mounted) setState(() => _failed = true);
       }
     });
@@ -470,24 +490,53 @@ class _VideoPageState extends State<_VideoPage> {
   @override
   Widget build(BuildContext context) {
     final c = _c;
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white),
-      body: Center(
-        child: _failed
-            ? const Text('Не удалось открыть видео', style: TextStyle(color: Colors.white))
-            : c == null
-                ? const CircularProgressIndicator()
-                : GestureDetector(
-                    onTap: () => c.value.isPlaying ? c.pause() : c.play(),
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Flexible(child: AspectRatio(aspectRatio: c.value.aspectRatio, child: VideoPlayer(c))),
-                      VideoProgressIndicator(c, allowScrubbing: true, padding: const EdgeInsets.all(12)),
-                      Text('${fmtDur(c.value.position.inMilliseconds)} / ${fmtDur(c.value.duration.inMilliseconds)}', style: const TextStyle(color: Colors.white70)),
-                      const SizedBox(height: 12),
-                    ]),
-                  ),
+    if (_failed) {
+      return Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.videocam_off_outlined, color: Colors.white70, size: 40),
+          const SizedBox(height: 10),
+          const Text('Это видео не получается воспроизвести здесь', style: TextStyle(color: Colors.white)),
+          const SizedBox(height: 12),
+          FilledButton.tonalIcon(onPressed: widget.openExternally, icon: const Icon(Icons.open_in_new), label: const Text('Открыть в проигрывателе')),
+        ]),
+      );
+    }
+    if (c == null) return const Center(child: CircularProgressIndicator());
+    final playing = c.value.isPlaying;
+    return Column(children: [
+      Expanded(
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: () => playing ? c.pause() : c.play(),
+            child: Stack(alignment: Alignment.center, children: [
+              Center(child: AspectRatio(aspectRatio: c.value.aspectRatio <= 0 ? 16 / 9 : c.value.aspectRatio, child: VideoPlayer(c))),
+              if (!playing)
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.45), shape: BoxShape.circle),
+                  child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 40),
+                ),
+            ]),
+          ),
+        ),
       ),
-    );
+      SafeArea(
+        top: false,
+        child: Row(children: [
+          IconButton(
+            color: Colors.white,
+            icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded),
+            onPressed: () => playing ? c.pause() : c.play(),
+          ),
+          Expanded(child: VideoProgressIndicator(c, allowScrubbing: true, padding: const EdgeInsets.symmetric(vertical: 14))),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text('${fmtDur(c.value.position.inMilliseconds)} / ${fmtDur(c.value.duration.inMilliseconds)}', style: const TextStyle(color: Colors.white70)),
+          ),
+        ]),
+      ),
+    ]);
   }
 }

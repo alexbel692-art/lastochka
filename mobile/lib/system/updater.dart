@@ -67,6 +67,9 @@ class Updater {
   final _http = IOClient(HttpClient(context: CertPinning.trustContext)..connectionTimeout = const Duration(seconds: 30));
 
   final available = ValueNotifier<UpdateInfo?>(null);
+  /// Нашлась версия, о которой ещё не сообщали (раз за запуск на каждую версию).
+  void Function(UpdateInfo u)? onNewVersion;
+  final _announced = <String>{};
   final progress = ValueNotifier<double?>(null); // 0..1 во время скачивания
   final error = ValueNotifier<String?>(null);
   Timer? _timer;
@@ -97,7 +100,8 @@ class Updater {
     onInstallStatus = _onAndroidStatus;
     // при запуске — сразу (через пару секунд, чтобы не мешать открытию чатов)
     Future.delayed(const Duration(seconds: 3), _auto);
-    _timer ??= Timer.periodic(const Duration(hours: 6), (_) => _auto());
+    // проверка раз в час: новая версия не пройдёт незамеченной, даже если Ласточку не закрывают
+    _timer ??= Timer.periodic(const Duration(hours: 1), (_) => _auto());
     // вернулись в Ласточку, а проверяли больше часа назад — проверим снова;
     // свернули — самое время поставить уже скачанное обновление
     visibility.addListener(() {
@@ -245,8 +249,11 @@ class Updater {
       final sig = file == null ? null : assets.where((a) => a['name'] == '${file['name']}.sig').firstOrNull;
       if (file == null || sig == null) return false;
       if (switchAbi) Diag.add('Стоит 32-битная версия на 64-битном телефоне — предлагаем переустановку');
+      final isNew = !_announced.contains(version);
+      _announced.add(version);
       available.value = UpdateInfo(version, switchAbi && cmpVer(version, appVersion) == 0 ? 'Версия для вашего процессора — уберёт предупреждение о совместимости' : '${rel['body'] ?? ''}', '${file['name']}', '${file['browser_download_url']}',
           '${sig['browser_download_url']}', (file['size'] as num?)?.toInt() ?? 0);
+      if (isNew && available.value != null) onNewVersion?.call(available.value!);
       return true;
     } catch (e) {
       Diag.err('Проверка обновлений', e);

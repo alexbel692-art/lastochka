@@ -68,3 +68,49 @@ class Avatar extends StatelessWidget {
     );
   }
 }
+
+/// Посмотреть аватарку крупно (нажатие на свою аватарку в шапке, на аватарку в профиле).
+Future<void> showAvatarViewer(BuildContext context, Uri? mxc, String name, {VoidCallback? onEdit}) => showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (d) {
+        final side = (MediaQuery.sizeOf(d).shortestSide * 0.8).clamp(200.0, 560.0);
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            GestureDetector(
+              onTap: () => Navigator.pop(d),
+              child: ClipOval(
+                child: SizedBox(
+                  width: side,
+                  height: side,
+                  child: mxc == null
+                      ? Avatar(mxc: null, name: name, size: side)
+                      : FutureBuilder<Uint8List?>(
+                          future: loadThumb(mxc, 1024),
+                          builder: (_, s) => s.data == null
+                              ? Avatar(mxc: mxc, name: name, size: side)
+                              : InteractiveViewer(maxScale: 4, child: Image.memory(s.data!, fit: BoxFit.cover, gaplessPlayback: true)),
+                        ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(name, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600)),
+            if (onEdit != null) ...[
+              const SizedBox(height: 10),
+              TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: Colors.white),
+                onPressed: () {
+                  Navigator.pop(d);
+                  onEdit();
+                },
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Изменить в настройках'),
+              ),
+            ],
+          ]),
+        );
+      },
+    );

@@ -94,11 +94,17 @@ class _MediaViewerState extends State<_MediaViewer> {
               itemBuilder: (_, i) {
                 final m = widget.items[i];
                 if (m.messageType == MessageTypes.Video) {
+                  // видео воспроизводится прямо здесь, как фото открывается; на соседних страницах — кадр
+                  if (i == _i && videoSupported) {
+                    return VideoPlayerView(key: ValueKey(m.eventId), event: m, openExternally: () => widget.openExternally(m));
+                  }
                   return Center(
                     child: VideoPreview(
                       event: m,
                       maxWidth: MediaQuery.sizeOf(context).width.clamp(200, 720).toDouble(),
-                      onOpen: () => openVideo(context, m, () => widget.openExternally(m)),
+                      onOpen: () {
+                        if (!videoSupported) widget.openExternally(m);
+                      },
                     ),
                   );
                 }

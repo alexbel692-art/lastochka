@@ -36,6 +36,7 @@ import 'system/stale_sessions.dart';
 late Client client;
 final _switcherCover = ValueNotifier<bool>(false);
 final navKey = GlobalKey<NavigatorState>();
+final messengerKey = GlobalKey<ScaffoldMessengerState>();
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -111,6 +112,18 @@ Future<void> main(List<String> args) async {
   startOutbox();
   autoAcceptDirectInvites();
   handlePasswordConfirmations();
+  // нашлась новая версия — сообщение внизу экрана (и уведомление, если Ласточка свёрнута)
+  Updater.instance.onNewVersion = (u) {
+    if (!appVisible) {
+      showSecurityNotification('Доступна Ласточка ${u.version}', 'Откройте Ласточку, чтобы обновиться');
+      return;
+    }
+    messengerKey.currentState?.showSnackBar(SnackBar(
+      duration: const Duration(seconds: 12),
+      content: Text('Доступна новая версия Ласточки — ${u.version}'),
+      action: SnackBarAction(label: 'Обновить', onPressed: () => Updater.instance.install()),
+    ));
+  };
   Updater.instance.start();
   unawaited(Updater.instance.checkDowngrade());
   await Drafts.instance.init();
@@ -219,6 +232,7 @@ class _LastochkaAppState extends State<LastochkaApp> {
       title: 'Ласточка',
       debugShowCheckedModeBanner: false,
       navigatorKey: navKey,
+      scaffoldMessengerKey: messengerKey,
       theme: liteTheme(lightTheme),
       darkTheme: liteTheme(darkTheme),
       themeMode: Appearance.instance.themeMode.value,

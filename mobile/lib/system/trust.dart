@@ -29,6 +29,9 @@ class Trust {
   void Function(String deviceName)? onNewLogin;
   void Function()? onOwnIdentityReset;
 
+  /// Ключи сбрасываем сами на этом устройстве («Забыли секретную фразу?») — не пугать уведомлением.
+  bool selfReset = false;
+
   SharedPreferences? _p;
   Map<String, String> _pins = {};
   Map<String, bool> _pinVerified = {};
@@ -87,7 +90,11 @@ class Trust {
           // ключ вашего аккаунта сброшен (вами в другом приложении — или кем-то ещё)
           _pins[uid] = mk;
           _pinVerified[uid] = true;
-          onOwnIdentityReset?.call();
+          if (selfReset) {
+            selfReset = false;
+          } else {
+            onOwnIdentityReset?.call();
+          }
         } else if (!ch.containsKey(uid)) {
           ch[uid] = _pinVerified[uid] == true;
         }

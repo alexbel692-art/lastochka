@@ -338,9 +338,33 @@ class Diag {
       '',
       if (_prev.isNotEmpty) ...['— Прошлые запуски (последние строки) —', ..._prevTail, ''],
       '— Журнал Matrix (предупреждения и ошибки) —',
-      for (final e in Logs().outputEvents.where((e) => e.level.index <= Level.warning.index).toList().reversed.take(80).toList().reversed)
-        '${e.level.name}: ${e.title}${e.exception != null ? ' — ${e.exception}' : ''}',
+      ..._squash([
+        for (final e in Logs().outputEvents.where((e) => e.level.index <= Level.warning.index).toList().reversed.take(200).toList().reversed)
+          '${e.level.name}: ${e.title}${e.exception != null ? ' — ${e.exception}' : ''}',
+      ]).reversed.take(60).toList().reversed,
     ];
     return scrub(lines.join('\n'), host: client.homeserver?.host, domain: client.userID?.domain);
   }
+}
+
+/// Одинаковые строки подряд — одной строкой с «×N» (журнал не забивается повторами).
+List<String> _squash(List<String> lines) {
+  final out = <String>[];
+  String? prev;
+  var n = 0;
+  void flush() {
+    if (prev != null) out.add(n > 1 ? '$prev  ×$n' : prev!);
+  }
+
+  for (final l in lines) {
+    if (l == prev) {
+      n++;
+    } else {
+      flush();
+      prev = l;
+      n = 1;
+    }
+  }
+  flush();
+  return out;
 }

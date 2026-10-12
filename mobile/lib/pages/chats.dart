@@ -128,7 +128,7 @@ class _ChatsPageState extends State<ChatsPage> {
   final _inner = GlobalKey<ScaffoldState>();
   int _leftTab = 0; // компьютер: 0 — чаты, 1 — контакты, 2 — звонки (настройки — окном)
   Future<Profile>? _me;
-  void _openMenu() => (_wide ? _outer : _inner).currentState?.openDrawer();
+  void _settings() => pushAdaptive<void>(context, (_) => const SettingsPage(), maxWidth: 620);
   final _q = TextEditingController();
   List<Profile> _people = [];
   Timer? _peopleTimer;
@@ -512,7 +512,6 @@ class _ChatsPageState extends State<ChatsPage> {
       final dark = Theme.of(context).brightness == Brightness.dark;
       return Scaffold(
         key: _outer,
-        drawer: _drawer(context),
         backgroundColor: dark ? const Color(0xFF151515) : const Color(0xFFE9ECF0),
         body: Row(children: [
         Padding(
@@ -589,7 +588,7 @@ class _ChatsPageState extends State<ChatsPage> {
                   suffixIcon: _q.text.isEmpty ? null : IconButton(icon: const Icon(Icons.close), onPressed: () => setState(_q.clear)),
                 ),
               )
-            : _Header(me: _me, onTap: _openMenu),
+            : _Header(me: _me, onEdit: _settings),
         actions: [
           IconButton(
             icon: Icon(_searching ? Icons.arrow_forward : Icons.search),
@@ -664,7 +663,6 @@ class _ChatsPageState extends State<ChatsPage> {
           ),
         ),
       ),
-      drawer: _wide ? null : _drawer(context),
       floatingActionButton: FloatingActionButton(onPressed: _newChat, tooltip: 'Новый чат', child: const Icon(Icons.edit_outlined)),
       body: Column(children: [
         const UpdateBanner(),
@@ -792,101 +790,35 @@ class _ChatsPageState extends State<ChatsPage> {
     );
   }
 
-  Widget _drawer(BuildContext context) {
-    final me = client.userID ?? '';
-    return Drawer(
-      child: ListView(padding: EdgeInsets.zero, children: [
-        FutureBuilder<Profile>(
-          future: client.fetchOwnProfile(),
-          builder: (_, s) {
-            final name = s.data?.displayName ?? me.localpart ?? '';
-            return DrawerHeader(
-              margin: const EdgeInsets.fromLTRB(10, 10, 10, 6),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                gradient: Theme.of(context).brightness == Brightness.dark
-                    ? const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF3A3550), Color(0xFF2B2B2B)])
-                    : LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Theme.of(context).colorScheme.primary, const Color(0xFF2A6FE0)]),
-              ),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.end, children: [
-                Avatar(mxc: s.data?.avatarUrl, name: name, size: 64),
-                const SizedBox(height: 12),
-                Text(name, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
-                Text(me, style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 13.5)),
-              ]),
-            );
-          },
-        ),
-        ListTile(leading: const Icon(Icons.person_add_alt_outlined), title: const Text('Новый личный чат'), onTap: () {
-          Navigator.pop(context);
-          _newChatOf('dm');
-        }),
-        ListTile(leading: const Icon(Icons.group_add_outlined), title: const Text('Создать группу'), onTap: () {
-          Navigator.pop(context);
-          _newChatOf('group');
-        }),
-        if (canScanQr)
-          ListTile(leading: const Icon(Icons.qr_code_scanner), title: const Text('Сканировать QR-код'), onTap: () async {
-            Navigator.pop(context);
-            final v = await scanQr(context);
-            if (v != null && mounted) await openMatrixLink(context, v);
-          }),
-        ListTile(leading: const Icon(Icons.travel_explore), title: const Text('Найти группу'), onTap: () {
-          Navigator.pop(context);
-          _newChatOf('join');
-        }),
-        const Divider(),
-        ListTile(leading: const Icon(Icons.settings_outlined), title: const Text('Настройки'), onTap: () {
-          Navigator.pop(context);
-          pushAdaptive<void>(context, (_) => const SettingsPage(), maxWidth: 620);
-        }),
-      ]),
-    );
-  }
 }
 
-/// Шапка списка чатов: аватарка, «Ласточка» фирменной надписью и отображаемое имя.
+/// Шапка списка чатов: своя аватарка (нажатие — посмотреть крупно) и отображаемое имя.
 class _Header extends StatelessWidget {
   final Future<Profile>? me;
-  final VoidCallback onTap;
-  const _Header({required this.me, required this.onTap});
+  final VoidCallback onEdit;
+  const _Header({required this.me, required this.onEdit});
 
   @override
   Widget build(BuildContext context) {
-    final accent = Theme.of(context).colorScheme.primary;
-    final dark = Theme.of(context).brightness == Brightness.dark;
     return FutureBuilder<Profile>(
       future: me,
       builder: (context, s) {
         final id = client.userID ?? '';
         final name = s.data?.displayName ?? id.localpart ?? '';
-        return Tooltip(
-          message: 'Меню',
-          child: InkWell(
-            borderRadius: BorderRadius.circular(24),
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Avatar(mxc: s.data?.avatarUrl, name: name, size: 38),
-                const SizedBox(width: 10),
-                Flexible(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                    // фирменная надпись: градиент и чуть разреженные буквы
-                    ShaderMask(
-                      blendMode: BlendMode.srcIn,
-                      shaderCallback: (r) => LinearGradient(
-                        colors: dark ? [const Color(0xFF9DB8FF), accent] : [const Color(0xFF2A6FE0), const Color(0xFF6B4FD8)],
-                      ).createShader(r),
-                      child: const Text('Ласточка', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700, letterSpacing: 0.3, height: 1.1)),
-                    ),
-                    Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Theme.of(context).hintColor, height: 1.2)),
-                  ]),
-                ),
-              ]),
+        return Row(mainAxisSize: MainAxisSize.min, children: [
+          Tooltip(
+            message: 'Ваше фото',
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: () => showAvatarViewer(context, s.data?.avatarUrl, name, onEdit: onEdit),
+                child: Avatar(mxc: s.data?.avatarUrl, name: name, size: 40),
+              ),
             ),
           ),
-        );
+          const SizedBox(width: 12),
+          Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w600))),
+        ]);
       },
     );
   }

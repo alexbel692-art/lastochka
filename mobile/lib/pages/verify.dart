@@ -93,6 +93,66 @@ class _VerifyGateState extends State<VerifyGate> {
     if (mounted) setState(() {});
   }
 
+  /// «Забыли секретную фразу?» — новая фраза вместо старой, со сбросом ключей (после двух предупреждений).
+  bool _resetting = false;
+
+  Future<void> _forgot() async {
+    final first = await showDialog<bool>(
+      context: context,
+      builder: (d) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 40),
+        title: const Text('Забыли секретную фразу?'),
+        content: const Text(
+          'Если нет другого подтверждённого устройства и вы не помните фразу, можно начать заново: '
+          'задать новую секретную фразу и новые ключи.\n\n'
+          'Вся прежняя переписка в защищённых чатах станет недоступна — на этом и на всех новых устройствах. '
+          'Другие ваши устройства нужно будет подтвердить заново, а собеседники увидят, что ваши ключи сменились.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
+          TextButton(onPressed: () => Navigator.pop(d, true), child: const Text('Продолжить', style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (first != true || !mounted) return;
+    final word = TextEditingController();
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (d) => StatefulBuilder(
+        builder: (d, set) => AlertDialog(
+          title: const Text('Точно сбросить?'),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Прежнюю переписку вернуть будет нельзя. Чтобы подтвердить, введите слово СБРОСИТЬ.'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: word,
+              autofocus: true,
+              autocorrect: false,
+              enableIMEPersonalizedLearning: false,
+              onChanged: (_) => set(() {}),
+              decoration: const InputDecoration(hintText: 'СБРОСИТЬ'),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: word.text.trim().toUpperCase() == 'СБРОСИТЬ' ? () => Navigator.pop(d, true) : null,
+              child: const Text('Сбросить'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (sure == true && mounted) {
+      Diag.add('Сброс секретной фразы и ключей начат пользователем');
+      setState(() {
+        _resetting = true;
+        _setupError = null;
+      });
+    }
+  }
+
   // секретная фраза вместо ключа восстановления: ключ выводится из фразы и нигде не показывается
   final _p1 = TextEditingController(), _p2 = TextEditingController();
   bool _setupRunning = false, _show = false;
@@ -109,11 +169,13 @@ class _VerifyGateState extends State<VerifyGate> {
       _setupError = null;
     });
     final done = Completer<void>();
+    final wipe = _resetting; // сброс: старые ключи, подпись устройств и резервную копию — заменить новыми
+    if (wipe) Trust.instance.selfReset = true;
     client.encryption!.bootstrap(onUpdate: (bs) async {
       try {
         switch (bs.state) {
           case BootstrapState.askWipeSsss:
-            bs.wipeSsss(false);
+            bs.wipeSsss(wipe);
           case BootstrapState.askUseExistingSsss:
             bs.useExistingSsss(false);
           case BootstrapState.askBadSsss:
@@ -125,7 +187,7 @@ class _VerifyGateState extends State<VerifyGate> {
           case BootstrapState.askSetupCrossSigning:
             await bs.askSetupCrossSigning(setupMasterKey: true, setupSelfSigningKey: true, setupUserSigningKey: true);
           case BootstrapState.askWipeOnlineKeyBackup:
-            bs.wipeOnlineKeyBackup(false);
+            bs.wipeOnlineKeyBackup(wipe);
           case BootstrapState.askSetupOnlineKeyBackup:
             await bs.askSetupOnlineKeyBackup(true);
           case BootstrapState.done:
@@ -145,8 +207,15 @@ class _VerifyGateState extends State<VerifyGate> {
       await done.future.timeout(const Duration(minutes: 3));
       _p1.clear();
       _p2.clear();
+      if (wipe) {
+        Diag.add('Сброс выполнен: новая секретная фраза и ключи');
+        await client.updateUserDeviceKeys();
+      }
+      _resetting = false;
       setState(() {});
     } catch (e) {
+      if (wipe) Trust.instance.selfReset = false;
+      Diag.err('Настройка защиты${wipe ? ' (сброс)' : ''}', e);
       setState(() => _setupError = 'Не удалось настроить защиту. Проверьте подключение и попробуйте ещё раз.');
     } finally {
       if (mounted) setState(() => _setupRunning = false);
@@ -165,7 +234,7 @@ class _VerifyGateState extends State<VerifyGate> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Icon(Icons.vpn_key_outlined, size: 64, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(height: 14),
-                Text('Секретная фраза', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+                Text(_resetting ? 'Новая секретная фраза' : 'Секретная фраза', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 10),
                 Text(
                   'Придумайте фразу, которую знаете только вы. По ней вы будете подтверждать новые устройства и возвращать переписку. '
@@ -204,7 +273,10 @@ class _VerifyGateState extends State<VerifyGate> {
                   child: _setupRunning ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)) : const Text('Сохранить фразу'),
                 ),
                 const SizedBox(height: 14),
-                TextButton(onPressed: () => logout(context), child: const Text('Выйти из аккаунта', style: TextStyle(color: Colors.redAccent))),
+                if (_resetting)
+                  TextButton(onPressed: _setupRunning ? null : () => setState(() => _resetting = false), child: const Text('Отмена — я вспомнил фразу'))
+                else
+                  TextButton(onPressed: () => logout(context), child: const Text('Выйти из аккаунта', style: TextStyle(color: Colors.redAccent))),
               ]),
             ),
           ),
@@ -215,7 +287,7 @@ class _VerifyGateState extends State<VerifyGate> {
 
   @override
   Widget build(BuildContext context) {
-    if (needsSecuritySetup()) return _setupScreen(context);
+    if (needsSecuritySetup() || (_resetting && needsVerification())) return _setupScreen(context);
     if (!needsVerification()) return widget.child;
     final hint = Theme.of(context).hintColor;
     return Scaffold(
@@ -264,7 +336,8 @@ class _VerifyGateState extends State<VerifyGate> {
                     icon: const Icon(Icons.devices_outlined),
                     label: const Text('С другого устройства'),
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 10),
+                  TextButton(onPressed: _busy ? null : _forgot, child: const Text('Забыли секретную фразу?')),
                   TextButton(onPressed: () => logout(context), child: const Text('Выйти из аккаунта', style: TextStyle(color: Colors.redAccent))),
                 ],
               ),

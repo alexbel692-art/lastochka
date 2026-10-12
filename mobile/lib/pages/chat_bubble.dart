@@ -8,7 +8,11 @@ void _autoLoadKey(Event e) {
   final sid = e.content.tryGet<String>('session_id');
   final enc = client.encryption;
   if (sid == null || enc == null || !_keyTried.add(sid)) return;
-  enc.keyManager.loadSingleKey(e.room.id, sid).catchError((Object err) => Diag.err('Ключ из резервной копии', err));
+  enc.keyManager.loadSingleKey(e.room.id, sid).catchError((Object err) {
+    // ключа нет в резервной копии — обычное дело (сообщение зашифровали до её включения), не ошибка
+    if ('$err'.contains('M_NOT_FOUND')) return;
+    Diag.err('Ключ из резервной копии', err);
+  });
 }
 class _Bubble extends StatelessWidget {
   final Event event;
@@ -161,7 +165,13 @@ class _Bubble extends StatelessWidget {
       content = VideoPreview(
         event: e,
         maxWidth: min(paneWidth(context) * 0.7, 360.0),
-        onOpen: () => openVideo(context, e, () => openAttachment(e, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s))))),
+        onOpen: () {
+          void ext(Event m) => openAttachment(m, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s))), context: context);
+          if (!videoSupported) return ext(e);
+          // как фото: общий просмотр с листанием, видео играет внутри
+          final st = context.findAncestorStateOfType<_ChatPageState>();
+          openMediaViewer(context, st?._mediaList() ?? [e], e, openExternally: ext);
+        },
       );
     } else if (e.messageType == 'm.key.verification.request') {
       content = Row(mainAxisSize: MainAxisSize.min, children: [

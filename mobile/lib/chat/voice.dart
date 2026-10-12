@@ -52,17 +52,36 @@ class VoiceRecorder {
           return 'Микрофон не найден. На удалённом рабочем столе включите в настройках подключения «Запись звука с этого компьютера»';
         }
       }
-      // AAC (m4a) — как на телефонах; если система его не умеет — WAV
+      // AAC (m4a) — как на телефонах; если система его не умеет или микрофон не принимает формат
+      // (так бывает на удалённом рабочем столе: «тип носителя недопустим») — пробуем другие частоты и WAV
       final aac = await _rec.isEncoderSupported(AudioEncoder.aacLc);
       final dir = await privateTemp();
-      _wav = !aac;
-      _path = p.join(dir.path, 'voice_${DateTime.now().millisecondsSinceEpoch}.${aac ? 'm4a' : 'wav'}');
       levels.clear();
-      await _rec.start(
-          aac
-              ? const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 48000, sampleRate: 44100, numChannels: 1)
-              : const RecordConfig(encoder: AudioEncoder.wav, sampleRate: 16000, numChannels: 1),
-          path: _path!);
+      final tries = <RecordConfig>[
+        if (aac) const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 48000, sampleRate: 44100, numChannels: 1),
+        if (aac) const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 64000, sampleRate: 48000, numChannels: 2),
+        const RecordConfig(encoder: AudioEncoder.wav, sampleRate: 48000, numChannels: 1),
+        const RecordConfig(encoder: AudioEncoder.wav, sampleRate: 44100, numChannels: 2),
+        const RecordConfig(encoder: AudioEncoder.wav, sampleRate: 16000, numChannels: 1),
+      ];
+      Object? last;
+      var ok = false;
+      for (final cfg in tries) {
+        final wav = cfg.encoder == AudioEncoder.wav;
+        _path = p.join(dir.path, 'voice_${DateTime.now().millisecondsSinceEpoch}.${wav ? 'wav' : 'm4a'}');
+        try {
+          await _rec.start(cfg, path: _path!);
+          _wav = wav;
+          ok = true;
+          break;
+        } catch (e) {
+          last = e;
+          try {
+            await _rec.stop();
+          } catch (_) {}
+        }
+      }
+      if (!ok) throw last ?? 'запись не началась';
       started = DateTime.now();
       _amp = _rec.onAmplitudeChanged(const Duration(milliseconds: 80)).listen((a) {
         final db = a.current.isFinite ? a.current : -60.0;
