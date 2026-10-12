@@ -55,12 +55,18 @@ class MainActivity : FlutterFragmentActivity() {
      */
     fun applyCallModeLater() {
         val v = window?.decorView ?: return
-        v.post { if (!isFinishing && !isDestroyed) applyCallMode() }
+        v.post {
+            if (isFinishing || isDestroyed) return@post
+            if (!applyCallMode()) return@post
+            // окно перестроится — через мгновение просим Flutter перерисовать кадр целиком
+            v.postDelayed({ MainApplication.redraw() }, 250)
+            v.postDelayed({ MainApplication.redraw() }, 900)
+        }
     }
 
     /** Поверх экрана блокировки — только во время входящего звонка, а не всегда. */
-    fun applyCallMode() {
-        if (appliedCallMode == callMode) return
+    fun applyCallMode(): Boolean {
+        if (appliedCallMode == callMode) return false
         appliedCallMode = callMode
         if (Build.VERSION.SDK_INT >= 27) {
             setShowWhenLocked(callMode)
@@ -70,6 +76,7 @@ class MainActivity : FlutterFragmentActivity() {
             val f = WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
             if (callMode) window.addFlags(f) else window.clearFlags(f)
         }
+        return true
     }
 
     companion object {

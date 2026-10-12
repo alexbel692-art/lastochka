@@ -85,6 +85,10 @@ Future<void> initNotifications() async {
         _handle('${m['action'] ?? ''}', '${m['payload'] ?? ''}');
       } else if (call.method == 'networkChanged') {
         onNetworkChanged?.call();
+      } else if (call.method == 'redraw') {
+        // окно перестроилось (сменился режим «поверх блокировки» и т. п.) — рисуем кадр заново целиком,
+        // чтобы на экране не оставалась недорисованная картинка
+        WidgetsBinding.instance.scheduleForcedFrame();
       }
       return null;
     });

@@ -87,7 +87,14 @@ class MainApplication : Application() {
         private const val ID = "lastochka"
 
         fun engine(app: Application): FlutterEngine {
-            FlutterEngineCache.getInstance().get(ID)?.let { return it }
+            FlutterEngineCache.getInstance().get(ID)?.let { cached ->
+                // движок, который уже остановлен, не отдаём окну — иначе оно падает при первом же
+                // изменении размера («FlutterJNI is not attached»); создаём новый
+                if (cached.dartExecutor.isExecutingDart) return cached
+                FlutterEngineCache.getInstance().remove(ID)
+                channel = null
+                dartReady = false
+            }
             val e = FlutterEngine(app)
             channel(app, e)
             e.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
@@ -99,6 +106,11 @@ class MainApplication : Application() {
         private var dartReady = false
         private var clipStamp = 0L
         private val pendingTaps = mutableListOf<Map<String, String>>()
+
+        /** Попросить Flutter перерисовать кадр (после перестройки окна). */
+        fun redraw() {
+            try { channel?.invokeMethod("redraw", null) } catch (_: Throwable) {}
+        }
 
         /** Нажатие на уведомление: передать в Dart (если Ласточка ещё запускается — после готовности). */
         fun forwardTap(intent: Intent?) {

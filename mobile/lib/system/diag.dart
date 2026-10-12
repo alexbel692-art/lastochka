@@ -317,6 +317,18 @@ class Diag {
       if (skew != null) 'Часы: ${skew.inSeconds.abs() < 60 ? 'в порядке' : skewText(skew)}',
       if (lastCall != null) 'Последний звонок: $lastCall',
       '',
+      // шаги последнего звонка с точным временем — видно, где именно что-то задержалось
+      ...() {
+        try {
+          final t = _trail;
+          if (t == null || !t.existsSync()) return const <String>[];
+          final l = t.readAsStringSync().trim().split('\n').where((x) => x.isNotEmpty).toList();
+          if (l.isEmpty) return const <String>[];
+          return ['— Последние шаги (звонок и т. п.) —', ...l.reversed.take(40).toList().reversed, ''];
+        } catch (_) {
+          return const <String>[];
+        }
+      }(),
       '— Ошибки приложения —',
       ..._buf,
       '',

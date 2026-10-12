@@ -2,6 +2,7 @@
 // (одна и та же на Android, iPhone, Windows и macOS).
 // Ключ базы хранится в защищённом хранилище системы: Android Keystore, iOS/macOS Keychain,
 // Windows — шифрование учётной записи (DPAPI).
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -107,6 +108,23 @@ Future<DatabaseApi> _openDatabase() async {
   }
 }
 
+Timer? _cacheGuard;
+
+/// Android может сам очистить кэш приложения (мало места, «Очистить кэш» в настройках) вместе с папкой
+/// загруженных файлов — тогда библиотека Matrix каждые полминуты писала ошибку «папка не найдена»,
+/// а новые картинки не сохранялись. Проверяем и создаём папку заново.
+void _keepFileCacheDir() {
+  _cacheGuard?.cancel();
+  Future<void> check() async {
+    try {
+      final d = Directory(p.join((await getTemporaryDirectory()).path, '${clientName}_files'));
+      if (!await d.exists()) await d.create(recursive: true);
+    } catch (_) {}
+  }
+
+  _cacheGuard = Timer.periodic(const Duration(seconds: 20), (_) => check());
+}
+
 /// Сколько дней хранить загруженные файлы (настройка «Хранилище»).
 Future<int> fileKeepDays() async => (await SharedPreferences.getInstance()).getInt('storage.days') ?? 30;
 
@@ -191,6 +209,7 @@ Future<Client> createClient() async {
     logLevel: kReleaseMode ? Level.warning : Level.info,
   );
   await client.init(waitForFirstSync: false);
+  _keepFileCacheDir();
   return client;
 }
 
