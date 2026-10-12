@@ -148,6 +148,12 @@ class _LastochkaAppState extends State<LastochkaApp> {
     });
     // входящие запросы на подтверждение (с другого устройства или от собеседника)
     _verify = client.onKeyVerificationRequest.stream.listen((KeyVerification req) {
+      Diag.add('Входящий запрос подтверждения (${req.userId == client.userID ? 'своё устройство' : 'собеседник'})');
+      // Ласточка свёрнута — уведомление, иначе запрос истечёт через 10 минут незамеченным
+      if (!appVisible) {
+        showSecurityNotification(req.userId == client.userID ? 'Подтверждение входа' : 'Запрос подтверждения',
+            req.userId == client.userID ? 'Другое ваше устройство просит подтвердить вход — откройте Ласточку' : 'Собеседник просит сравнить эмодзи — откройте Ласточку');
+      }
       final ctx = navKey.currentContext;
       if (ctx != null) showIncomingVerification(ctx, req);
     });

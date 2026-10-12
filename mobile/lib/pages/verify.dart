@@ -11,6 +11,8 @@ import 'package:matrix/matrix.dart';
 import '../main.dart';
 import '../system/trust.dart';
 import 'settings.dart';
+import '../system/clock.dart';
+import '../system/diag.dart';
 
 /// Проверка новой секретной фразы. null — подходит.
 String? phraseProblem(String p1, String p2) {
@@ -42,10 +44,12 @@ class _VerifyGateState extends State<VerifyGate> {
   final _key = TextEditingController();
   bool _busy = false;
   String? _error;
+  Duration? _skew;
 
   @override
   void initState() {
     super.initState();
+    clockSkew().then((d) => mounted ? setState(() => _skew = d) : null);
     _sub = client.onSync.stream.listen((_) {
       if (mounted) setState(() {});
     });
@@ -242,6 +246,14 @@ class _VerifyGateState extends State<VerifyGate> {
                     child: _busy ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)) : const Text('Подтвердить'),
                   ),
                   const SizedBox(height: 10),
+                  if (skewMatters(_skew))
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+                      child: Text('Часы этого устройства ${skewText(_skew!)} — подтверждение с другого устройства не пройдёт. $fixClockHint Секретной фразой подтвердить можно и так.',
+                          style: TextStyle(color: Colors.orange.shade900, fontSize: 13)),
+                    ),
                   OutlinedButton.icon(
                     onPressed: _busy ? null : _otherDevice,
                     style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
@@ -295,8 +307,8 @@ class _VerificationDialogState extends State<_VerificationDialog> {
     Widget body;
     List<Widget> actions;
     final who = req.userId == client.userID ? 'Другое ваше устройство' : req.userId;
-    if (req.canceled) {
-      body = Text('Подтверждение отменено${req.canceledReason != null ? ': ${req.canceledReason}' : ''}');
+    if (req.canceled || req.state == KeyVerificationState.error) {
+      body = _CancelInfo(code: req.canceledCode, reason: req.canceledReason);
       actions = [TextButton(onPressed: _close, child: const Text('Закрыть'))];
     } else {
       switch (req.state) {
@@ -336,9 +348,6 @@ class _VerificationDialogState extends State<_VerificationDialog> {
         case KeyVerificationState.done:
           body = const Row(children: [Icon(Icons.verified_outlined, color: Colors.green), SizedBox(width: 10), Expanded(child: Text('Готово! Устройство подтверждено.'))]);
           actions = [FilledButton(onPressed: _close, child: const Text('Отлично'))];
-        case KeyVerificationState.error:
-          body = Text('Не удалось подтвердить${req.canceledReason != null ? ': ${req.canceledReason}' : ''}');
-          actions = [TextButton(onPressed: _close, child: const Text('Закрыть'))];
         default:
           body = const Row(children: [
             SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5)),
@@ -349,6 +358,55 @@ class _VerificationDialogState extends State<_VerificationDialog> {
       }
     }
     return AlertDialog(title: const Text('Подтверждение'), content: body, actions: actions);
+  }
+}
+
+/// Почему подтверждение отменилось — словами, а для m.timeout ещё и сверка часов.
+class _CancelInfo extends StatefulWidget {
+  final String? code, reason;
+  const _CancelInfo({this.code, this.reason});
+  @override
+  State<_CancelInfo> createState() => _CancelInfoState();
+}
+
+class _CancelInfoState extends State<_CancelInfo> {
+  Duration? _skew;
+
+  @override
+  void initState() {
+    super.initState();
+    Diag.add('Подтверждение отменено: ${widget.code} ${widget.reason ?? ''}');
+    if (widget.code == 'm.timeout') clockSkew(fresh: true).then((d) => mounted ? setState(() => _skew = d) : null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = switch (widget.code) {
+      'm.timeout' => 'Время ожидания истекло. Так бывает, если часы на одном из ваших устройств неправильные (разница больше 5 минут) '
+          'или другое устройство не ответило за 10 минут — например, Ласточка на нём была закрыта.',
+      'm.user' => 'Подтверждение отменили на другом устройстве.',
+      'm.mismatched_sas' || 'm.key_mismatch' => 'Эмодзи не совпали — подтверждение остановлено. Если вы ничего не путали, кто-то может вмешиваться в соединение: смените пароль.',
+      'm.accepted' => 'Запрос принят на другом вашем устройстве.',
+      'm.unknown_method' || 'm.unknown_transaction' || 'm.unexpected_message' => 'Другое устройство не поддерживает этот способ подтверждения. Используйте секретную фразу.',
+      'im.fluffychat.unknown_device' => 'Другое устройство пока не знает об этом — подождите минуту и попробуйте ещё раз.',
+      _ => 'Подтверждение не удалось${widget.reason != null ? ' (${widget.reason})' : ''}.',
+    };
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(text),
+      if (widget.code == 'm.timeout') ...[
+        const SizedBox(height: 10),
+        Text(
+          _skew == null
+              ? 'Проверьте, что время на телефоне и компьютере выставлено автоматически.'
+              : skewMatters(_skew)
+                  ? 'На этом устройстве часы ${skewText(_skew!)}. $fixClockHint'
+                  : 'На этом устройстве часы в порядке — проверьте время на другом устройстве и что Ласточка там открыта.',
+          style: TextStyle(fontSize: 13, color: skewMatters(_skew) ? Colors.orange.shade800 : Theme.of(context).hintColor),
+        ),
+        const SizedBox(height: 8),
+        Text('Самый простой путь — подтвердить секретной фразой: другое устройство для этого не нужно.', style: TextStyle(fontSize: 13, color: Theme.of(context).hintColor)),
+      ],
+    ]);
   }
 }
 

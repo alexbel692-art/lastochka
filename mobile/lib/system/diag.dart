@@ -16,6 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
 import '../matrix_client.dart';
+import 'clock.dart';
 import 'updater.dart';
 
 class Diag {
@@ -258,6 +259,7 @@ class Diag {
       final run = Abi.current() == Abi.androidArm64 ? 'arm64' : Abi.current() == Abi.androidArm ? 'arm' : '${Abi.current()}';
       cpu = run == dev ? run : '$run, а телефон $dev — нужна версия под его процессор';
     }
+    final skew = client.isLogged() ? await clockSkew() : null;
     var beta = false;
     try {
       beta = (await SharedPreferences.getInstance()).getBool('update.beta') ?? false;
@@ -275,6 +277,7 @@ class Diag {
       'Чатов: ${client.rooms.length}',
       if (battery != null) 'Работа в фоне: $battery',
       if (cpu != null) 'Процессор: $cpu',
+      if (skew != null) 'Часы: ${skew.inSeconds.abs() < 60 ? 'в порядке' : skewText(skew)}',
       if (lastCall != null) 'Последний звонок: $lastCall',
       '',
       '— Ошибки приложения —',
