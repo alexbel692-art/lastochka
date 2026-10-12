@@ -34,7 +34,8 @@ public class VideoFramePlugin: NSObject, FlutterPlugin {
       result(FlutterMethodNotImplemented)
       return
     }
-    let maxSide = (args["max"] as? Int) ?? 480
+    let requested = (args["max"] as? Int) ?? 480
+    let maxSide = (requested > 0 && requested <= 2048) ? requested : 480 // не больше 2048 точек — защита памяти
     DispatchQueue.global(qos: .userInitiated).async {
       let r = VideoFramePlugin.grab(path: path, maxSide: maxSide)
       DispatchQueue.main.async { result(r) }

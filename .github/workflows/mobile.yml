@@ -58,18 +58,9 @@ jobs:
           flutter --version
           tool/annotate.sh "create" flutter create --no-pub --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
           rm -f test/widget_test.dart
-      - name: Ключ подписи
-        env:
-          KS: ${{ secrets.ANDROID_KEYSTORE }}
-          KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          if [ -n "$KS" ]; then
-            echo "$KS" | base64 -d > android/app/upload.jks
-            printf 'storeFile=upload.jks\nstorePassword=%s\nkeyAlias=lastochka\nkeyPassword=%s\n' "$KP" "$KP" > android/key.properties
-          else
-            echo "::warning::Секрет ANDROID_KEYSTORE не задан — APK подписан временным ключом"
-          fi
       - name: Настройка проекта
+        env:
+          ANDROID_SIGNED: ${{ secrets.ANDROID_KEYSTORE != '' }}
         run: python3 tool/ci_prepare.py
       # библиотеки строго по зафиксированным версиям: подменённое обновление чужой библиотеки само не попадёт
       - name: Зависимости
@@ -97,7 +88,10 @@ jobs:
       - name: Проверка зависимостей на уязвимости
         continue-on-error: true
         run: |
-          curl -sSL -o /tmp/osv https://github.com/google/osv-scanner/releases/download/v1.9.2/osv-scanner_linux_amd64 && chmod +x /tmp/osv
+          curl -sSL -o /tmp/osv https://github.com/google/osv-scanner/releases/download/v1.9.2/osv-scanner_linux_amd64
+          # проверка, что скачан именно официальный сканер (контрольная сумма из выпуска v1.9.2)
+          echo "d6af4b67fa5de658598bd2d445efb99e90d1734b3146962418719c4350ecb74b  /tmp/osv" | sha256sum -c - || { echo "::error::Сканер уязвимостей подменён"; exit 1; }
+          chmod +x /tmp/osv
           if /tmp/osv --lockfile=pubspec.lock > /tmp/osv.txt 2>&1; then
             echo "::notice title=Зависимости::Известных уязвимостей не найдено"
           else
@@ -109,6 +103,22 @@ jobs:
         run: tool/annotate.sh "analyze" flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Тесты
         run: tool/annotate.sh "tests" flutter test
+      # ключ подписи Android появляется на диске только перед самой сборкой APK — сторонний код
+      # (библиотеки, генератор иконок, проверки) его не застаёт
+      - name: Ключ подписи
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE }}
+          KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > android/app/upload.jks
+            printf 'storeFile=upload.jks\nstorePassword=%s\nkeyAlias=lastochka\nkeyPassword=%s\n' "$KP" "$KP" > android/key.properties
+          elif [ "$PUBLISH" = "true" ]; then
+            echo "::error::Секрет ANDROID_KEYSTORE не задан — выпуск с временным ключом запрещён"; exit 1
+          else
+            echo "::warning::Секрет ANDROID_KEYSTORE не задан — APK подписан временным ключом (только для проверки)"
+          fi
       - name: Сборка APK
         run: |
           mkdir -p ../dist

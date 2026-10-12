@@ -27,7 +27,8 @@ namespace {
 using flutter::EncodableMap;
 using flutter::EncodableValue;
 
-constexpr UINT kDoneMessage = WM_APP + 0x51;
+// своё зарегистрированное сообщение окна — не совпадёт с сообщениями других модулей
+const UINT kDoneMessage = RegisterWindowMessageW(L"LastochkaVideoFrameDone");
 
 template <class T>
 void SafeRelease(T** p) {
@@ -175,6 +176,13 @@ class VideoFramePlugin : public flutter::Plugin {
     std::unique_ptr<flutter::MethodResult<EncodableValue>> result;
     EncodableValue value;
   };
+  // общее состояние живёт, пока его держит хоть один фоновый поток: если модуль закроется во время
+  // разбора видео, поток обратится к живому состоянию, а не к освобождённой памяти
+  struct State {
+    std::mutex mu;
+    int next_id = 0;
+    std::map<int, Pending> pending;
+  };
 
   void Handle(const flutter::MethodCall<EncodableValue>& call, std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
     const auto* args = std::get_if<EncodableMap>(call.arguments());
@@ -192,6 +200,7 @@ class VideoFramePlugin : public flutter::Plugin {
     if (it != args->end()) {
       if (const auto* m = std::get_if<int32_t>(&it->second)) max_side = *m;
     }
+    if (max_side <= 0 || max_side > 2048) max_side = 480;
     HWND view = registrar_->GetView() ? registrar_->GetView()->GetNativeWindow() : nullptr;
     HWND top = view ? GetAncestor(view, GA_ROOT) : nullptr;
     if (path.empty() || top == nullptr) {
@@ -200,16 +209,16 @@ class VideoFramePlugin : public flutter::Plugin {
     }
     int id;
     {
-      std::lock_guard<std::mutex> lock(mu_);
-      id = ++next_id_;
-      pending_[id] = Pending{std::move(result), EncodableValue()};
+      std::lock_guard<std::mutex> lock(st_->mu);
+      id = ++st_->next_id;
+      st_->pending[id] = Pending{std::move(result), EncodableValue()};
     }
-    std::thread([this, id, top, wpath = Utf8ToWide(path), max_side]() {
+    std::thread([st = st_, id, top, wpath = Utf8ToWide(path), max_side]() {
       EncodableValue v = Grab(wpath, max_side);
       {
-        std::lock_guard<std::mutex> lock(mu_);
-        auto p = pending_.find(id);
-        if (p != pending_.end()) p->second.value = std::move(v);
+        std::lock_guard<std::mutex> lock(st->mu);
+        auto p = st->pending.find(id);
+        if (p != st->pending.end()) p->second.value = std::move(v);
       }
       PostMessage(top, kDoneMessage, static_cast<WPARAM>(id), 0);
     }).detach();
@@ -218,11 +227,11 @@ class VideoFramePlugin : public flutter::Plugin {
   void Finish(int id) {
     Pending p;
     {
-      std::lock_guard<std::mutex> lock(mu_);
-      auto it = pending_.find(id);
-      if (it == pending_.end()) return;
+      std::lock_guard<std::mutex> lock(st_->mu);
+      auto it = st_->pending.find(id);
+      if (it == st_->pending.end()) return;
       p = std::move(it->second);
-      pending_.erase(it);
+      st_->pending.erase(it);
     }
     if (p.value.IsNull()) {
       p.result->Success();
@@ -234,9 +243,7 @@ class VideoFramePlugin : public flutter::Plugin {
   flutter::PluginRegistrarWindows* registrar_;
   std::unique_ptr<flutter::MethodChannel<EncodableValue>> channel_;
   int delegate_ = 0;
-  std::mutex mu_;
-  int next_id_ = 0;
-  std::map<int, Pending> pending_;
+  std::shared_ptr<State> st_ = std::make_shared<State>();
 };
 
 }  // namespace
