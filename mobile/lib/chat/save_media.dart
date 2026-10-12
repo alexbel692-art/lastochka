@@ -84,7 +84,7 @@ Future<void> saveMedia(BuildContext context, Event e) async {
     final f = await e.downloadAndDecryptAttachment();
     final where = await FilePicker.saveFile(dialogTitle: 'Сохранить как', fileName: name, bytes: f.bytes);
     if (where == null) return;
-    final saved = where.pathSegments.isEmpty ? name : Uri.decodeComponent(where.pathSegments.last);
+    final saved = where.pathSegments.isEmpty ? name : where.pathSegments.last;
     toast('Сохранено: $saved');
   } catch (err, st) {
     Diag.err('Сохранение файла', err, st);
