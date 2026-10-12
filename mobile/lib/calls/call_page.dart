@@ -42,15 +42,10 @@ class _CallPageState extends State<CallPage> {
     super.initState();
     _speaker = call.type == CallType.kVideo;
     Diag.mark('звонок: экран открыт (${call.type == CallType.kVideo ? 'видео' : 'аудио'}, ${call.isOutgoing ? 'исходящий' : 'входящий'})', start: true);
-    // окна видео — только для видеозвонков: на аудиозвонке они не нужны, а их освобождение
-    // на старых Android могло подвесить приложение при завершении
-    if (call.type == CallType.kVideo) {
-      Future.wait([_remote.initialize(), _local.initialize()]).then((_) {
-        if (!mounted || _closing) return;
-        _renderers = true;
-        _bindStreams();
-      }).catchError((Object e) => Logs().w('[Ласточка] видео недоступно', e));
-    }
+    // окна видео создаются, только когда видео действительно есть: сразу для видеозвонка,
+    // а на голосовом — как только кто-то включит камеру (в том числе собеседник из Element).
+    // Лишние окна на аудиозвонке не нужны: их освобождение на старых Android подвешивало приложение
+    if (call.type == CallType.kVideo) _ensureRenderers();
     _subs.add(call.onCallStateChanged.stream.listen(_onState));
     _subs.add(call.onCallStreamsChanged.stream.listen((_) => _bindStreams()));
     _subs.add(call.onStreamAdd.stream.listen((_) => _bindStreams()));
@@ -61,8 +56,30 @@ class _CallPageState extends State<CallPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _onState(call.state));
   }
 
+  Future<void>? _rendInit;
+
+  Future<void> _ensureRenderers() => _rendInit ??= Future.wait([_remote.initialize(), _local.initialize()]).then((_) {
+        if (!mounted || _closing) return;
+        _renderers = true;
+        Diag.mark('звонок: окна видео готовы');
+        _bindStreams();
+      }).catchError((Object e) {
+        Diag.err('Окна видео', e);
+      });
+
+  bool get _anyVideo =>
+      (call.remoteUserMediaStream?.stream?.getVideoTracks().isNotEmpty ?? false) || (call.localUserMediaStream?.stream?.getVideoTracks().isNotEmpty ?? false);
+
+  bool _sawRemoteVideo = false;
+
   void _bindStreams() {
     if (!mounted) return;
+    if (!_renderers && !_closing && _anyVideo) _ensureRenderers();
+    final rv = call.remoteUserMediaStream?.stream?.getVideoTracks().isNotEmpty ?? false;
+    if (rv && !_sawRemoteVideo) {
+      _sawRemoteVideo = true;
+      Diag.mark('звонок: пришло видео собеседника');
+    }
     if (_renderers) {
       try {
         _remote.srcObject = call.remoteUserMediaStream?.stream;
@@ -143,16 +160,16 @@ class _CallPageState extends State<CallPage> {
       s.cancel();
     }
     _ticker?.cancel();
-    final hadVideo = call.type == CallType.kVideo;
+    final init = _rendInit;
     _detach();
     if (!call.callHasEnded) call.hangup(reason: CallErrorCode.userHangup).catchError((_) {});
     // окна видео освобождаем чуть позже — когда модуль звонков закончит со своими потоками
-    if (hadVideo) {
+    if (init != null) {
       final r = _remote, l = _local;
-      Future.delayed(const Duration(seconds: 2), () {
-        r.dispose().catchError((_) {});
-        l.dispose().catchError((_) {});
-      });
+      init.whenComplete(() => Future.delayed(const Duration(seconds: 2), () {
+            r.dispose().catchError((_) {});
+            l.dispose().catchError((_) {});
+          }));
     }
     Diag.mark('звонок: экран закрыт — готово');
     super.dispose();
@@ -246,7 +263,29 @@ class _CallPageState extends State<CallPage> {
                         rtc.Helper.setSpeakerphoneOn(_speaker).catchError((_) {});
                       }, active: _speaker),
                       _btn(call.isLocalVideoMuted || !localVideo ? Icons.videocam_off : Icons.videocam, 'Видео', () async {
-                        await call.setLocalVideoMuted(localVideo);
+                        final on = !localVideo;
+                        try {
+                          await call.setLocalVideoMuted(!on);
+                        } catch (e) {
+                          Diag.err('Включение камеры', e);
+                        }
+                        if (on) {
+                          if (!(call.localUserMediaStream?.stream?.getVideoTracks().isNotEmpty ?? false)) {
+                            // модуль звонков не смог добавить видео (например, собеседник не прислал описание потоков)
+                            Diag.add('Камера не включилась: видео в этот звонок не добавлено');
+                            if (context.mounted) {
+                              ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Не удалось включить камеру в этом звонке')));
+                            }
+                          } else {
+                            Diag.mark('звонок: камера включена');
+                            await _ensureRenderers();
+                            // с видео удобнее говорить по громкой связи, как в Telegram
+                            if (!_speaker) {
+                              setState(() => _speaker = true);
+                              rtc.Helper.setSpeakerphoneOn(true).catchError((_) {});
+                            }
+                          }
+                        }
                         _bindStreams();
                       }, active: localVideo),
                       _btn(call.isMicrophoneMuted ? Icons.mic_off : Icons.mic, call.isMicrophoneMuted ? 'Микр. выкл.' : 'Микрофон', () async {
