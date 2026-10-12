@@ -26,6 +26,7 @@ import 'system/desktop.dart';
 import 'system/notify.dart';
 import 'matrix_client.dart';
 import 'pages/chats.dart';
+import 'pages/home.dart';
 import 'pages/login.dart';
 import 'pages/verify.dart';
 import 'theme.dart';
@@ -229,7 +230,7 @@ class _LastochkaAppState extends State<LastochkaApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      home: client.isLogged() ? const VerifyGate(child: ChatsPage()) : const LoginPage(),
+      home: client.isLogged() ? const VerifyGate(child: HomeShell()) : const LoginPage(),
       // код-пароль поверх всего приложения
       builder: (context, child) => MediaQuery(
         // размер текста из «Оформления» поверх системного

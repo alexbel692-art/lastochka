@@ -19,7 +19,9 @@ import '../system/clipboard.dart';
 /// Информация о чате (как профиль в Telegram): звонки, уведомления, участники, выход.
 class RoomInfoPage extends StatefulWidget {
   final Room room;
-  const RoomInfoPage({super.key, required this.room});
+  /// Открыт панелью справа от чата (компьютер) — вместо «назад» крестик.
+  final VoidCallback? onClose;
+  const RoomInfoPage({super.key, required this.room, this.onClose});
   @override
   State<RoomInfoPage> createState() => _RoomInfoPageState();
 }
@@ -59,7 +61,11 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
     final topic = room.topic;
     final members = _members ?? room.getParticipants([Membership.join]);
     return Scaffold(
-      appBar: AppBar(title: Text(room.isDirectChat ? 'Профиль' : 'Информация')),
+      appBar: AppBar(
+        automaticallyImplyLeading: widget.onClose == null,
+        title: Text(room.isDirectChat ? 'Профиль' : 'Информация'),
+        actions: [if (widget.onClose != null) IconButton(tooltip: 'Закрыть', icon: const Icon(Icons.close_rounded), onPressed: widget.onClose)],
+      ),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 640),
@@ -94,15 +100,21 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
                   _action(Icons.call_outlined, 'Звонок', () => startCall(context, room, video: false)),
                   _action(Icons.videocam_outlined, 'Видео', () => startCall(context, room, video: true)),
                 ],
-                _action(muted ? Icons.notifications_off_outlined : Icons.notifications_outlined, muted ? 'Без звука' : 'Звук', () async {
-                  try {
-                    await room.setPushRuleState(muted ? PushRuleState.notify : PushRuleState.mentionsOnly);
-                    setState(() {});
-                  } catch (_) {
-                    _toast('Не получилось');
-                  }
-                }),
+                _action(muted ? Icons.notifications_off_rounded : Icons.notifications_active_outlined, muted ? 'Без звука' : 'Звук вкл.', _notifyMenu),
+                _action(Icons.search_rounded, 'Медиа', () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => RoomMediaPage(room: room)))),
               ]),
+            ),
+            // уведомления — отдельной строкой, чтобы было видно сразу
+            SwitchListTile(
+              secondary: Icon(muted ? Icons.notifications_off_rounded : Icons.notifications_active_outlined, color: muted ? Colors.redAccent : hint),
+              title: const Text('Уведомления'),
+              subtitle: Text(switch (room.pushRuleState) {
+                PushRuleState.notify => 'Включены',
+                PushRuleState.mentionsOnly => 'Только упоминания и ответы',
+                PushRuleState.dontNotify => 'Выключены',
+              }),
+              value: !muted,
+              onChanged: (v) => _setNotify(v ? PushRuleState.notify : PushRuleState.dontNotify),
             ),
             if (topic.isNotEmpty || _canEdit(EventTypes.RoomTopic)) ...[
               const Divider(),
@@ -152,11 +164,19 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
                 ListTile(leading: Icon(Icons.block, color: hint), title: const Text('Заблокированные'), onTap: _banned),
             ],
             const Divider(),
-            ListTile(
-              leading: Icon(Icons.perm_media_outlined, color: hint),
-              title: const Text('Медиа, файлы и ссылки'),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => RoomMediaPage(room: room))),
-            ),
+            // разделы, как в Telegram и Element: каждый открывается сразу на своей вкладке
+            for (final (i, icon, title) in const [
+              (0, Icons.photo_library_outlined, 'Медиа'),
+              (1, Icons.insert_drive_file_outlined, 'Файлы'),
+              (2, Icons.link_rounded, 'Ссылки'),
+              (3, Icons.mic_none_rounded, 'Голосовые'),
+            ])
+              ListTile(
+                leading: Icon(icon, color: hint),
+                title: Text(title),
+                trailing: Icon(Icons.chevron_right_rounded, color: hint),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => RoomMediaPage(room: room, initialTab: i))),
+              ),
             if (room.isDirectChat && room.directChatMatrixID != null)
               Builder(builder: (context) {
                 final uid = room.directChatMatrixID!;
@@ -225,7 +245,8 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
                 if (ok != true) return;
                 try {
                   await room.leave();
-                  if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+                  widget.onClose?.call();
+                  if (mounted) Navigator.of(context, rootNavigator: true).popUntil((r) => r.isFirst);
                 } catch (_) {
                   _toast('Не получилось');
                 }
@@ -317,7 +338,7 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
         case 'dm':
           final id = await client.startDirectChat(u.id, enableEncryption: true);
           final r = client.getRoomById(id) ?? await client.waitForRoomInSync(id).then((_) => client.getRoomById(id));
-          if (r != null && mounted) await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatPage(room: r)));
+          if (r != null && mounted) await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => ChatPage(room: r)));
         case 'verify':
           await verifyUser(context, u.id);
         case 'p100' || 'p50' || 'p0':
@@ -416,6 +437,44 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
     } catch (_) {
       _toast('Не получилось');
     }
+  }
+
+  Future<void> _setNotify(PushRuleState st) async {
+    try {
+      await room.setPushRuleState(st);
+      if (mounted) setState(() {});
+      _toast(switch (st) {
+        PushRuleState.notify => 'Уведомления включены',
+        PushRuleState.mentionsOnly => 'Только упоминания и ответы',
+        PushRuleState.dontNotify => room.isDirectChat ? 'Уведомления от собеседника выключены' : 'Уведомления группы выключены',
+      });
+    } catch (_) {
+      _toast('Не получилось');
+    }
+  }
+
+  /// Выбор, как уведомлять: всё / только упоминания (в группах) / без звука.
+  Future<void> _notifyMenu() async {
+    final st = await showModalBottomSheet<PushRuleState>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final (s, icon, title) in [
+            (PushRuleState.notify, Icons.notifications_active_outlined, 'Все уведомления'),
+            if (!room.isDirectChat) (PushRuleState.mentionsOnly, Icons.alternate_email_rounded, 'Только упоминания и ответы'),
+            (PushRuleState.dontNotify, Icons.notifications_off_rounded, 'Без звука'),
+          ])
+            ListTile(
+              leading: Icon(icon),
+              title: Text(title),
+              trailing: room.pushRuleState == s ? Icon(Icons.check_rounded, color: Theme.of(c).colorScheme.primary) : null,
+              onTap: () => Navigator.pop(c, s),
+            ),
+        ]),
+      ),
+    );
+    if (st != null) await _setNotify(st);
   }
 
   Future<bool> _confirm(String title, String text) async =>

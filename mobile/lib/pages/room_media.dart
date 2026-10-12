@@ -9,6 +9,8 @@ import 'package:matrix/matrix.dart';
 import '../chat/formatting.dart';
 import '../chat/media_viewer.dart';
 import '../chat/video.dart';
+import '../chat/voice.dart' show VoiceMessage;
+import '../widgets/avatar.dart';
 import '../system/diag.dart';
 import '../system/lru.dart';
 import 'chat.dart' show openAttachment;
@@ -16,9 +18,11 @@ import 'chat.dart' show openAttachment;
 final _thumbs = Lru<String, Future<Uint8List?>>(150)..register();
 final _url = RegExp(r'''(?:https?://|www\.)[^\s<>"']+[^\s<>"'.,;:!?)\]}]''', caseSensitive: false);
 
+/// Разделы: 0 — медиа, 1 — файлы, 2 — ссылки, 3 — голосовые.
 class RoomMediaPage extends StatefulWidget {
   final Room room;
-  const RoomMediaPage({super.key, required this.room});
+  final int initialTab;
+  const RoomMediaPage({super.key, required this.room, this.initialTab = 0});
   @override
   State<RoomMediaPage> createState() => _RoomMediaPageState();
 }
@@ -26,7 +30,7 @@ class RoomMediaPage extends StatefulWidget {
 class _RoomMediaPageState extends State<RoomMediaPage> {
   Timeline? _tl;
   bool _loading = true;
-  List<Event> _media = [], _files = [];
+  List<Event> _media = [], _files = [], _voice = [];
   List<(Event, String)> _links = [];
 
   @override
@@ -44,13 +48,15 @@ class _RoomMediaPageState extends State<RoomMediaPage> {
   void _collect() {
     final tl = _tl;
     if (tl == null) return;
-    final media = <Event>[], files = <Event>[], links = <(Event, String)>[];
+    final media = <Event>[], files = <Event>[], voice = <Event>[], links = <(Event, String)>[];
     for (final e in tl.events) {
       if (e.redacted || e.type != EventTypes.Message) continue;
       final d = e.getDisplayEvent(tl);
       if (isViewableMedia(d)) {
         media.add(d);
-      } else if (d.messageType == MessageTypes.File || (d.messageType == MessageTypes.Audio && !d.content.containsKey('org.matrix.msc3245.voice'))) {
+      } else if (d.messageType == MessageTypes.Audio) {
+        voice.add(d); // голосовые и аудиозаписи
+      } else if (d.messageType == MessageTypes.File) {
         files.add(d);
       } else if (d.messageType == MessageTypes.Text || d.messageType == MessageTypes.Notice) {
         for (final m in _url.allMatches(d.body)) {
@@ -61,6 +67,7 @@ class _RoomMediaPageState extends State<RoomMediaPage> {
     setState(() {
       _media = media;
       _files = files;
+      _voice = voice;
       _links = links;
     });
   }
@@ -89,14 +96,16 @@ class _RoomMediaPageState extends State<RoomMediaPage> {
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
     return DefaultTabController(
-      length: 3,
+      length: 4,
+      initialIndex: widget.initialTab.clamp(0, 3),
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Медиа, файлы и ссылки'),
-          bottom: TabBar(tabs: [
+          title: Text(widget.room.getLocalizedDisplayname()),
+          bottom: TabBar(isScrollable: true, tabAlignment: TabAlignment.center, tabs: [
             Tab(text: 'Медиа${_media.isEmpty ? '' : ' · ${_media.length}'}'),
             Tab(text: 'Файлы${_files.isEmpty ? '' : ' · ${_files.length}'}'),
             Tab(text: 'Ссылки${_links.isEmpty ? '' : ' · ${_links.length}'}'),
+            Tab(text: 'Голосовые${_voice.isEmpty ? '' : ' · ${_voice.length}'}'),
           ]),
         ),
         body: Column(children: [
@@ -175,6 +184,32 @@ class _RoomMediaPageState extends State<RoomMediaPage> {
                           subtitle: Text('${prettyUrl(u)}\n${e.senderFromMemoryOrFallback.calcDisplayname()} · ${DateFormat('d MMM yyyy', 'ru').format(e.originServerTs)}',
                               maxLines: 2, overflow: TextOverflow.ellipsis),
                           onTap: () => openLink(context, u.toLowerCase().startsWith('www.') ? 'https://$u' : u),
+                        );
+                      },
+                    ),
+              // голосовые: слушать прямо здесь
+              _voice.isEmpty
+                  ? _empty(_loading ? 'Ищем голосовые…' : 'Голосовых пока нет', hint)
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: _voice.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
+                      itemBuilder: (_, i) {
+                        final e = _voice[i];
+                        final u = e.senderFromMemoryOrFallback;
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                          child: Row(children: [
+                            Avatar(mxc: u.avatarUrl, name: u.calcDisplayname(), size: 44),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text('${u.calcDisplayname()} · ${DateFormat('d MMM, HH:mm', 'ru').format(e.originServerTs)}', style: TextStyle(color: hint, fontSize: 12.5)),
+                                const SizedBox(height: 4),
+                                VoiceMessage(event: e, color: Theme.of(context).colorScheme.primary),
+                              ]),
+                            ),
+                          ]),
                         );
                       },
                     ),

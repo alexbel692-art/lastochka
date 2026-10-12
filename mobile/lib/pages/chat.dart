@@ -103,7 +103,8 @@ class _ChatPageState extends State<ChatPage> {
           for (final m in (_albums[e.eventId] ?? [e]))
             if (isViewableMedia(m)) m,
       ];
-  int _panelTab = 0; // панель снизу: 0 — эмодзи, 1 — стикеры
+  int _panelTab = 0;
+  bool _info = false; // компьютер: открыт ли профиль чата справа // панель снизу: 0 — эмодзи, 1 — стикеры
   final _clipKey = GlobalKey(); // скрепка — у неё на компьютере всплывает меню вложений
   Map<String, List<Event>> _albums = const {}; // альбом: id первого показанного сообщения → все снимки
   // упоминания в сообщении: имя → @id
@@ -286,7 +287,7 @@ class _ChatPageState extends State<ChatPage> {
     _albums = albums;
     final typing = room.typingUsers.any((u) => u.id != client.userID);
     final accent = Theme.of(context).colorScheme.primary;
-    return PopScope(
+    final page = PopScope(
       canPop: _sel == null,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _sel != null) setState(() => _sel = null);
@@ -315,7 +316,7 @@ class _ChatPageState extends State<ChatPage> {
                 decoration: const InputDecoration(hintText: 'Поиск в чате', filled: false, border: InputBorder.none),
               )
             : InkWell(
-          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => RoomInfoPage(room: room))),
+          onTap: () => widget.embedded ? setState(() => _info = !_info) : Navigator.of(context).push(MaterialPageRoute(builder: (_) => RoomInfoPage(room: room))),
           child: Row(children: [
           Avatar(mxc: room.avatar, name: name, size: 40),
           const SizedBox(width: 10),
@@ -327,6 +328,8 @@ class _ChatPageState extends State<ChatPage> {
                   const Padding(padding: EdgeInsets.only(left: 4), child: Icon(Icons.verified_user, size: 16, color: Colors.green)),
                 if (Trust.instance.changedIn(room).isNotEmpty)
                   const Padding(padding: EdgeInsets.only(left: 4), child: Icon(Icons.gpp_bad, size: 16, color: Colors.red)),
+                if (room.pushRuleState != PushRuleState.notify)
+                  Padding(padding: const EdgeInsets.only(left: 4), child: Icon(Icons.notifications_off_rounded, size: 16, color: Theme.of(context).hintColor)),
               ]),
               Text(_subtitle(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: typing ? accent : Theme.of(context).hintColor)),
             ]),
@@ -451,6 +454,22 @@ class _ChatPageState extends State<ChatPage> {
     ),
     ),
     );
+    // компьютер: профиль чата — панелью справа, как в Element (без нового окна)
+    if (!widget.embedded || !_info) return page;
+    return Row(children: [
+      Expanded(child: page),
+      VerticalDivider(width: 1, thickness: 1, color: Theme.of(context).dividerColor.withValues(alpha: 0.3)),
+      SizedBox(
+        width: 380,
+        child: ClipRect(
+          // свой навигатор: разделы профиля (медиа, файлы…) открываются внутри панели
+          child: Navigator(
+            key: ValueKey('info-${room.id}'),
+            onGenerateRoute: (_) => MaterialPageRoute(builder: (_) => RoomInfoPage(room: room, onClose: () => setState(() => _info = false))),
+          ),
+        ),
+      ),
+    ]);
   }
 
 }

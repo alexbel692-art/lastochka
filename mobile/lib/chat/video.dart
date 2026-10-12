@@ -420,7 +420,7 @@ class _RoundVideoState extends State<RoundVideo> {
 /// Полноэкранный просмотр обычного видео.
 Future<void> openVideo(BuildContext context, Event e, void Function() openExternally) async {
   if (!videoSupported) return openExternally();
-  await Navigator.of(context).push(MaterialPageRoute(builder: (_) => _VideoPage(event: e)));
+  await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => _VideoPage(event: e)));
 }
 
 class _VideoPage extends StatefulWidget {

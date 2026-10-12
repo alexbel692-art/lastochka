@@ -25,7 +25,8 @@ bool isViewableMedia(Event e) => !e.redacted && (e.messageType == MessageTypes.I
 /// Открыть просмотр: [items] — по порядку (старые слева), [initial] — с какого начать.
 Future<void> openMediaViewer(BuildContext context, List<Event> items, Event initial, {required void Function(Event) openExternally}) {
   final i = items.indexWhere((e) => e.eventId == initial.eventId);
-  return Navigator.of(context).push(MaterialPageRoute(
+  // поверх всего окна (и из боковой панели профиля на компьютере)
+  return Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
     builder: (_) => _MediaViewer(items: i < 0 ? [initial] : items, initial: i < 0 ? 0 : i, openExternally: openExternally),
   ));
 }
