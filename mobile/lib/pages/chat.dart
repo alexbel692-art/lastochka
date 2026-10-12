@@ -91,6 +91,8 @@ class _ChatPageState extends State<ChatPage> {
   DateTime? _floatDate;
   bool _floatShow = false;
   List<Event> _events = const [];
+  int _panelTab = 0; // панель снизу: 0 — эмодзи, 1 — стикеры
+  final _clipKey = GlobalKey(); // скрепка — у неё на компьютере всплывает меню вложений
   Map<String, List<Event>> _albums = const {}; // альбом: id первого показанного сообщения → все снимки
   // упоминания в сообщении: имя → @id
   final Map<String, String> _mentions = {};

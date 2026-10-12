@@ -168,14 +168,27 @@ class _PeoplePageState extends State<_PeoplePage> {
           if (widget.multi) Text(_picked.isEmpty ? 'Отметьте людей' : 'Выбрано: ${_picked.length}', style: TextStyle(fontSize: 13, color: hint, fontWeight: FontWeight.w400)),
         ]),
       ),
-      floatingActionButton: widget.multi && (_picked.isNotEmpty || widget.allowEmpty)
-          ? FloatingActionButton.extended(
-              onPressed: () => Navigator.pop(context, PickResult(List.of(_picked))),
-              icon: const Icon(Icons.arrow_forward_rounded),
-              label: Text(widget.doneLabel),
+      // кнопка — полосой внизу по центру (на компьютере FAB висел в углу поверх галочек)
+      bottomNavigationBar: widget.multi && (_picked.isNotEmpty || widget.allowEmpty)
+          ? SafeArea(
+              child: Center(
+                heightFactor: 1,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 640),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                      onPressed: () => Navigator.pop(context, PickResult(List.of(_picked))),
+                      icon: const Icon(Icons.arrow_forward_rounded),
+                      label: Text(_picked.isEmpty ? widget.doneLabel : '${widget.doneLabel} · ${_picked.length}'),
+                    ),
+                  ),
+                ),
+              ),
             )
           : null,
-      body: Column(children: [
+      body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 640), child: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
           child: TextField(
@@ -234,7 +247,7 @@ class _PeoplePageState extends State<_PeoplePage> {
                 ),
         ),
         Expanded(
-          child: ListView(padding: const EdgeInsets.only(bottom: 96), children: [
+          child: ListView(padding: const EdgeInsets.only(bottom: 16), children: [
             if (showActions) ...[
               for (final a in widget.actions)
                 ListTile(
@@ -270,7 +283,7 @@ class _PeoplePageState extends State<_PeoplePage> {
               ),
           ]),
         ),
-      ]),
+      ]))),
     );
   }
 

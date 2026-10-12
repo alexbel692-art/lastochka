@@ -17,6 +17,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
 import '../matrix_client.dart';
 import 'clock.dart';
+import 'perf.dart';
 import 'updater.dart';
 
 class Diag {
@@ -277,6 +278,7 @@ class Diag {
       'Чатов: ${client.rooms.length}',
       if (battery != null) 'Работа в фоне: $battery',
       if (cpu != null) 'Процессор: $cpu',
+      if (remoteSession) 'Удалённый рабочий стол: да (облегчённый режим)',
       if (skew != null) 'Часы: ${skew.inSeconds.abs() < 60 ? 'в порядке' : skewText(skew)}',
       if (lastCall != null) 'Последний звонок: $lastCall',
       '',

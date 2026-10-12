@@ -136,13 +136,14 @@ class EmojiStickerPanel extends StatefulWidget {
   final void Function(String emoji) onEmoji;
   final void Function(StickerImg s) onSticker;
   final double height;
-  const EmojiStickerPanel({super.key, required this.room, required this.onEmoji, required this.onSticker, this.height = 300});
+  final int initialTab; // 0 — эмодзи, 1 — стикеры
+  const EmojiStickerPanel({super.key, required this.room, required this.onEmoji, required this.onSticker, this.height = 300, this.initialTab = 0});
   @override
   State<EmojiStickerPanel> createState() => _EmojiStickerPanelState();
 }
 
 class _EmojiStickerPanelState extends State<EmojiStickerPanel> with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 2, vsync: this);
+  late final TabController _tabs = TabController(length: 2, vsync: this, initialIndex: widget.initialTab.clamp(0, 1));
   List<String> _recent = [];
 
   @override

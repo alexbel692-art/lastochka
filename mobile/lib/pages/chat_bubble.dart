@@ -1,6 +1,15 @@
 part of 'chat.dart';
 
 // Пузырь сообщения и ответ-цитата.
+
+/// Один раз за запуск на каждую сессию: подтянуть ключ из резервной копии на сервере.
+final Set<String> _keyTried = {};
+void _autoLoadKey(Event e) {
+  final sid = e.content.tryGet<String>('session_id');
+  final enc = client.encryption;
+  if (sid == null || enc == null || !_keyTried.add(sid)) return;
+  enc.keyManager.loadSingleKey(e.room.id, sid).catchError((Object err) => Diag.err('Ключ из резервной копии', err));
+}
 class _Bubble extends StatelessWidget {
   final Event event;
   final Timeline timeline;
@@ -85,20 +94,38 @@ class _Bubble extends StatelessWidget {
     if (event.redacted) {
       content = Text('Сообщение удалено', style: TextStyle(fontStyle: FontStyle.italic, color: hint));
     } else if (e.type == EventTypes.Encrypted) {
-      content = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-        Text('🔒 Ожидание ключа расшифровки…', style: TextStyle(fontStyle: FontStyle.italic, color: hint)),
-        if (e.content['can_request_session'] == true)
-          TextButton.icon(
-            style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
-            icon: const Icon(Icons.key, size: 16),
-            label: const Text('Запросить ключ'),
-            onPressed: () async {
-              try {
-                await e.requestKey();
-                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Запрос отправлен на ваши устройства и отправителю')));
-              } catch (_) {}
-            },
-          ),
+      // ключ ещё не пришёл: сначала тихо пробуем взять его из резервной копии
+      _autoLoadKey(e);
+      content = Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(color: accent.withValues(alpha: 0.14), shape: BoxShape.circle),
+          child: Icon(Icons.lock_clock_rounded, size: 19, color: accent),
+        ),
+        const SizedBox(width: 10),
+        Flexible(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Text('Сообщение ещё не расшифровано', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5, color: mine ? Bubbles.outText(context) : null)),
+            const SizedBox(height: 2),
+            if (e.content['can_request_session'] == true)
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () async {
+                  try {
+                    await e.requestKey();
+                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Запрос ключа отправлен')));
+                  } catch (_) {}
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text('Запросить ключ у ваших устройств', style: TextStyle(color: accent, fontSize: 13.5, fontWeight: FontWeight.w500)),
+                ),
+              )
+            else
+              Text('Ключ загружается…', style: TextStyle(color: hint, fontSize: 13)),
+          ]),
+        ),
       ]);
     } else if (e.type == EventTypes.CallInvite) {
       content = Row(mainAxisSize: MainAxisSize.min, children: [

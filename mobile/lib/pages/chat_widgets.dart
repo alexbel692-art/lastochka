@@ -83,7 +83,18 @@ class _Blink extends StatefulWidget {
 }
 
 class _BlinkState extends State<_Blink> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 700))..repeat(reverse: true);
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 700), value: 1);
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // в RDP (и при выключенных анимациях) — просто точка, без мигания
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _c.stop();
+      _c.value = 1;
+    } else if (!_c.isAnimating) {
+      _c.repeat(reverse: true);
+    }
+  }
   @override
   void dispose() {
     _c.dispose();

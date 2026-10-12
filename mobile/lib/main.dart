@@ -28,6 +28,7 @@ import 'pages/login.dart';
 import 'pages/verify.dart';
 import 'theme.dart';
 import 'widgets/splash.dart';
+import 'system/perf.dart';
 
 late Client client;
 final _switcherCover = ValueNotifier<bool>(false);
@@ -209,8 +210,8 @@ class _LastochkaAppState extends State<LastochkaApp> {
       title: 'Ласточка',
       debugShowCheckedModeBanner: false,
       navigatorKey: navKey,
-      theme: lightTheme,
-      darkTheme: darkTheme,
+      theme: liteTheme(lightTheme),
+      darkTheme: liteTheme(darkTheme),
       themeMode: Appearance.instance.themeMode.value,
       locale: const Locale('ru'),
       supportedLocales: const [Locale('ru'), Locale('en')],
@@ -223,7 +224,9 @@ class _LastochkaAppState extends State<LastochkaApp> {
       // код-пароль поверх всего приложения
       builder: (context, child) => MediaQuery(
         // размер текста из «Оформления» поверх системного
-        data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(MediaQuery.textScalerOf(context).scale(1) * Appearance.instance.textScale.value)),
+        // в RDP-сеансе анимации выключены (кадры рисует процессор сервера)
+        data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(MediaQuery.textScalerOf(context).scale(1) * Appearance.instance.textScale.value), disableAnimations: remoteSession || MediaQuery.of(context).disableAnimations),
         child: ListenableBuilder(
         listenable: Listenable.merge([AppLock.instance.locked, callActive, screenProtect, _switcherCover, CertPinning.instance.alert]),
         builder: (context, _) {

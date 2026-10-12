@@ -17,6 +17,7 @@ import '../chat/polls.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/login_banner.dart';
+import '../widgets/clock_banner.dart';
 import '../widgets/update_banner.dart';
 import 'chat.dart';
 import 'settings.dart';
@@ -483,10 +484,20 @@ class _ChatsPageState extends State<ChatsPage> {
       if (!_wide) return _list(context);
       final sel = _selected == null ? null : client.getRoomById(_selected!.id);
       final listW = (c.maxWidth * 0.36).clamp(320.0, 420.0);
-      return Row(children: [
-        SizedBox(width: listW, child: _list(context)),
-        VerticalDivider(width: 1, thickness: 1, color: Theme.of(context).dividerColor.withValues(alpha: 0.3)),
+      // на широком экране — два закруглённых «листа» на подложке, как в современных мессенджерах
+      final dark = Theme.of(context).brightness == Brightness.dark;
+      return ColoredBox(
+        color: dark ? const Color(0xFF151515) : const Color(0xFFE9ECF0),
+        child: Row(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 4, 8),
+          child: ClipRRect(borderRadius: BorderRadius.circular(18), child: SizedBox(width: listW - 12, child: _list(context))),
+        ),
         Expanded(
+          child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 8, 8, 8),
+          child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
           child: sel == null || sel.membership != Membership.join
               ? Container(
                   color: Bubbles.wall(context),
@@ -498,8 +509,11 @@ class _ChatsPageState extends State<ChatsPage> {
                   ),
                 )
               : ChatPage(key: ValueKey('${sel.id}|$_jump'), room: sel, embedded: true, jumpTo: _jump),
+          ),
+          ),
         ),
-      ]);
+      ]),
+      );
     });
   }
 
@@ -600,6 +614,7 @@ class _ChatsPageState extends State<ChatsPage> {
       floatingActionButton: FloatingActionButton(onPressed: _newChat, tooltip: 'Новый чат', child: const Icon(Icons.edit_outlined)),
       body: Column(children: [
         const UpdateBanner(),
+        const ClockBanner(),
         const NewLoginBanner(),
         Expanded(child: client.prevBatch == null && client.rooms.isEmpty
           ? const Center(child: CircularProgressIndicator())
@@ -721,8 +736,13 @@ class _ChatsPageState extends State<ChatsPage> {
           builder: (_, s) {
             final name = s.data?.displayName ?? me.localpart ?? '';
             return DrawerHeader(
-              margin: EdgeInsets.zero,
-              decoration: BoxDecoration(color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF2B2B2B) : Theme.of(context).colorScheme.primary),
+              margin: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                gradient: Theme.of(context).brightness == Brightness.dark
+                    ? const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF3A3550), Color(0xFF2B2B2B)])
+                    : LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Theme.of(context).colorScheme.primary, const Color(0xFF2A6FE0)]),
+              ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.end, children: [
                 Avatar(mxc: s.data?.avatarUrl, name: name, size: 64),
                 const SizedBox(height: 12),

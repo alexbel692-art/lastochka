@@ -235,6 +235,37 @@ extension _ChatActions on _ChatPageState {
     if (_scroll.hasClients) _scroll.animateTo(0, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
   }
 
+  Future<String?> _attachPopup(List<_AttachItem> items) {
+    final box = _clipKey.currentContext?.findRenderObject() as RenderBox?;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final at = box == null ? Offset(overlay.size.width - 60, overlay.size.height - 60) : box.localToGlobal(Offset.zero, ancestor: overlay);
+    final w = box?.size.width ?? 48;
+    // меню прижато правым краем к скрепке и открывается вверх
+    return showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(at.dx + w - 220, at.dy - 8 - items.length * 48.0, overlay.size.width - at.dx - w, overlay.size.height - at.dy + 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      constraints: const BoxConstraints(minWidth: 210),
+      items: [
+        for (final it in items)
+          PopupMenuItem<String>(
+            value: it.value,
+            height: 48,
+            child: Row(children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: it.colors)),
+                child: Icon(it.icon, color: Colors.white, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Text(it.label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+            ]),
+          ),
+      ],
+    );
+  }
+
   static bool _isVideoName(String name, String? mime) =>
       (mime?.startsWith('video/') ?? false) || RegExp(r'\.(mp4|mov|m4v|3gp|webm|mkv|avi)$', caseSensitive: false).hasMatch(name);
 
@@ -310,13 +341,16 @@ extension _ChatActions on _ChatPageState {
       const _AttachItem(Icons.bar_chart_rounded, 'Опрос', 'poll', [Color(0xFFFFB547), Color(0xFFF08A1C)]),
     ];
     final picked = ValueNotifier<List<AssetEntity>>(const []);
-    final res = await showModalBottomSheet<Object>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      isScrollControlled: true,
-      builder: (c) => _AttachSheet(items: items, picked: picked),
-    );
+    // на компьютере — компактное меню прямо над скрепкой, на телефоне — карточка с галереей
+    final res = isDesktop
+        ? await _attachPopup(items)
+        : await showModalBottomSheet<Object>(
+            context: context,
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            isScrollControlled: true,
+            builder: (c) => _AttachSheet(items: items, picked: picked),
+          );
     final a = res is String ? res : null;
     final reply = _replyTo;
     try {
@@ -457,7 +491,7 @@ class _AttachTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => TweenAnimationBuilder<double>(
         tween: Tween(begin: 0, end: 1),
-        duration: Duration(milliseconds: 260 + index * 45),
+        duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : Duration(milliseconds: 260 + index * 45),
         curve: Curves.easeOutBack,
         builder: (_, v, child) => Opacity(opacity: v.clamp(0.0, 1.0), child: Transform.scale(scale: 0.7 + 0.3 * v, child: child)),
         child: InkWell(

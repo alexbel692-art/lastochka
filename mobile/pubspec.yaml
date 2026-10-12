@@ -1,7 +1,7 @@
 name: lastochka
 description: Ласточка — защищённый мессенджер на Matrix (Android, iOS).
 publish_to: 'none'
-version: 4.9.3+1
+version: 4.10.0+1
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -72,6 +72,17 @@ flutter:
     - assets/stickers/
     - assets/tray.ico
     - assets/tray.png
+  # шрифт Inter (SIL OFL, assets/fonts/Inter-OFL.txt): одинаково современный на всех платформах
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
 
 # SQLCipher вместо обычного SQLite на всех платформах (база сообщений зашифрована)
 hooks:

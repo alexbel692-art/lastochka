@@ -291,14 +291,17 @@ extension _ChatCompose on _ChatPageState {
             Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
               IconButton(
                 tooltip: 'Эмодзи и стикеры',
-                icon: Icon(_panel ? Icons.keyboard_outlined : Icons.emoji_emotions_outlined, color: hint),
+                icon: Icon(_panel && _panelTab == 0 ? Icons.keyboard_outlined : Icons.emoji_emotions_outlined, color: hint),
                 onPressed: () {
-                  if (_panel) {
+                  if (_panel && _panelTab == 0) {
                     _set(() => _panel = false);
                     _focus.requestFocus();
                   } else {
                     FocusScope.of(context).unfocus();
-                    _set(() => _panel = true);
+                    _set(() {
+                      _panelTab = 0;
+                      _panel = true;
+                    });
                   }
                 },
               ),
@@ -320,7 +323,24 @@ extension _ChatCompose on _ChatPageState {
                   ),
                 ),
               ),
-              if (empty && _editing == null) IconButton(tooltip: 'Прикрепить', icon: Icon(Icons.attach_file, color: hint), onPressed: _attach),
+              if (empty && _editing == null)
+                IconButton(
+                  tooltip: 'Стикеры',
+                  icon: Icon(_panel && _panelTab == 1 ? Icons.keyboard_outlined : Icons.sticky_note_2_outlined, color: hint),
+                  onPressed: () {
+                    if (_panel && _panelTab == 1) {
+                      _set(() => _panel = false);
+                      _focus.requestFocus();
+                    } else {
+                      FocusScope.of(context).unfocus();
+                      _set(() {
+                        _panelTab = 1;
+                        _panel = true;
+                      });
+                    }
+                  },
+                ),
+              if (empty && _editing == null) IconButton(key: _clipKey, tooltip: 'Прикрепить', icon: Icon(Icons.attach_file_rounded, color: hint), onPressed: _attach),
               if (empty && _editing == null)
                 IconButton(tooltip: 'Голосовое сообщение', icon: Icon(Icons.mic_none, color: hint), onPressed: _startRec)
               else
@@ -338,6 +358,8 @@ extension _ChatCompose on _ChatPageState {
             ]),
           if (_panel && !_recording)
             EmojiStickerPanel(
+              key: ValueKey('panel$_panelTab'),
+              initialTab: _panelTab,
               room: room,
               height: min(320, MediaQuery.sizeOf(context).height * 0.4),
               onEmoji: (em) {

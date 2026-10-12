@@ -17,6 +17,23 @@ ThemeData _base(Brightness b) {
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
+    fontFamily: 'Inter',
+    // эмодзи и редкие символы — системными шрифтами
+    fontFamilyFallback: const ['Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', 'Segoe UI', 'Roboto'],
+    // короткие уведомления («Сохранено», «Скопировано») — маленькой плашкой по центру, а не полосой во всю ширину
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      width: 340,
+      elevation: 3,
+      backgroundColor: dark ? const Color(0xFF3A3A3C) : const Color(0xE6303035),
+      contentTextStyle: const TextStyle(color: Colors.white, fontSize: 14, fontFamily: 'Inter'),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    ),
+    drawerTheme: const DrawerThemeData(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.horizontal(right: Radius.circular(22))),
+    ),
+    popupMenuTheme: PopupMenuThemeData(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+    dialogTheme: DialogThemeData(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22))),
     scaffoldBackgroundColor: bg,
     appBarTheme: AppBarTheme(
       backgroundColor: bg,
