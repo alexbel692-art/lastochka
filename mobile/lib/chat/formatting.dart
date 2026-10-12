@@ -7,6 +7,8 @@ import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html;
 import 'package:matrix/matrix.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../system/link_safety.dart';
+import '../system/diag.dart';
 
 String _esc(String s) => s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 
@@ -74,23 +76,47 @@ String stripMarkdown(String s) => s
     .replaceAllMapped(RegExp(r'`([^`]+)`'), (m) => m[1]!);
 
 /// Открыть ссылку — только после подтверждения: видно, куда на самом деле ведёт ссылка.
-Future<void> openLink(BuildContext context, String href) async {
+Future<void> openLink(BuildContext context, String href, {String? shown}) async {
   final uri = Uri.tryParse(href.trim());
   if (uri == null || !const ['http', 'https', 'mailto'].contains(uri.scheme.toLowerCase())) {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Такие ссылки Ласточка не открывает')));
     return;
   }
+  final warn = uri.scheme == 'mailto' ? const <String>[] : linkWarnings(uri, shown: shown);
+  final host = displayHost(uri.host);
   final ok = await showDialog<bool>(
     context: context,
     builder: (d) => AlertDialog(
-      title: const Text('Открыть ссылку?'),
-      content: SelectableText(uri.toString(), style: const TextStyle(fontSize: 14)),
+      icon: warn.isEmpty ? null : const Icon(Icons.gpp_maybe_rounded, color: Colors.redAccent, size: 40),
+      title: Text(warn.isEmpty ? 'Открыть ссылку?' : 'Осторожно: ссылка может быть поддельной'),
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (host.isNotEmpty) ...[
+          Text('Сайт: $host', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+          const SizedBox(height: 6),
+        ],
+        SelectableText(uri.toString(), style: const TextStyle(fontSize: 13)),
+        for (final w in warn)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Icon(Icons.warning_amber_rounded, size: 18, color: Colors.redAccent),
+              const SizedBox(width: 6),
+              Expanded(child: Text(w, style: const TextStyle(color: Colors.redAccent, fontSize: 13.5))),
+            ]),
+          ),
+      ]),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
-        FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Открыть')),
+        if (warn.isEmpty) TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
+        if (warn.isEmpty)
+          FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Открыть'))
+        else ...[
+          TextButton(onPressed: () => Navigator.pop(d, true), child: const Text('Всё равно открыть', style: TextStyle(color: Colors.redAccent))),
+          FilledButton(onPressed: () => Navigator.pop(d, false), child: const Text('Не открывать')),
+        ],
       ],
     ),
   );
+  if (warn.isNotEmpty) Diag.add('Предупреждение о ссылке: ${warn.length} ${ok == true ? '(открыта)' : '(не открыта)'}');
   if (ok == true) {
     try {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -326,7 +352,7 @@ class _RichMessageState extends State<RichMessage> {
           TextSpan(
             text: shown,
             style: st.copyWith(color: accent, decoration: TextDecoration.underline, decorationColor: accent),
-            recognizer: _tap(() => openLink(context, href)),
+            recognizer: _tap(() => openLink(context, href, shown: el.text)),
           ),
         ];
       default:

@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
 import '../system/diag.dart';
 import '../system/notify.dart';
+import '../system/secure_store.dart';
 import 'autodelete.dart';
 
 const pollStart = 'org.matrix.msc3381.poll.start';
@@ -152,11 +153,25 @@ const pollDurations = [
 
 const _closeKey = 'poll.autoClose';
 
-Future<void> _scheduleClose(String roomId, String eventId, DateTime at) async {
+// список хранится зашифрованным (какие опросы и в каких чатах — тоже сведения о переписке)
+Future<List<String>> _loadClose() async {
   final prefs = await SharedPreferences.getInstance();
-  final list = prefs.getStringList(_closeKey) ?? [];
+  final old = prefs.getStringList(_closeKey);
+  final v = await SecureStore.instance.read(_closeKey);
+  final list = v is List ? v.whereType<String>().toList() : <String>[];
+  if (old != null) {
+    // перенос из открытых настроек (до 4.12)
+    list.addAll(old);
+    await prefs.remove(_closeKey);
+    await SecureStore.instance.write(_closeKey, list);
+  }
+  return list;
+}
+
+Future<void> _scheduleClose(String roomId, String eventId, DateTime at) async {
+  final list = await _loadClose();
   list.add('$roomId|$eventId|${at.millisecondsSinceEpoch}');
-  await prefs.setStringList(_closeKey, list);
+  await SecureStore.instance.write(_closeKey, list);
   _pollTimer ??= Timer.periodic(const Duration(seconds: 30), (_) => closeDuePolls());
 }
 
@@ -175,8 +190,7 @@ Future<void> closeDuePolls() async {
   if (_closing || !client.isLogged()) return;
   _closing = true;
   try {
-    final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList(_closeKey) ?? [];
+    final list = await _loadClose();
     if (list.isEmpty) return;
     final keep = <String>[];
     for (final item in list) {
@@ -199,7 +213,9 @@ Future<void> closeDuePolls() async {
         keep.add(item); // попробуем ещё раз позже
       }
     }
-    await prefs.setStringList(_closeKey, keep);
+    if (keep.length != list.length) await SecureStore.instance.write(_closeKey, keep.isEmpty ? null : keep);
+  } catch (e) {
+    Diag.err('Опросы со сроком', e);
   } finally {
     _closing = false;
   }

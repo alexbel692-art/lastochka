@@ -117,6 +117,14 @@ def plist_fn(s):
 for plist in ('ios/Runner/Info.plist', 'macos/Runner/Info.plist'):
     if os.path.exists(plist):
         edit(plist, plist_fn)
+# macOS: все файлы, которые создаёт Ласточка (вложения из чатов), получают карантин Gatekeeper
+if os.path.exists('macos/Runner/Info.plist'):
+    def quarantine_fn(s):
+        if 'LSFileQuarantineEnabled' in s:
+            return s
+        i = s.rindex('</dict>')
+        return s[:i] + '\t<key>LSFileQuarantineEnabled</key>\n\t<true/>\n' + s[i:]
+    edit('macos/Runner/Info.plist', quarantine_fn)
 
 # --- macOS: разрешения песочницы (сеть, камера, микрофон, выбор файлов) ---
 ENT = ['com.apple.security.network.client', 'com.apple.security.network.server', 'com.apple.security.device.camera',

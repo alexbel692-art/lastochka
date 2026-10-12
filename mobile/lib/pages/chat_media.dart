@@ -2,14 +2,16 @@ part of 'chat.dart';
 
 // Картинки в ленте и открытие вложений.
 /// Скачать вложение и открыть системной программой.
-Future<void> openAttachment(Event e, void Function(String) toast) async {
+/// Программы и скрипты не открываются сами — только сохраняются с предупреждением.
+Future<void> openAttachment(Event e, void Function(String) toast, {BuildContext? context}) async {
   try {
     toast('Загрузка…');
     final f = await e.downloadAndDecryptAttachment();
     var name = (e.content.tryGet<String>('filename') ?? e.body).replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-    name = name.replaceAll(RegExp(r'[\x00-\x1f]'), '').trim();
+    name = name.replaceAll(RegExp(r'[\x00-\x1f\u202a-\u202e\u2066-\u2069]'), '').trim(); // без «переворота» текста: «txt.exe» → «exe.txt»
     if (name.length > 120) name = name.substring(name.length - 120);
     if (name.isEmpty || RegExp(r'^\.+$').hasMatch(name)) name = 'файл';
+    final danger = isDangerousFile(name);
     // на компьютере — сразу в «Загрузки» (как в Telegram Desktop), на телефоне — во внутреннюю
     // папку приложения (удаляется при следующем запуске)
     final downloads = isDesktop ? await getDownloadsDirectory() : null;
@@ -24,6 +26,31 @@ Future<void> openAttachment(Event e, void Function(String) toast) async {
       }
     }
     await File(path).writeAsBytes(f.bytes, flush: true);
+    await markFromInternet(path);
+    if (danger) {
+      Diag.add('Получен исполняемый файл (.${fileExt(name)}) — не открыт автоматически');
+      final ctx = context;
+      if (ctx != null && ctx.mounted) {
+        await showDialog<void>(
+          context: ctx,
+          builder: (d) => AlertDialog(
+            icon: const Icon(Icons.gpp_maybe_rounded, color: Colors.redAccent, size: 40),
+            title: const Text('Это программа или скрипт'),
+            content: Text('«${p.basename(path)}» может навредить компьютеру, поэтому Ласточка его не открыла. '
+                '${downloads != null ? 'Файл сохранён в «Загрузки». ' : ''}Запускайте только если точно знаете, что это, и доверяете отправителю — '
+                'мошенники часто присылают вирусы от имени знакомых.'),
+            actions: [
+              if (downloads != null)
+                TextButton(onPressed: () { Navigator.pop(d); revealInFolder(path); }, child: const Text('Показать в папке')),
+              FilledButton(onPressed: () => Navigator.pop(d), child: const Text('Понятно')),
+            ],
+          ),
+        );
+      } else {
+        toast('Это программа — Ласточка её не открывает. ${downloads != null ? 'Файл в «Загрузках»' : ''}');
+      }
+      return;
+    }
     if (downloads != null) toast('Сохранено в «Загрузки»: ${p.basename(path)}');
     final r = await OpenFilex.open(path);
     if (r.type != ResultType.done) toast('Нет программы, чтобы открыть этот файл');

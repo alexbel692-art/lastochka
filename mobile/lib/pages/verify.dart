@@ -13,11 +13,14 @@ import '../system/trust.dart';
 import 'settings.dart';
 import '../system/clock.dart';
 import '../system/diag.dart';
+import '../system/phrase_strength.dart';
 
 /// Проверка новой секретной фразы. null — подходит.
 String? phraseProblem(String p1, String p2) {
   if (p1.length < 12) return 'Фраза слишком короткая — нужно не меньше 12 символов';
-  if (RegExp(r'^(.)\1+$').hasMatch(p1) || RegExp(r'^(0123|1234|qwer|йцук|abcd)', caseSensitive: false).hasMatch(p1)) return 'Слишком простая фраза — придумайте другую';
+  if (phraseStrength(p1, login: client.userID?.localpart) == Strength.weak) {
+    return 'Слишком простая фраза — такие подбирают за минуты. Возьмите 3–4 не связанных слова, например «кот лампа облако 7»';
+  }
   if (p1 != p2) return 'Фразы не совпадают';
   return null;
 }
@@ -181,6 +184,7 @@ class _VerifyGateState extends State<VerifyGate> {
                     suffixIcon: IconButton(icon: Icon(_show ? Icons.visibility_off : Icons.visibility), onPressed: () => setState(() => _show = !_show)),
                   ),
                 ),
+                PhraseMeter(controller: _p1, login: client.userID?.localpart),
                 const SizedBox(height: 10),
                 TextField(
                   enableIMEPersonalizedLearning: false,

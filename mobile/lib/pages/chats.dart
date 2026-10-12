@@ -14,6 +14,7 @@ import 'people.dart';
 import 'qr.dart';
 import '../chat/formatting.dart';
 import '../chat/polls.dart';
+import '../system/perf.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/login_banner.dart';
@@ -207,7 +208,8 @@ class _ChatsPageState extends State<ChatsPage> {
   Timer? _redrawTimer;
   void _redraw() {
     if (_redrawTimer?.isActive == true) return;
-    _redrawTimer = Timer(const Duration(milliseconds: 250), () {
+    // на удалённом рабочем столе кадры дорогие — перерисовываем реже
+    _redrawTimer = Timer(Duration(milliseconds: remoteSession ? 700 : 250), () {
       if (mounted) setState(() {});
     });
   }
@@ -220,6 +222,19 @@ class _ChatsPageState extends State<ChatsPage> {
     _gs.cancel();
     _sub?.cancel();
     super.dispose();
+  }
+
+  // Открытый справа чат — один и тот же экземпляр виджета, пока не выбран другой чат:
+  // тогда обновление списка (новые сообщения, «печатает…», отметки) не перерисовывает всю переписку.
+  Widget? _pane;
+  String? _paneKey;
+  Widget _chatPane(Room sel) {
+    final k = '${sel.id}|$_jump';
+    if (_pane == null || _paneKey != k) {
+      _paneKey = k;
+      _pane = ChatPage(key: ValueKey(k), room: sel, embedded: true, jumpTo: _jump);
+    }
+    return _pane!;
   }
 
   List<Room> get _rooms {
@@ -508,7 +523,7 @@ class _ChatsPageState extends State<ChatsPage> {
                     child: const Text('Выберите чат', style: TextStyle(color: Colors.white)),
                   ),
                 )
-              : ChatPage(key: ValueKey('${sel.id}|$_jump'), room: sel, embedded: true, jumpTo: _jump),
+              : _chatPane(sel),
           ),
           ),
         ),

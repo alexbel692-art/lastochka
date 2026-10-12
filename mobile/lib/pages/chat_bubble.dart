@@ -160,7 +160,7 @@ class _Bubble extends StatelessWidget {
     } else if (e.messageType == MessageTypes.File) {
       final size = (e.content.tryGetMap<String, Object?>('info')?['size'] as num?)?.toInt();
       content = InkWell(
-        onTap: () => openAttachment(e, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)))),
+        onTap: () => openAttachment(e, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s))), context: context),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           CircleAvatar(
             radius: 22,

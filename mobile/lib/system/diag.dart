@@ -1,6 +1,8 @@
 // Отчёт для диагностики: версия, устройство, последние ошибки. Без переписки: адреса, имена,
 // идентификаторы, ссылки и пути к файлам вырезаются, поэтому отчёт можно спокойно переслать.
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
 import 'dart:ffi' show Abi;
 import 'dart:io';
 import 'dart:isolate';
@@ -9,6 +11,8 @@ import 'dart:ui';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'package:crypto/crypto.dart' as h;
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:matrix/matrix.dart';
@@ -36,41 +40,72 @@ class Diag {
     add('$where: $e$stack');
   }
 
-  // ---------- журнал на диске: переживает перезапуск, хранится уже очищенным ----------
-  static File? _log;
-  static final List<String> _pending = [];
+  // ---------- журнал на диске: переживает перезапуск, хранится очищенным и зашифрованным ----------
+  // Ключ выводится из ключа базы (он в защищённом хранилище системы), поэтому файл журнала
+  // без устройства не прочитать. До открытия базы строки копятся в памяти.
+  static String? _dir;
+  static final List<String> _session = [];
   static List<String> _prev = const [];
-  static const _logMax = 256 * 1024;
+  static SecretKey? _logKey;
+  static Timer? _saveTimer;
+  static const _logMax = 128 * 1024;
+  static final _aes = AesGcm.with256bits();
 
   static void _persist(String line) {
-    final clean = scrub(line).replaceAll('\n', '\n    ');
-    final f = _log;
-    if (f == null) {
-      _pending.add(clean);
-      return;
+    _session.add(scrub(line).replaceAll('\n', '\n    '));
+    if (_session.length > 600) _session.removeRange(0, _session.length - 600);
+    if (_logKey != null) {
+      _saveTimer?.cancel();
+      _saveTimer = Timer(const Duration(seconds: 2), _saveLog);
     }
+  }
+
+  /// Подключить ключ шифрования журнала (после открытия базы) и прочитать прошлые запуски.
+  static Future<void> attachKey(String secret) async {
+    final dir = _dir;
+    if (dir == null || _logKey != null) return;
+    _logKey = SecretKey(h.sha256.convert(utf8.encode('lastochka-diag|$secret')).bytes);
+    final lines = <String>[];
+    // старый незашифрованный журнал (до 4.12) — переносим и удаляем
+    final plain = File(p.join(dir, 'diag_log.txt'));
     try {
-      f.writeAsStringSync('$clean\n', mode: FileMode.append, flush: true);
+      if (await plain.exists()) {
+        lines.addAll((await plain.readAsString()).trim().split('\n'));
+        await plain.delete();
+      }
+    } catch (_) {}
+    final enc = File(p.join(dir, 'diag_log.bin'));
+    try {
+      if (await enc.exists()) {
+        final b = await enc.readAsBytes();
+        final box = SecretBox(b.sublist(12, b.length - 16), nonce: b.sublist(0, 12), mac: Mac(b.sublist(b.length - 16)));
+        lines.addAll(utf8.decode(await _aes.decrypt(box, secretKey: _logKey!)).trim().split('\n'));
+      }
+    } catch (_) {
+      // повреждён или другой ключ (переустановка) — начинаем заново
+    }
+    _prev = lines.where((l) => l.isNotEmpty).toList();
+    _session.insert(0, '=== запуск ${DateTime.now().toIso8601String().substring(0, 19)}, Ласточка $appVersion ===');
+    await _saveLog();
+  }
+
+  static Future<void> _saveLog() async {
+    final dir = _dir, key = _logKey;
+    if (dir == null || key == null) return;
+    try {
+      var text = [..._prev, ..._session].join('\n');
+      if (text.length > _logMax) text = text.substring(text.length - _logMax);
+      final rnd = Random.secure();
+      final nonce = List<int>.generate(12, (_) => rnd.nextInt(256));
+      final box = await _aes.encrypt(utf8.encode(text), secretKey: key, nonce: nonce);
+      final tmp = File(p.join(dir, 'diag_log.bin.tmp'));
+      await tmp.writeAsBytes([...box.nonce, ...box.cipherText, ...box.mac.bytes], flush: true);
+      await tmp.rename(p.join(dir, 'diag_log.bin'));
     } catch (_) {}
   }
 
-  static Future<void> _openLog(String dir) async {
-    final f = File(p.join(dir, 'diag_log.txt'));
-    try {
-      if (await f.exists()) {
-        var text = await f.readAsString();
-        if (text.length > _logMax) {
-          text = text.substring(text.length - _logMax ~/ 2);
-          await f.writeAsString(text, flush: true);
-        }
-        _prev = text.trim().split('\n').reversed.take(80).toList().reversed.toList();
-      }
-      await f.writeAsString('=== запуск ${DateTime.now().toIso8601String().substring(0, 19)}, Ласточка $appVersion ===\n${_pending.map((l) => '$l\n').join()}',
-          mode: FileMode.append, flush: true);
-      _pending.clear();
-      _log = f;
-    } catch (_) {}
-  }
+  /// Последние строки прошлых запусков (для отчёта).
+  static List<String> get _prevTail => _prev.reversed.take(80).toList().reversed.toList();
 
   /// Итоги последнего звонка (тип соединения, потери, задержка) — для жалоб «не слышно» и «обрывается».
   static String? lastCall;
@@ -81,7 +116,7 @@ class Diag {
 
   static Future<void> initTrail() async {
     final dir = (await getApplicationSupportDirectory()).path;
-    await _openLog(dir);
+    _dir = dir;
     // следы прошлого запуска: зависание (Android — со стеком, другие платформы — сторож ниже)
     // и падение системной части Android
     var hung = false;
@@ -285,7 +320,7 @@ class Diag {
       '— Ошибки приложения —',
       ..._buf,
       '',
-      if (_prev.isNotEmpty) ...['— Прошлые запуски (последние строки) —', ..._prev, ''],
+      if (_prev.isNotEmpty) ...['— Прошлые запуски (последние строки) —', ..._prevTail, ''],
       '— Журнал Matrix (предупреждения и ошибки) —',
       for (final e in Logs().outputEvents.where((e) => e.level.index <= Level.warning.index).toList().reversed.take(80).toList().reversed)
         '${e.level.name}: ${e.title}${e.exception != null ? ' — ${e.exception}' : ''}',

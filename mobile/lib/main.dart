@@ -30,6 +30,7 @@ import 'pages/verify.dart';
 import 'theme.dart';
 import 'widgets/splash.dart';
 import 'system/perf.dart';
+import 'system/stale_sessions.dart';
 
 late Client client;
 final _switcherCover = ValueNotifier<bool>(false);
@@ -94,6 +95,8 @@ Future<void> main(List<String> args) async {
     return;
   }
   Diag.watchClient(client);
+  final secret = deviceSecret;
+  if (secret != null) unawaited(Diag.attachKey(secret));
   initVoip();
   await initNotifications();
   await AppLock.instance.init();
@@ -170,6 +173,8 @@ class _LastochkaAppState extends State<LastochkaApp> {
     }
     await requestNotificationPermission();
     await startBackgroundService();
+    // раз в неделю — не остались ли забытые входы на старых устройствах
+    Future.delayed(const Duration(seconds: 15), checkStaleSessions);
     if (Platform.isAndroid && !await isIgnoringBatteryOptimizations()) {
       final prefs = await SharedPreferences.getInstance();
       if (prefs.getBool('bg.batteryAsked') == true) return;

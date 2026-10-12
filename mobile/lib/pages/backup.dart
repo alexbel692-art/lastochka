@@ -9,6 +9,7 @@ import 'package:matrix/matrix.dart';
 import '../main.dart';
 import '../system/diag.dart';
 import 'verify.dart' show phraseProblem;
+import '../system/phrase_strength.dart';
 
 enum BackupState { unknown, ok, notConnected, missing }
 
@@ -275,6 +276,7 @@ class _BackupPageState extends State<BackupPage> {
               TextField(enableIMEPersonalizedLearning: false, controller: _old, obscureText: true, autocorrect: false, decoration: const InputDecoration(hintText: 'Нынешний ключ восстановления')),
               const SizedBox(height: 8),
               TextField(enableIMEPersonalizedLearning: false, controller: _n1, obscureText: true, autocorrect: false, decoration: const InputDecoration(hintText: 'Новая секретная фраза')),
+              PhraseMeter(controller: _n1, login: client.userID?.localpart),
               const SizedBox(height: 8),
               TextField(enableIMEPersonalizedLearning: false, controller: _n2, obscureText: true, autocorrect: false, decoration: const InputDecoration(hintText: 'Повторите фразу')),
               const SizedBox(height: 10),

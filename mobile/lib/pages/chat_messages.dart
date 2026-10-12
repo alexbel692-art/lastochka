@@ -177,7 +177,7 @@ extension _ChatMessages on _ChatPageState {
       case 'sticker':
         _toast(await addToOwnPack(disp));
       case 'open':
-        await openAttachment(disp, _toast);
+        await openAttachment(disp, _toast, context: context);
       case 'del':
         final ok = await showDialog<bool>(
           context: context,
