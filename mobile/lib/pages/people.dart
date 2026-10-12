@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 
+import '../widgets/adaptive.dart';
 import '../main.dart';
 import '../widgets/avatar.dart';
 
@@ -38,9 +39,8 @@ Future<PickResult?> pickPeople(
   List<PickerAction> actions = const [],
   bool allowEmpty = false,
 }) =>
-    Navigator.of(context).push<PickResult>(MaterialPageRoute(
-      builder: (_) => _PeoplePage(title: title, multi: multi, doneLabel: doneLabel, exclude: exclude, actions: actions, allowEmpty: allowEmpty),
-    ));
+    // на компьютере — окном по центру поверх приложения, на телефоне — на весь экран
+    pushAdaptive<PickResult>(context, (_) => _PeoplePage(title: title, multi: multi, doneLabel: doneLabel, exclude: exclude, actions: actions, allowEmpty: allowEmpty));
 
 // служебные пользователи мостов и ботов (по соглашению их логины начинаются с «_» или имени моста)
 final _service = RegExp(r'^@(_|(telegram|whatsapp|signal|discord|slack|facebook|instagram)_)');

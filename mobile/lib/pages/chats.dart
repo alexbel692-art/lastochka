@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:matrix/matrix.dart';
 
+import '../widgets/adaptive.dart';
 import '../widgets/wallpaper.dart';
 import '../main.dart';
 import '../calls/voip.dart';
@@ -797,7 +798,7 @@ class _ChatsPageState extends State<ChatsPage> {
         const Divider(),
         ListTile(leading: const Icon(Icons.settings_outlined), title: const Text('Настройки'), onTap: () {
           Navigator.pop(context);
-          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
+          pushAdaptive<void>(context, (_) => const SettingsPage(), maxWidth: 620);
         }),
       ]),
     );

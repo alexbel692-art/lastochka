@@ -41,6 +41,8 @@ class _SwipeToReplyState extends State<_SwipeToReply> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
+      // свайп для ответа — пальцем; мышью на компьютере — через меню (иначе срабатывал при движении окна)
+      supportedDevices: const {PointerDeviceKind.touch, PointerDeviceKind.stylus, PointerDeviceKind.invertedStylus},
       onHorizontalDragUpdate: (d) {
         final nx = (_dx + d.delta.dx).clamp(-80.0, 0.0);
         final armed = nx < -56;

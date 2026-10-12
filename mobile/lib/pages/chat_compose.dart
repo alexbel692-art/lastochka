@@ -49,9 +49,14 @@ extension _ChatCompose on _ChatPageState {
             });
             _focus.requestFocus();
           },
+          // долгое нажатие — только пальцем: на компьютере после разворота окна двойным щелчком по заголовку
+          // Windows присылает «отпускание» мыши уже в окно, и это принималось за долгое нажатие на сообщение.
+          // Мышью меню открывается правой кнопкой
           child: GestureDetector(
-            onTap: _sel != null ? () => _toggleSel(e) : null,
+            supportedDevices: const {PointerDeviceKind.touch, PointerDeviceKind.stylus, PointerDeviceKind.invertedStylus},
             onLongPress: () => _sel != null ? _toggleSel(e) : _actions(e),
+            child: GestureDetector(
+            onTap: _sel != null ? () => _toggleSel(e) : null,
             onSecondaryTap: () => _actions(e),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 400),
@@ -75,6 +80,7 @@ extension _ChatCompose on _ChatPageState {
               ),
               ),
             ),
+          ),
           ),
         ),
     ]);
