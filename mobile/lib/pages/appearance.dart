@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/wallpaper.dart';
 import '../system/appearance.dart';
 import '../theme.dart';
 import '../widgets/bubble_shape.dart';
@@ -21,15 +22,19 @@ class AppearancePage extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 640),
             child: ListView(children: [
               // предпросмотр
-              Container(
-                margin: const EdgeInsets.all(12),
+              Padding(
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(gradient: Bubbles.wallGradient(context), borderRadius: BorderRadius.circular(14)),
-                child: Column(children: [
-                  _preview(context, 'Привет! Как тебе новое оформление?', false),
-                  const SizedBox(height: 6),
-                  _preview(context, 'Отлично, текст читается легко 👍', true),
-                ]),
+                child: ChatWallpaper(
+                  radius: BorderRadius.circular(14),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(children: [
+                      _preview(context, 'Привет! Как тебе новое оформление?', false),
+                      const SizedBox(height: 6),
+                      _preview(context, 'Отлично, текст читается легко 👍', true),
+                    ]),
+                  ),
+                ),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -74,15 +79,22 @@ class AppearancePage extends StatelessWidget {
                         Container(
                           width: 84,
                           height: 120,
-                          decoration: BoxDecoration(
+                          clipBehavior: Clip.antiAlias,
+                          foregroundDecoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: a.wallpaper.value == i ? accent : Colors.transparent, width: 3),
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
                             gradient: LinearGradient(
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                               colors: Theme.of(context).brightness == Brightness.dark ? wallpapers[i].dark : wallpapers[i].light,
                             ),
                           ),
+                          child: wallpapers[i].pattern
+                              ? CustomPaint(painter: SwallowPattern(patternColor(wallpapers[i], Theme.of(context).brightness == Brightness.dark), zoom: 0.5))
+                              : null,
                         ),
                         const SizedBox(height: 4),
                         Text(wallpapers[i].name, style: const TextStyle(fontSize: 12.5)),

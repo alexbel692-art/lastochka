@@ -22,6 +22,8 @@ import 'desktop.dart';
 import 'pinning.dart';
 import 'notify.dart';
 import 'diag.dart';
+import 'perf.dart' show remoteSession;
+import '../calls/voip.dart' show callActive;
 
 const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '0.0.0');
 const _repo = 'alexbel692-art/lastochka';
@@ -73,15 +75,98 @@ class Updater {
 
   DateTime? _lastCheck;
 
+  final _started = DateTime.now();
+
+  /// Скачано и проверено — ждёт установки (версия).
+  final ready = ValueNotifier<String?>(null);
+  File? _readyFile;
+  bool _busy = false;
+  bool _applying = false;
+
+  /// Обновлять самостоятельно (настройка, по умолчанию включено).
+  static Future<bool> autoEnabled() async {
+    try {
+      return (await SharedPreferences.getInstance()).getBool('update.auto') ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
   void start() {
     if (!supported || appVersion == '0.0.0') return;
-    Future.delayed(const Duration(seconds: 20), check);
-    _timer ??= Timer.periodic(const Duration(hours: 6), (_) => check());
-    // вернулись в Ласточку, а проверяли больше часа назад — проверим снова
+    onInstallStatus = _onAndroidStatus;
+    // при запуске — сразу (через пару секунд, чтобы не мешать открытию чатов)
+    Future.delayed(const Duration(seconds: 3), _auto);
+    _timer ??= Timer.periodic(const Duration(hours: 6), (_) => _auto());
+    // вернулись в Ласточку, а проверяли больше часа назад — проверим снова;
+    // свернули — самое время поставить уже скачанное обновление
     visibility.addListener(() {
       final l = _lastCheck;
-      if (appVisible && (l == null || DateTime.now().difference(l).inMinutes >= 60)) check();
+      if (appVisible && (l == null || DateTime.now().difference(l).inMinutes >= 60)) _auto();
+      if (!appVisible) _applyIfQuiet();
     });
+    callActive.addListener(_applyIfQuiet);
+  }
+
+  /// Проверить, скачать и (когда удобно) поставить — без участия человека.
+  Future<void> _auto() async {
+    if (_busy) return;
+    if (!await check()) return;
+    if (!await autoEnabled()) return; // ручной режим: только полоска «Доступна новая версия»
+    final u = available.value;
+    if (u == null || ready.value == u.version) return _applyIfQuiet();
+    _busy = true;
+    try {
+      _readyFile = await _download(u);
+      ready.value = u.version;
+      Diag.add('Обновление ${u.version} скачано и проверено');
+    } catch (e, st) {
+      Diag.err('Автообновление', e, st);
+    } finally {
+      _busy = false;
+    }
+    await _applyIfQuiet();
+  }
+
+  /// Поставить скачанное обновление, если сейчас это никому не помешает:
+  /// не идёт звонок; компьютер — сразу после запуска или когда окно свёрнуто;
+  /// телефон — когда Ласточка свёрнута (Android закрывает приложение на время установки).
+  Future<void> _applyIfQuiet() async {
+    final f = _readyFile;
+    if (f == null || _applying || callActive.value || !await autoEnabled()) return;
+    final justStarted = DateTime.now().difference(_started).inMinutes < 3;
+    if (Platform.isWindows) {
+      if (remoteSession) return; // сервер RDP: у пользователей нет прав администратора — обновляет админ
+      if (!justStarted && appVisible) return;
+    } else if (Platform.isMacOS) {
+      // песочница macOS не даёт программе заменить себя — открываем готовый образ один раз
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString('update.opened') == ready.value) return;
+      await prefs.setString('update.opened', ready.value ?? '');
+    } else if (Platform.isAndroid) {
+      if (appVisible) return;
+    }
+    _applying = true;
+    try {
+      await _apply(f, interactive: false);
+    } catch (e, st) {
+      Diag.err('Автоустановка обновления', e, st);
+    } finally {
+      // на Android установка идёт дальше в системе — ответ придёт в _onAndroidStatus
+      if (!Platform.isAndroid) _applying = false;
+    }
+  }
+
+  void _onAndroidStatus(String st) {
+    Diag.add('Установка обновления: $st');
+    if (st == 'pending') {
+      // система просит подтвердить — окно «Обновить» откроется, как только Ласточку откроют
+      if (!appVisible) showSecurityNotification('Обновление Ласточки готово', 'Откройте Ласточку и нажмите «Обновить» — это займёт несколько секунд');
+      _applying = false;
+    } else if (st.startsWith('fail')) {
+      _applying = false;
+      error.value = 'Не удалось установить обновление (${st.replaceFirst('fail:', '')})';
+    }
   }
 
   /// Защита от отката: если на устройстве вдруг оказалась версия старее, чем уже стояла
@@ -169,14 +254,34 @@ class Updater {
     }
   }
 
-  /// Скачать, проверить подпись и установить.
+  /// Скачать, проверить подпись и установить (нажали «Обновить»).
   Future<void> install() async {
-    if (progress.value != null) return;
+    if (progress.value != null || _busy) return;
     // сведения могли устареть (проверка раз в 6 часов) — уточняем: вдруг уже вышла версия новее
     await check();
     final u = available.value;
-    if (u == null || progress.value != null) return;
+    if (u == null) return;
     error.value = null;
+    _busy = true;
+    try {
+      final f = ready.value == u.version && _readyFile != null ? _readyFile! : await _download(u);
+      _readyFile = f;
+      ready.value = u.version;
+      _applying = true;
+      await _apply(f, interactive: true);
+    } catch (e, st) {
+      Diag.err('Установка обновления', e, st);
+      error.value = '$e';
+    } finally {
+      _busy = false;
+      if (!Platform.isAndroid) _applying = false;
+    }
+  }
+
+  Map<String, dynamic>? _sig;
+
+  /// Скачать файл обновления и проверить подпись разработчика и SHA-256. Уже скачанный — только перепроверить.
+  Future<File> _download(UpdateInfo u) async {
     progress.value = 0;
     try {
       // 1. подпись: какой файл, какая версия, какой SHA-256
@@ -189,10 +294,23 @@ class Updater {
       // та же версия допускается только для перехода 32-бит → 64-бит на 64-битном телефоне
       final sameForAbi = c == 0 && await wrongAbi() && RegExp(r'-Android-arm64\.apk$').hasMatch(u.fileName);
       if (c < 0 || (c == 0 && !sameForAbi)) throw 'Подписанная версия не новее текущей';
+      _sig = s;
 
-      // 2. файл: качаем и считаем SHA-256 по ходу
       final dir = await Directory(p.join((await getTemporaryDirectory()).path, 'lastochka-update')).create(recursive: true);
       final target = File(p.join(dir.path, u.fileName));
+      // уже скачан раньше (например, до перезапуска) — не качаем заново, если совпадает SHA-256
+      if (await target.exists()) {
+        final d = await hash.sha256.bind(target.openRead()).first;
+        if (d.toString() == s['sha256']) return target;
+      }
+      // старые скачанные версии больше не нужны
+      try {
+        await for (final f in dir.list()) {
+          if (f.path != target.path) await f.delete(recursive: true);
+        }
+      } catch (_) {}
+
+      // 2. файл: качаем и считаем SHA-256 по ходу
       final req = http.Request('GET', Uri.parse(u.fileUrl))..headers['user-agent'] = 'Lastochka-Updater';
       final resp = await _http.send(req);
       if (resp.statusCode != 200) throw 'Не удалось скачать обновление (${resp.statusCode})';
@@ -215,25 +333,45 @@ class Updater {
         } catch (_) {}
         throw 'Файл обновления повреждён или подменён — установка отменена';
       }
-
-      // 3. установка
-      if (Platform.isWindows) {
-        // тихая установка поверх; после неё Ласточка запустится сама.
-        // Windows попросит права администратора (установка для всех пользователей)
-        await Process.start(target.path, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'], mode: ProcessStartMode.detached);
-        await Future.delayed(const Duration(milliseconds: 600));
-        await quitApp();
-      } else if (Platform.isMacOS) {
-        await Process.run('open', [target.path]); // откроется образ — перетащите Ласточку в «Программы»
-      } else if (Platform.isAndroid) {
-        final r = await OpenFilex.open(target.path, type: 'application/vnd.android.package-archive');
-        if (r.type != ResultType.done) throw 'Разрешите Ласточке устанавливать приложения: Настройки → Приложения → Ласточка → Установка неизвестных приложений';
-      }
-    } catch (e, st) {
-      Diag.err('Установка обновления', e, st);
-      error.value = '$e';
+      return target;
     } finally {
       progress.value = null;
+    }
+  }
+
+  /// Установить проверенный файл.
+  Future<void> _apply(File target, {required bool interactive}) async {
+    // перед установкой ещё раз сверяем файл с подписью (он лежал на диске)
+    final s = _sig;
+    if (s == null || (await hash.sha256.bind(target.openRead()).first).toString() != s['sha256']) {
+      _readyFile = null;
+      ready.value = null;
+      throw 'Файл обновления изменился — скачаем заново';
+    }
+    if (Platform.isWindows) {
+      // тихая установка поверх; после неё Ласточка запустится сама.
+      // Windows попросит права администратора (установка для всех пользователей)
+      Diag.add('Устанавливаем обновление ${ready.value}');
+      await Process.start(target.path, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'], mode: ProcessStartMode.detached);
+      await Future.delayed(const Duration(milliseconds: 600));
+      await quitApp();
+    } else if (Platform.isMacOS) {
+      await Process.run('open', [target.path]); // откроется образ — перетащите Ласточку в «Программы»
+    } else if (Platform.isAndroid) {
+      // системный установщик: на Android 12+ обновляет без вопросов, иначе покажет «Обновить»
+      String r;
+      try {
+        r = await const MethodChannel('lastochka/system').invokeMethod<String>('installApk', target.path) ?? 'error';
+      } catch (e) {
+        r = 'error:$e';
+      }
+      if (r != 'started') {
+        Diag.add('Установка через системный установщик не началась: $r');
+        _applying = false;
+        if (!interactive && !appVisible) return; // попробуем, когда Ласточку откроют
+        final o = await OpenFilex.open(target.path, type: 'application/vnd.android.package-archive');
+        if (o.type != ResultType.done) throw 'Разрешите Ласточке устанавливать приложения: Настройки → Приложения → Ласточка → Установка неизвестных приложений';
+      }
     }
   }
 }

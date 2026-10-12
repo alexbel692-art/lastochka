@@ -5,7 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 class Wallpaper {
   final String name;
   final List<Color> light, dark;
-  const Wallpaper(this.name, this.light, this.dark);
+  final bool pattern; // рисунок из ласточек поверх цвета
+  const Wallpaper(this.name, this.light, this.dark, {this.pattern = true});
 }
 
 const wallpapers = [
@@ -14,7 +15,7 @@ const wallpapers = [
   Wallpaper('Закат', [Color(0xFFF9E1C8), Color(0xFFF2C0A8), Color(0xFFE7A3A6)], [Color(0xFF1E1416), Color(0xFF2A1A1E), Color(0xFF181012)]),
   Wallpaper('Лаванда', [Color(0xFFE6DDF7), Color(0xFFD2C4F0), Color(0xFFBFAEE8)], [Color(0xFF17131F), Color(0xFF211A2D), Color(0xFF120F18)]),
   Wallpaper('Мята', [Color(0xFFD5F1E8), Color(0xFFB2E3D3), Color(0xFF94D6C2)], [Color(0xFF0F1A18), Color(0xFF142422), Color(0xFF0B1413)]),
-  Wallpaper('Без обоев', [Color(0xFFF1F1F3), Color(0xFFF1F1F3)], [Color(0xFF181818), Color(0xFF181818)]),
+  Wallpaper('Без рисунка', [Color(0xFFF1F1F3), Color(0xFFF1F1F3)], [Color(0xFF181818), Color(0xFF181818)], pattern: false),
 ];
 
 class Appearance {

@@ -85,6 +85,8 @@ Future<void> initNotifications() async {
         _handle('${m['action'] ?? ''}', '${m['payload'] ?? ''}');
       } else if (call.method == 'networkChanged') {
         onNetworkChanged?.call();
+      } else if (call.method == 'installStatus') {
+        onInstallStatus?.call('${call.arguments}');
       } else if (call.method == 'redraw') {
         // окно перестроилось (сменился режим «поверх блокировки» и т. п.) — рисуем кадр заново целиком,
         // чтобы на экране не оставалась недорисованная картинка
@@ -100,6 +102,9 @@ Future<void> initNotifications() async {
 
 /// Телефон переключился на другую сеть (Android) — задаёт модуль звонков.
 void Function()? onNetworkChanged;
+
+/// Самообновление на Android: «pending» (ждёт подтверждения), «success», «fail:…».
+void Function(String status)? onInstallStatus;
 
 /// Спросить разрешение на уведомления (Android 13+, iOS, macOS).
 Future<void> requestNotificationPermission() async {

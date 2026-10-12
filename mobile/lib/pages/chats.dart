@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:matrix/matrix.dart';
 
+import '../widgets/wallpaper.dart';
 import '../main.dart';
 import '../calls/voip.dart';
 import '../chat/autodelete.dart';
@@ -15,7 +16,6 @@ import 'qr.dart';
 import '../chat/formatting.dart';
 import '../chat/polls.dart';
 import '../system/perf.dart';
-import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/login_banner.dart';
 import '../widgets/clock_banner.dart';
@@ -121,6 +121,8 @@ class _ChatsPageState extends State<ChatsPage> {
   String? _jump; // перейти к сообщению (из поиска)
   bool _wide = false;
   bool _searching = false;
+  // на широком экране меню выезжает поверх всего окна (а не только списка чатов) и закрывается кликом в любом месте
+  final _outer = GlobalKey<ScaffoldState>();
   final _q = TextEditingController();
   List<Profile> _people = [];
   Timer? _peopleTimer;
@@ -501,9 +503,11 @@ class _ChatsPageState extends State<ChatsPage> {
       final listW = (c.maxWidth * 0.36).clamp(320.0, 420.0);
       // на широком экране — два закруглённых «листа» на подложке, как в современных мессенджерах
       final dark = Theme.of(context).brightness == Brightness.dark;
-      return ColoredBox(
-        color: dark ? const Color(0xFF151515) : const Color(0xFFE9ECF0),
-        child: Row(children: [
+      return Scaffold(
+        key: _outer,
+        drawer: _drawer(context),
+        backgroundColor: dark ? const Color(0xFF151515) : const Color(0xFFE9ECF0),
+        body: Row(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 8, 4, 8),
           child: ClipRRect(borderRadius: BorderRadius.circular(18), child: SizedBox(width: listW - 12, child: _list(context))),
@@ -513,17 +517,8 @@ class _ChatsPageState extends State<ChatsPage> {
           padding: const EdgeInsets.fromLTRB(4, 8, 8, 8),
           child: ClipRRect(
           borderRadius: BorderRadius.circular(18),
-          child: sel == null || sel.membership != Membership.join
-              ? Container(
-                  color: Bubbles.wall(context),
-                  alignment: Alignment.center,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                    decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.25), borderRadius: BorderRadius.circular(14)),
-                    child: const Text('Выберите чат', style: TextStyle(color: Colors.white)),
-                  ),
-                )
-              : _chatPane(sel),
+          // чат не выбран — просто обои с узором, без надписи
+          child: sel == null || sel.membership != Membership.join ? const ChatWallpaper() : _chatPane(sel),
           ),
           ),
         ),
@@ -538,6 +533,7 @@ class _ChatsPageState extends State<ChatsPage> {
     final accent = Theme.of(context).colorScheme.primary;
     return Scaffold(
       appBar: AppBar(
+        leading: _wide ? IconButton(icon: const Icon(Icons.menu), tooltip: 'Меню', onPressed: () => _outer.currentState?.openDrawer()) : null,
         title: _searching
             ? TextField(enableIMEPersonalizedLearning: false, 
                 controller: _q,
@@ -627,7 +623,7 @@ class _ChatsPageState extends State<ChatsPage> {
           ),
         ),
       ),
-      drawer: _drawer(context),
+      drawer: _wide ? null : _drawer(context),
       floatingActionButton: FloatingActionButton(onPressed: _newChat, tooltip: 'Новый чат', child: const Icon(Icons.edit_outlined)),
       body: Column(children: [
         const UpdateBanner(),
@@ -787,15 +783,6 @@ class _ChatsPageState extends State<ChatsPage> {
         ListTile(leading: const Icon(Icons.group_add_outlined), title: const Text('Создать группу'), onTap: () {
           Navigator.pop(context);
           _newChatOf('group');
-        }),
-        ListTile(leading: const Icon(Icons.bookmark_outline), title: const Text(savedName), onTap: () async {
-          Navigator.pop(context);
-          try {
-            final r = await openSaved();
-            if (r != null && mounted) _open(r);
-          } catch (_) {
-            _toast('Не удалось открыть «Избранное»');
-          }
         }),
         if (canScanQr)
           ListTile(leading: const Icon(Icons.qr_code_scanner), title: const Text('Сканировать QR-код'), onTap: () async {

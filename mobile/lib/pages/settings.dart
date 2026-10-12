@@ -324,6 +324,13 @@ class _SettingsPageState extends State<SettingsPage> {
         _row(Icons.bug_report_outlined, 'Отчёт для диагностики', sub: 'Версия, устройство и ошибки — без переписки, имён и адресов', onTap: _diag),
         _row(Icons.info_outline, 'Ласточка $appVersion', sub: 'Защищённый мессенджер'),
         if (Updater.instance.supported)
+          _switch(Icons.autorenew, 'Обновлять автоматически',
+              Platform.isAndroid ? 'Скачивается в фоне и ставится, когда Ласточка свёрнута' : Platform.isMacOS ? 'Скачивается и проверяется само — останется перетащить в «Программы»' : 'Скачивается в фоне и ставится при запуске или когда окно свёрнуто',
+              _p?.getBool('update.auto') ?? true, (v) async {
+            await _p?.setBool('update.auto', v);
+            setState(() {});
+          }),
+        if (Updater.instance.supported)
           _switch(Icons.science_outlined, 'Тестовые версии', 'Получать новые версии раньше всех — до того, как их получат остальные', _p?.getBool('update.beta') ?? false, (v) async {
             await _p?.setBool('update.beta', v);
             setState(() {});

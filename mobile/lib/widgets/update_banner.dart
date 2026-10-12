@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
 
+import 'dart:io';
+
 import '../system/updater.dart';
+
+String _when() => Platform.isAndroid
+    ? 'установится, когда вы свернёте Ласточку'
+    : Platform.isMacOS
+        ? 'перетащите её в «Программы»'
+        : 'установится при следующем запуске или когда окно свёрнуто';
 
 /// Полоска «Доступна новая версия» над списком чатов, как в Telegram Desktop.
 class UpdateBanner extends StatelessWidget {
@@ -10,7 +18,7 @@ class UpdateBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final up = Updater.instance;
     return ListenableBuilder(
-      listenable: Listenable.merge([up.available, up.progress, up.error]),
+      listenable: Listenable.merge([up.available, up.progress, up.error, up.ready]),
       builder: (context, _) {
         final u = up.available.value;
         if (u == null) return const SizedBox.shrink();
@@ -28,7 +36,13 @@ class UpdateBanner extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      pr != null ? 'Загрузка обновления ${(pr * 100).round()}%…' : u.version == appVersion ? 'Ласточка для вашего процессора — нажмите, чтобы переустановить' : 'Доступна Ласточка ${u.version} — нажмите, чтобы обновить',
+                      pr != null
+                          ? 'Загрузка обновления ${(pr * 100).round()}%…'
+                          : u.version == appVersion
+                              ? 'Ласточка для вашего процессора — нажмите, чтобы переустановить'
+                              : up.ready.value == u.version
+                                  ? 'Ласточка ${u.version} готова — ${_when()}. Нажмите, чтобы сейчас'
+                                  : 'Доступна Ласточка ${u.version} — нажмите, чтобы обновить',
                       style: TextStyle(color: accent, fontWeight: FontWeight.w600),
                     ),
                   ),

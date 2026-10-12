@@ -240,6 +240,12 @@ Future<void> _notifyResults(Room room, Event start) async {
   await showSecurityNotification('Опрос завершён: ${p.question}', body);
 }
 
+/// Мой последний выбор в опросе (по id опроса) — пока сервер не вернул его в ленту.
+/// Сравнивать голоса по времени отправки ненадёжно: если часы телефона отстают от сервера,
+/// новый голос выглядел «старше» прежнего и проигрывал — переголосовать не получалось.
+final _myPick = <String, Set<String>>{};
+final pollChanged = ValueNotifier<int>(0);
+
 /// Итоги опроса по ответам в ленте.
 class PollState {
   final Map<String, int> counts = {};
@@ -259,23 +265,48 @@ PollState pollState(Event start, Timeline tl, PollData p) {
   final latest = <String, Event>{};
   for (final e in refs) {
     if (!_isResponse(e)) continue;
+    if (e.status.isError) continue; // не отправился — не считаем
     if (s.ended != null && e.originServerTs.isAfter(s.ended!.originServerTs)) continue;
     if (p.endsAt != null && e.originServerTs.isAfter(p.endsAt!)) continue; // проголосовал после срока
     final prev = latest[e.senderId];
-    if (prev == null || e.originServerTs.isAfter(prev.originServerTs)) latest[e.senderId] = e;
+    // отправляемый сейчас голос — всегда самый новый, даже если часы телефона отстают
+    final newer = prev == null ||
+        (e.status.isSending && !prev.status.isSending) ||
+        (e.status.isSending == prev.status.isSending && !e.originServerTs.isBefore(prev.originServerTs));
+    if (newer) latest[e.senderId] = e;
   }
   final valid = p.answers.map((a) => a.$1).toSet();
-  for (final MapEntry(key: user, value: e) in latest.entries) {
+  Set<String> pickedOf(Event e) {
     final r = e.content[pollResponse] ?? e.content['m.selections'];
     final list = r is Map ? r['answers'] : r;
-    if (list is! List) continue;
-    final picked = list.whereType<String>().where(valid.contains).take(p.maxSelections).toSet();
+    if (list is! List) return {};
+    return list.whereType<String>().where(valid.contains).take(p.maxSelections).toSet();
+  }
+
+  final me = client.userID;
+  final over = _myPick[start.eventId];
+  if (over != null && me != null) {
+    final mineNow = latest[me];
+    // сервер уже вернул ровно этот выбор — подсказка больше не нужна
+    if (mineNow != null && !mineNow.status.isSending && setEquals(pickedOf(mineNow), over)) _myPick.remove(start.eventId);
+  }
+  for (final MapEntry(key: user, value: e) in latest.entries) {
+    final picked = user == me && _myPick[start.eventId] != null ? _myPick[start.eventId]! : pickedOf(e);
     if (picked.isEmpty) continue;
     s.voters++;
     for (final a in picked) {
       s.counts[a] = (s.counts[a] ?? 0) + 1;
     }
-    if (user == client.userID) s.mine.addAll(picked);
+    if (user == me) s.mine.addAll(picked);
+  }
+  // голосую впервые, а ответа ещё нет в ленте
+  final first = _myPick[start.eventId];
+  if (me != null && !latest.containsKey(me) && first != null && first.isNotEmpty) {
+    s.voters++;
+    for (final a in first) {
+      s.counts[a] = (s.counts[a] ?? 0) + 1;
+    }
+    s.mine.addAll(first);
   }
   return s;
 }
@@ -317,18 +348,35 @@ class PollView extends StatelessWidget {
     } else {
       next.contains(id) ? next.remove(id) : next.add(id);
     }
+    await _send(context, next);
+  }
+
+  Future<void> _send(BuildContext context, Set<String> next) async {
+    final before = _myPick[event.eventId];
+    _myPick[event.eventId] = next; // сразу показываем новый выбор
+    pollChanged.value++;
     try {
       await event.room.sendEvent({
         'm.relates_to': {'rel_type': 'm.reference', 'event_id': event.eventId},
         pollResponse: {'answers': next.toList()},
+        // стабильное название (Element и др.)
+        'm.selections': next.toList(),
       }, type: pollResponse);
     } catch (_) {
+      if (before == null) {
+        _myPick.remove(event.eventId);
+      } else {
+        _myPick[event.eventId] = before;
+      }
+      pollChanged.value++;
       if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Голос не отправлен')));
     }
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<int>(valueListenable: pollChanged, builder: (context, _, __) => _build(context));
+
+  Widget _build(BuildContext context) {
     final p = PollData.of(event);
     if (p == null) return const Text('Опрос');
     final s = pollState(event, timeline, p);
@@ -380,10 +428,21 @@ class PollView extends StatelessWidget {
               ]),
             ),
           ),
-        Text(
-          s.voters == 0 ? 'Пока никто не проголосовал' : 'Проголосовали: ${s.voters}',
-          style: TextStyle(fontSize: 12.5, color: hint),
-        ),
+        Row(children: [
+          Expanded(
+            child: Text(
+              s.voters == 0 ? 'Пока никто не проголосовал' : 'Проголосовали: ${s.voters}',
+              style: TextStyle(fontSize: 12.5, color: hint),
+            ),
+          ),
+          // как в Telegram: голос можно отменить и выбрать заново, пока опрос идёт
+          if (!ended && s.mine.isNotEmpty)
+            TextButton(
+              style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8), foregroundColor: accent),
+              onPressed: () => _send(context, {}),
+              child: const Text('Отменить голос', style: TextStyle(fontSize: 12.5)),
+            ),
+        ]),
       ]),
     );
   }

@@ -30,9 +30,17 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun onResume() {
         super.onResume()
+        resumed = true
         applyCallMode()
+        // обновление ждёт подтверждения — показываем системное окно «Обновить»
+        SelfUpdate.showPending(this)
         // окно открыто — можно «повысить» фоновую службу до доступа к микрофону для звонков
         SyncService.startIfEnabled(this)
+    }
+
+    override fun onPause() {
+        resumed = false
+        super.onPause()
     }
 
     override fun onDestroy() {
@@ -82,6 +90,7 @@ class MainActivity : FlutterFragmentActivity() {
     companion object {
         var current: MainActivity? = null
         var callMode = false
+        var resumed = false
         var secure = false
     }
 }

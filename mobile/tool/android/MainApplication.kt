@@ -1,6 +1,7 @@
 package app.lastochka.lastochka
 
 import android.app.Application
+import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
@@ -107,6 +108,13 @@ class MainApplication : Application() {
         private var clipStamp = 0L
         private val pendingTaps = mutableListOf<Map<String, String>>()
 
+        /** Состояние самообновления — в Dart. */
+        fun installStatus(s: String) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                try { channel?.invokeMethod("installStatus", s) } catch (_: Throwable) {}
+            }
+        }
+
         /** Попросить Flutter перерисовать кадр (после перестройки окна). */
         fun redraw() {
             try { channel?.invokeMethod("redraw", null) } catch (_: Throwable) {}
@@ -166,6 +174,8 @@ class MainApplication : Application() {
                     // обращаются к звуковой службе и на некоторых телефонах отвечают сотни миллисекунд
                     "tone" -> { val k = call.arguments as? String ?: ""; Tones.post { Tones.play(ctx, k) }; result.success(true) }
                     "toneStop" -> { Tones.post { Tones.stop(ctx) }; result.success(true) }
+                    // самообновление через системный установщик (Android 12+ — без вопросов, если разрешено)
+                    "installApk" -> SelfUpdate.install(ctx, call.arguments as? String ?: "") { result.success(it) }
                     "compressVideo" -> {
                         // сжатие видео перед отправкой (Media3 Transformer, аппаратный кодировщик)
                         try {
@@ -396,5 +406,81 @@ object VideoCompress {
         val t = current ?: return -1
         val h = androidx.media3.transformer.ProgressHolder()
         return if (t.getProgress(h) == androidx.media3.transformer.Transformer.PROGRESS_STATE_AVAILABLE) h.progress else 0
+    }
+}
+
+/**
+ * Самообновление: APK (уже проверенный по подписи разработчика в Dart) передаётся системному установщику.
+ * Android 12+ разрешает приложению обновлять себя без вопросов; если система всё же просит подтвердить,
+ * окно «Обновить» показывается сразу (Ласточка открыта) или при следующем открытии.
+ */
+object SelfUpdate {
+    private const val ACTION = "app.lastochka.lastochka.INSTALL_STATUS"
+    var pending: Intent? = null
+    private var registered = false
+
+    private val receiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            when (val st = intent.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS, -999)) {
+                android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                    val ask: Intent? = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+                        else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_INTENT)
+                    ask?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    val act = MainActivity.current
+                    if (ask != null && act != null && MainActivity.resumed) {
+                        try { act.startActivity(ask) } catch (_: Throwable) { pending = ask }
+                    } else {
+                        pending = ask
+                    }
+                    MainApplication.installStatus("pending")
+                }
+                android.content.pm.PackageInstaller.STATUS_SUCCESS -> MainApplication.installStatus("success")
+                else -> MainApplication.installStatus("fail:$st:" + (intent.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE) ?: ""))
+            }
+        }
+    }
+
+    /** Открыли Ласточку — показать отложенное окно установки. */
+    fun showPending(act: android.app.Activity) {
+        val i = pending ?: return
+        pending = null
+        try { act.startActivity(i) } catch (_: Throwable) {}
+    }
+
+    fun install(ctx: Context, path: String, done: (String) -> Unit) {
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        Thread({
+            val r = try {
+                val file = java.io.File(path)
+                val pi = ctx.packageManager.packageInstaller
+                val params = android.content.pm.PackageInstaller.SessionParams(android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+                params.setAppPackageName(ctx.packageName)
+                if (Build.VERSION.SDK_INT >= 31) params.setRequireUserAction(android.content.pm.PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+                val id = pi.createSession(params)
+                pi.openSession(id).use { s ->
+                    file.inputStream().use { inp ->
+                        s.openWrite("lastochka.apk", 0, file.length()).use { out ->
+                            inp.copyTo(out)
+                            s.fsync(out)
+                        }
+                    }
+                    synchronized(this) {
+                        if (!registered) {
+                            val f = android.content.IntentFilter(ACTION)
+                            if (Build.VERSION.SDK_INT >= 33) ctx.registerReceiver(receiver, f, Context.RECEIVER_NOT_EXPORTED)
+                            else ctx.registerReceiver(receiver, f)
+                            registered = true
+                        }
+                    }
+                    val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+                    val cb = PendingIntent.getBroadcast(ctx, id, Intent(ACTION).setPackage(ctx.packageName), flags)
+                    s.commit(cb.intentSender)
+                }
+                "started"
+            } catch (e: Throwable) {
+                "error:" + (e.message ?: e.javaClass.simpleName)
+            }
+            main.post { done(r) }
+        }, "self-update").start()
     }
 }

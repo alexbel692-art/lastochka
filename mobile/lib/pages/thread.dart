@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:matrix/matrix.dart';
 
+import '../widgets/wallpaper.dart';
 import '../chat/formatting.dart';
 import '../main.dart';
 import '../system/diag.dart';
@@ -144,8 +145,7 @@ class _ThreadPageState extends State<ThreadPage> {
               style: TextStyle(fontSize: 13, color: hint, fontWeight: FontWeight.w400)),
         ]),
       ),
-      body: DecoratedBox(
-        decoration: BoxDecoration(gradient: Bubbles.wallGradient(context)),
+      body: ChatWallpaper(
         child: Column(children: [
           Expanded(
             child: ListView(controller: _scroll, padding: const EdgeInsets.symmetric(vertical: 8), children: [
