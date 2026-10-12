@@ -23,9 +23,10 @@ class ChatWallpaper extends StatelessWidget {
               borderRadius: radius,
               gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: colors),
             ),
-            child: Stack(fit: StackFit.expand, children: [
+            child: Stack(fit: StackFit.passthrough, children: [
+              // узор — под содержимым и ровно по его размеру
               if (w.pattern)
-                RepaintBoundary(
+                Positioned.fill(child: RepaintBoundary(
                   child: ClipRRect(
                     borderRadius: radius ?? BorderRadius.zero,
                     child: CustomPaint(
@@ -33,8 +34,8 @@ class ChatWallpaper extends StatelessWidget {
                       painter: SwallowPattern(patternColor(w, dark)),
                     ),
                   ),
-                ),
-              if (child != null) child!,
+                )),
+              child ?? const SizedBox.expand(),
             ]),
           );
         },
