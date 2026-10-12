@@ -1,6 +1,7 @@
 // Опросы (стандарт Matrix MSC3381 — те же, что в Element): создание, голосование, итоги, завершение.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';

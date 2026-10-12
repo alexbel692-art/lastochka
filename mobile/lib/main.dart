@@ -25,7 +25,6 @@ import 'system/updater.dart';
 import 'system/desktop.dart';
 import 'system/notify.dart';
 import 'matrix_client.dart';
-import 'pages/chats.dart';
 import 'pages/home.dart';
 import 'pages/login.dart';
 import 'pages/verify.dart';
