@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'calls/voip.dart';
 import 'chat/autodelete.dart';
+import 'chat/outbox.dart';
 import 'chat/polls.dart' show startPollCloser;
 import 'chat/drafts.dart';
 import 'system/appearance.dart';
@@ -107,6 +108,7 @@ Future<void> main(List<String> args) async {
   Trust.instance.onNewLogin = (name) => showSecurityNotification('Новый вход в ваш аккаунт', '$name. Если это не вы — завершите сеанс в «Настройки → Мои сеансы» и смените пароль.');
   startAutodeleteSweeper();
   startPollCloser();
+  startOutbox();
   autoAcceptDirectInvites();
   handlePasswordConfirmations();
   Updater.instance.start();

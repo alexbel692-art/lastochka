@@ -178,6 +178,10 @@ class _CallPageState extends State<CallPage> {
   String get _status {
     if (call.state == CallState.kEnded || _closing) return _reasons[call.hangupReason] ?? 'Звонок завершён';
     if (_connectedAt != null) {
+      final ice = call.pc?.iceConnectionState;
+      if (ice == rtc.RTCIceConnectionState.RTCIceConnectionStateDisconnected || ice == rtc.RTCIceConnectionState.RTCIceConnectionStateChecking) {
+        return 'Переподключение…';
+      }
       final d = DateTime.now().difference(_connectedAt!);
       final m = d.inMinutes.toString().padLeft(2, '0'), s = (d.inSeconds % 60).toString().padLeft(2, '0');
       return d.inHours > 0 ? '${d.inHours}:$m:$s' : '$m:$s';

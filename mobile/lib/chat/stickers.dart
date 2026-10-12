@@ -3,14 +3,19 @@
 // и наборы чата (im.ponies.room_emotes). Встроенный стикер загружается на сервер
 // один раз, дальше переиспользуется ссылка mxc.
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
 import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
 import 'autodelete.dart';
+import '../system/diag.dart';
 import '../widgets/mxc_image.dart';
 
 class StickerImg {
@@ -102,6 +107,84 @@ Future<Uri> _builtinMxc(StickerImg s) async {
 Future<void> sendSticker(Room room, StickerImg s, {Event? inReplyTo}) async {
   final url = s.url ?? await _builtinMxc(s);
   await room.sendEvent({'body': s.body, 'url': url.toString(), 'info': {...s.info}, ...ttlExtra(room)}, type: EventTypes.Sticker, inReplyTo: inReplyTo);
+}
+
+Map<String, dynamic> _ownPack() => Map<String, dynamic>.from(client.accountData['im.ponies.user_emotes']?.content ?? {});
+
+Future<void> _saveOwn(Map<String, dynamic> prev, Map<String, dynamic> images) => client.setAccountData(client.userID!, 'im.ponies.user_emotes', {
+      ...prev,
+      'pack': {'display_name': 'Мои стикеры', ...(prev['pack'] as Map? ?? {})},
+      'images': images,
+    });
+
+String _freeKey(Map<String, dynamic> images, String name) {
+  var base = name.replaceAll(RegExp(r'\.[a-z0-9]+$', caseSensitive: false), '').replaceAll(RegExp(r'[^\p{L}\p{N}_-]+', unicode: true), '_');
+  if (base.isEmpty) base = 'sticker';
+  if (base.length > 32) base = base.substring(0, 32);
+  var sc = base;
+  for (var n = 2; images.containsKey(sc); n++) {
+    sc = '${base}_$n';
+  }
+  return sc;
+}
+
+/// Свой набор: добавить картинки с устройства (уменьшаются до 512 точек, без сведений о съёмке).
+/// Стикеры в Matrix не шифруются — их видит сервер, поэтому личные фото сюда лучше не добавлять.
+Future<String> addImagesToOwnPack() async {
+  final xs = await ImagePicker().pickMultiImage(requestFullMetadata: false, limit: 30);
+  if (xs.isEmpty) return '';
+  final prev = _ownPack();
+  final images = Map<String, dynamic>.from(prev['images'] as Map? ?? {});
+  var added = 0;
+  for (final x in xs) {
+    try {
+      final png = await compute(_toSticker, await x.readAsBytes());
+      if (png == null) continue;
+      final uri = await client.uploadContent(png.$1, filename: 'sticker.png', contentType: 'image/png');
+      images[_freeKey(images, x.name)] = {
+        'url': uri.toString(),
+        'body': 'Стикер',
+        'info': {'w': png.$2, 'h': png.$3, 'mimetype': 'image/png', 'size': png.$1.length},
+        'usage': ['sticker'],
+      };
+      added++;
+    } catch (e) {
+      Diag.err('Свой стикер', e);
+    }
+  }
+  if (added > 0) await _saveOwn(prev, images);
+  return added == 0 ? 'Не удалось добавить картинки' : 'Добавлено в «Мои стикеры»: $added';
+}
+
+(Uint8List, int, int)? _toSticker(Uint8List bytes) {
+  var im = img.decodeImage(bytes);
+  if (im == null) return null;
+  im = img.bakeOrientation(im);
+  if (im.width > 512 || im.height > 512) {
+    im = im.width >= im.height ? img.copyResize(im, width: 512) : img.copyResize(im, height: 512);
+  }
+  im.exif = img.ExifData();
+  return (img.encodePng(im), im.width, im.height);
+}
+
+Future<void> removeFromOwnPack(String key) async {
+  final prev = _ownPack();
+  final images = Map<String, dynamic>.from(prev['images'] as Map? ?? {})..remove(key);
+  await _saveOwn(prev, images);
+}
+
+/// Поделиться своим набором в группе: он появится у всех участников во вкладке стикеров этого чата.
+Future<String> shareOwnPackToRoom(Room room) async {
+  final images = Map<String, dynamic>.from(_ownPack()['images'] as Map? ?? {});
+  if (images.isEmpty) return 'В «Моих стикерах» пока пусто';
+  if (!room.canChangeStateEvent('im.ponies.room_emotes')) return 'Нужны права администратора группы';
+  final me = client.userID!;
+  final name = (await client.fetchOwnProfile()).displayName ?? me.localpart ?? 'участника';
+  await client.setRoomStateWithKey(room.id, 'im.ponies.room_emotes', 'lastochka_${me.localpart}', {
+    'pack': {'display_name': 'Стикеры $name'},
+    'images': images,
+  });
+  return 'Набор доступен всем в этом чате';
 }
 
 /// Сохранить стикер или картинку из чата в «Мои стикеры».
@@ -197,16 +280,60 @@ class _EmojiStickerPanelState extends State<EmojiStickerPanel> with SingleTicker
     ]);
   }
 
+  bool _busy = false;
+
+  Future<void> _run(Future<String> f) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final msg = await f.catchError((Object e) {
+      Diag.err('Стикеры', e);
+      return 'Не получилось';
+    });
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (msg.isNotEmpty) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _remove(StickerImg s) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: const Text('Убрать стикер из «Моих»?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Убрать')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await removeFromOwnPack(s.key);
+      if (mounted) setState(() {});
+    }
+  }
+
   Widget _stickerTab() {
     final packs = stickerPacks(widget.room);
     return CustomScrollView(slivers: [
       for (final pk in packs) ...[
-        SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.fromLTRB(12, 10, 12, 4), child: Text(pk.name, style: TextStyle(color: Theme.of(context).hintColor, fontSize: 13)))),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 4, 0),
+            child: Row(children: [
+              Expanded(child: Text(pk.name, style: TextStyle(color: Theme.of(context).hintColor, fontSize: 13))),
+              if (pk.own) ...[
+                if (pk.items.isNotEmpty && !widget.room.isDirectChat && widget.room.canChangeStateEvent('im.ponies.room_emotes'))
+                  TextButton(onPressed: () => _run(shareOwnPackToRoom(widget.room)), child: const Text('В этот чат', style: TextStyle(fontSize: 12.5))),
+                TextButton.icon(onPressed: () => _run(addImagesToOwnPack()), icon: const Icon(Icons.add_photo_alternate_outlined, size: 18), label: const Text('Добавить', style: TextStyle(fontSize: 12.5))),
+              ],
+            ]),
+          ),
+        ),
         if (pk.items.isEmpty && pk.own)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: Text('Долгое нажатие на стикер или фото в чате → «В мои стикеры»', style: TextStyle(color: Theme.of(context).hintColor, fontSize: 12)),
+              child: Text('«Добавить» — свои картинки; или долгое нажатие на стикер в чате → «В мои стикеры». Удалить — долгое нажатие на стикер здесь.',
+                  style: TextStyle(color: Theme.of(context).hintColor, fontSize: 12)),
             ),
           ),
         SliverGrid(
@@ -218,6 +345,8 @@ class _EmojiStickerPanelState extends State<EmojiStickerPanel> with SingleTicker
                 child: InkWell(
                   borderRadius: BorderRadius.circular(10),
                   onTap: () => widget.onSticker(s),
+                  onLongPress: pk.own ? () => _remove(s) : null,
+                  onSecondaryTap: pk.own ? () => _remove(s) : null,
                   child: Padding(
                     padding: const EdgeInsets.all(4),
                     child: s.asset != null ? Image.asset(s.asset!, fit: BoxFit.contain) : MxcImage(mxc: s.url!, size: 160, fit: BoxFit.contain),
@@ -237,6 +366,7 @@ class _EmojiStickerPanelState extends State<EmojiStickerPanel> with SingleTicker
       height: widget.height,
       child: Column(children: [
         TabBar(controller: _tabs, tabs: const [Tab(text: 'Эмодзи', height: 38), Tab(text: 'Стикеры', height: 38)]),
+        if (_busy) const LinearProgressIndicator(minHeight: 2),
         Expanded(child: TabBarView(controller: _tabs, children: [_emojiTab(), _stickerTab()])),
       ]),
     );

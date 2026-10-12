@@ -70,6 +70,8 @@ extension _ChatCompose on _ChatPageState {
                 onReplyTap: _jumpTo,
                 album: _albums[e.eventId],
                 highlight: _searching ? _searchCtl.text : null,
+                threadCount: e.aggregatedEvents(tl, RelationshipTypes.thread).length,
+                onThread: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ThreadPage(room: room, root: e))),
               ),
               ),
             ),

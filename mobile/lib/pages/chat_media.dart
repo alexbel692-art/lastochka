@@ -104,7 +104,6 @@ class _ImageState extends State<_Image> {
     final decodeW = (maxW * dpr).ceil().clamp(64, 1600);
     // размер указывает отправитель: если не указан — тоже не грузим сами
     final big = !sticker && !event.hasThumbnail && (size <= 0 || size > _autoLoadLimit) && !_manualLoaded.contains(event.eventId);
-    final fullW = (MediaQuery.sizeOf(context).width * dpr * 2).ceil().clamp(512, 4096);
     Widget frame(Widget child) => box != null
         ? SizedBox(width: box!.width, height: box!.height, child: child)
         : SizedBox(width: maxW, child: AspectRatio(aspectRatio: sticker ? 1 : ratio.clamp(0.5, 2.5), child: child));
@@ -113,23 +112,12 @@ class _ImageState extends State<_Image> {
           ? null
           : big
               ? () => setState(() => _manualLoaded.add(event.eventId))
-              : () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => Scaffold(
-                      backgroundColor: Colors.black,
-                      appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white),
-                      body: FutureBuilder<Uint8List?>(
-                        future: _load(full: true),
-                        builder: (_, s) => s.data == null
-                            ? Center(child: s.connectionState == ConnectionState.done ? const Icon(Icons.broken_image_outlined, color: Colors.white) : const CircularProgressIndicator())
-                            : InteractiveViewer(
-                                maxScale: 6,
-                                child: Center(
-                                  child: Image.memory(s.data!, fit: BoxFit.contain, cacheWidth: fullW, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.white)),
-                                ),
-                              ),
-                      ),
-                    ),
-                  )),
+              : () {
+                  // листание по всем фото и видео чата (свайп, стрелки), как в Telegram
+                  final st = context.findAncestorStateOfType<_ChatPageState>();
+                  openMediaViewer(context, st?._mediaList() ?? [event], event,
+                      openExternally: (m) => openAttachment(m, (s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s))), context: context));
+                },
       child: ClipRRect(
         borderRadius: BorderRadius.circular(sticker || box != null ? 0 : 13),
         child: frame(

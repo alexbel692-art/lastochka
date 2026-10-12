@@ -13,6 +13,8 @@ import '../system/trust.dart';
 import 'verify.dart';
 import '../main.dart';
 import '../widgets/avatar.dart';
+import 'room_media.dart';
+import '../system/clipboard.dart';
 
 /// Информация о чате (как профиль в Telegram): звонки, уведомления, участники, выход.
 class RoomInfoPage extends StatefulWidget {
@@ -128,13 +130,33 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
                     }
                   },
                 ),
-              if (room.joinRules == JoinRules.public)
+              if (room.joinRules == JoinRules.public) ...[
                 ListTile(
                   leading: Icon(Icons.qr_code_2, color: hint),
                   title: const Text('QR-код группы'),
                   onTap: () => showQr(context, name, roomLink(room), note: 'Отсканируйте в Ласточке, чтобы вступить'),
                 ),
+                ListTile(
+                  leading: Icon(Icons.link_rounded, color: hint),
+                  title: const Text('Скопировать ссылку-приглашение'),
+                  subtitle: Text(roomLink(room), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  onTap: () async {
+                    await copySensitive(roomLink(room), clearAfter: const Duration(minutes: 5));
+                    _toast('Ссылка скопирована');
+                  },
+                ),
+              ],
+              if (room.canChangeStateEvent(EventTypes.RoomPowerLevels))
+                ListTile(leading: Icon(Icons.tune_rounded, color: hint), title: const Text('Разрешения участников'), subtitle: const Text('Кто может писать, приглашать, менять название'), onTap: _permissions),
+              if (room.canBan)
+                ListTile(leading: Icon(Icons.block, color: hint), title: const Text('Заблокированные'), onTap: _banned),
             ],
+            const Divider(),
+            ListTile(
+              leading: Icon(Icons.perm_media_outlined, color: hint),
+              title: const Text('Медиа, файлы и ссылки'),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => RoomMediaPage(room: room))),
+            ),
             if (room.isDirectChat && room.directChatMatrixID != null)
               Builder(builder: (context) {
                 final uid = room.directChatMatrixID!;
@@ -314,6 +336,86 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
     }
     final m = await room.requestParticipants().catchError((_) => <User>[]);
     if (mounted) setState(() => _members = m.where((x) => x.membership == Membership.join).toList());
+  }
+
+  /// Разрешения группы: для каждого действия — «все участники» или «только администраторы и модераторы».
+  Future<void> _permissions() async {
+    final pl = Map<String, Object?>.from(room.getState(EventTypes.RoomPowerLevels)?.content ?? {});
+    final events = Map<String, Object?>.from(pl['events'] as Map? ?? {});
+    final stateDef = (pl['state_default'] as num?)?.toInt() ?? 50;
+    int lvl(String? ev, String key, int def) => ev != null ? ((events[ev] as num?)?.toInt() ?? stateDef) : ((pl[key] as num?)?.toInt() ?? def);
+    final items = <(String, String?, String, int)>[
+      ('Писать сообщения', null, 'events_default', 0),
+      ('Приглашать людей', null, 'invite', 0),
+      ('Менять название и фото', EventTypes.RoomName, '', 50),
+      ('Закреплять сообщения', 'm.room.pinned_events', '', 50),
+    ];
+    final allowed = {for (final (t, ev, key, def) in items) t: lvl(ev, key, def) <= 0};
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => StatefulBuilder(
+        builder: (d, set) => AlertDialog(
+          title: const Text('Разрешения участников'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('Включено — может любой участник. Выключено — только администраторы и модераторы.', style: TextStyle(color: Theme.of(d).hintColor, fontSize: 13)),
+            for (final (t, _, _, _) in items)
+              SwitchListTile(contentPadding: EdgeInsets.zero, title: Text(t), value: allowed[t]!, onChanged: (v) => set(() => allowed[t] = v)),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
+            FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Сохранить')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    for (final (t, ev, key, _) in items) {
+      final v = allowed[t]! ? 0 : 50;
+      if (ev == null) {
+        pl[key] = v;
+      } else {
+        events[ev] = v;
+        if (ev == EventTypes.RoomName) events[EventTypes.RoomAvatar] = v;
+      }
+    }
+    pl['events'] = events;
+    try {
+      await client.setRoomStateWithKey(room.id, EventTypes.RoomPowerLevels, '', pl);
+      _toast('Разрешения сохранены');
+    } catch (_) {
+      _toast('Не получилось — не хватает прав?');
+    }
+  }
+
+  /// Заблокированные участники — разблокировать.
+  Future<void> _banned() async {
+    final all = await room.requestParticipants([Membership.ban]).catchError((_) => <User>[]);
+    final banned = all.where((u) => u.membership == Membership.ban).toList();
+    if (!mounted) return;
+    final who = await showModalBottomSheet<User>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(banned.isEmpty ? 'Никто не заблокирован' : 'Заблокированы: ${banned.length}', style: const TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          for (final u in banned)
+            ListTile(
+              leading: Avatar(mxc: u.avatarUrl, name: u.calcDisplayname(), size: 40),
+              title: Text(u.calcDisplayname()),
+              trailing: TextButton(onPressed: () => Navigator.pop(c, u), child: const Text('Разблокировать')),
+            ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (who == null) return;
+    try {
+      await room.unban(who.id);
+      _toast('${who.calcDisplayname()} разблокирован(а) — теперь его можно снова пригласить');
+    } catch (_) {
+      _toast('Не получилось');
+    }
   }
 
   Future<bool> _confirm(String title, String text) async =>

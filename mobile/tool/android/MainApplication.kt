@@ -108,6 +108,25 @@ class MainApplication : Application() {
             if (dartReady) channel?.invokeMethod("notificationTap", tap) else pendingTaps.add(tap)
         }
 
+        private var netWatched = false
+        private var lastNet: android.net.Network? = null
+
+        /** Смена сети (Wi-Fi ↔ мобильный интернет): сообщаем в Dart — звонок переподключится, не обрываясь. */
+        private fun watchNetwork(ctx: Context) {
+            if (netWatched || Build.VERSION.SDK_INT < 24) return
+            netWatched = true
+            try {
+                val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+                cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: android.net.Network) {
+                        val changed = lastNet != null && lastNet != network
+                        lastNet = network
+                        if (changed) android.os.Handler(android.os.Looper.getMainLooper()).post { channel?.invokeMethod("networkChanged", null) }
+                    }
+                })
+            } catch (_: Throwable) {}
+        }
+
         private fun channel(ctx: Context, e: FlutterEngine) {
             val ch = MethodChannel(e.dartExecutor.binaryMessenger, "lastochka/system")
             channel = ch
@@ -117,6 +136,7 @@ class MainApplication : Application() {
                         dartReady = true
                         pendingTaps.forEach { ch.invokeMethod("notificationTap", it) }
                         pendingTaps.clear()
+                        watchNetwork(ctx)
                         result.success(true)
                     }
                     "secure" -> {

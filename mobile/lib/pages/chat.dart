@@ -19,6 +19,8 @@ import 'package:photo_manager/photo_manager.dart' show AssetEntity, AssetType, T
 
 import '../calls/voip.dart';
 import '../chat/album.dart';
+import '../chat/media_viewer.dart';
+import '../chat/outbox.dart';
 import '../chat/autodelete.dart';
 import '../chat/gallery.dart';
 import '../chat/drafts.dart';
@@ -43,6 +45,7 @@ import '../widgets/avatar.dart';
 import '../widgets/bubble_shape.dart';
 import 'chats.dart';
 import 'room_info.dart';
+import 'thread.dart';
 
 part 'chat_actions.dart';
 part 'chat_bubble.dart';
@@ -94,6 +97,12 @@ class _ChatPageState extends State<ChatPage> {
   DateTime? _floatDate;
   bool _floatShow = false;
   List<Event> _events = const [];
+  /// Фото и видео загруженной части чата — по порядку (для листания в просмотре).
+  List<Event> _mediaList() => [
+        for (final e in _events.reversed)
+          for (final m in (_albums[e.eventId] ?? [e]))
+            if (isViewableMedia(m)) m,
+      ];
   int _panelTab = 0; // панель снизу: 0 — эмодзи, 1 — стикеры
   final _clipKey = GlobalKey(); // скрепка — у неё на компьютере всплывает меню вложений
   Map<String, List<Event>> _albums = const {}; // альбом: id первого показанного сообщения → все снимки
@@ -250,6 +259,7 @@ class _ChatPageState extends State<ChatPage> {
     if (isExpired(e)) return false; // исчезнувшее сообщение
     if (ttlChangeText(e) != null) return true;
     if (e.relationshipType == RelationshipTypes.edit) return false;
+    if (e.relationshipType == RelationshipTypes.thread) return false; // ответы в ветке — в отдельном экране
     if (e.type == EventTypes.Message || e.type == EventTypes.Sticker || e.type == EventTypes.Encrypted) return true;
     if (isPollStart(e)) return true;
     if (e.type == EventTypes.CallInvite) return true;
@@ -271,6 +281,7 @@ class _ChatPageState extends State<ChatPage> {
     final name = room.getLocalizedDisplayname();
     final tl = _tl;
     final (events, albums) = groupAlbums(tl?.events.where(_visible).toList() ?? const <Event>[]);
+    if (events.any((e) => e.status.isError)) outboxNote(room);
     _events = events;
     _albums = albums;
     final typing = room.typingUsers.any((u) => u.id != client.userID);

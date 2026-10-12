@@ -19,7 +19,11 @@ class _Bubble extends StatelessWidget {
   final void Function(String id) onReplyTap;
   final List<Event>? album; // несколько фото/видео одним сообщением
   final String? highlight; // подсветка при поиске в чате
+  final int threadCount; // ответов в ветке
+  final VoidCallback? onThread;
   const _Bubble({
+    this.threadCount = 0,
+    this.onThread,
     this.album,
     this.highlight,
     required this.event,
@@ -255,6 +259,21 @@ class _Bubble extends StatelessWidget {
             Flexible(child: reactRow),
             if (!isText) ...[const SizedBox(width: 8), meta],
           ]),
+        // ответы в ветке — как в Telegram: «3 ответа ›» под сообщением
+        if (threadCount > 0 && onThread != null)
+          InkWell(
+            onTap: onThread,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.only(top: 6, bottom: 2),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.forum_rounded, size: 16, color: mine ? metaColor : accent),
+                const SizedBox(width: 5),
+                Text(threadCountText(threadCount), style: TextStyle(color: mine ? metaColor : accent, fontWeight: FontWeight.w600, fontSize: 13.5)),
+                Icon(Icons.chevron_right_rounded, size: 18, color: mine ? metaColor : accent),
+              ]),
+            ),
+          ),
       ]);
       body = DecoratedBox(
         decoration: ShapeDecoration(

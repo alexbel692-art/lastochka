@@ -83,6 +83,8 @@ Future<void> initNotifications() async {
       if (call.method == 'notificationTap' && call.arguments is Map) {
         final m = call.arguments as Map;
         _handle('${m['action'] ?? ''}', '${m['payload'] ?? ''}');
+      } else if (call.method == 'networkChanged') {
+        onNetworkChanged?.call();
       }
       return null;
     });
@@ -91,6 +93,9 @@ Future<void> initNotifications() async {
     } catch (_) {}
   }
 }
+
+/// Телефон переключился на другую сеть (Android) — задаёт модуль звонков.
+void Function()? onNetworkChanged;
 
 /// Спросить разрешение на уведомления (Android 13+, iOS, macOS).
 Future<void> requestNotificationPermission() async {

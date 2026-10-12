@@ -99,6 +99,7 @@ extension _ChatMessages on _ChatPageState {
   Future<void> _actions(Event e) async {
     final tl = _tl;
     if (tl == null || e.status.isSending) return;
+    if (e.status.isError) return _failedMenu(e);
     final mine = e.senderId == client.userID;
     final disp = e.getDisplayEvent(tl);
     final pinned = room.pinnedEventIds.contains(e.eventId);
@@ -124,6 +125,12 @@ extension _ChatMessages on _ChatPageState {
             ),
           const Divider(height: 1),
           ListTile(leading: const Icon(Icons.reply), title: const Text('Ответить'), onTap: () => Navigator.pop(c, 'reply')),
+          if (!e.redacted && e.relationshipType != RelationshipTypes.thread && !room.isDirectChat)
+            ListTile(leading: const Icon(Icons.forum_outlined), title: const Text('Обсудить в ветке'), onTap: () => Navigator.pop(c, 'thread')),
+          if (mine && !room.isDirectChat && !e.redacted)
+            ListTile(leading: const Icon(Icons.done_all_rounded), title: const Text('Кто прочитал'), onTap: () => Navigator.pop(c, 'readers')),
+          if (!e.redacted && e.hasAggregatedEvents(tl, RelationshipTypes.edit))
+            ListTile(leading: const Icon(Icons.history_rounded), title: const Text('История правок'), onTap: () => Navigator.pop(c, 'history')),
           if (canForward(e)) ListTile(leading: const Icon(Icons.forward_outlined), title: const Text('Переслать'), onTap: () => Navigator.pop(c, 'forward')),
           ListTile(leading: const Icon(Icons.check_circle_outline), title: const Text('Выбрать'), onTap: () => Navigator.pop(c, 'select')),
           if (isPollStart(e) && !e.redacted && (mine || room.ownPowerLevel.level >= 50) && pollStateOf(e, tl) == null)
@@ -162,6 +169,12 @@ extension _ChatMessages on _ChatPageState {
       case 'copy':
         await copySensitive(disp.calcUnlocalizedBody(hideReply: true));
         _toast('Текст скопирован (буфер очистится через минуту)');
+      case 'thread':
+        if (mounted) await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ThreadPage(room: room, root: e)));
+      case 'readers':
+        await _showReaders(e);
+      case 'history':
+        await _showEditHistory(e, tl);
       case 'forward':
         await forwardEvents(context, _albums[e.eventId] ?? [e], tl);
       case 'select':
@@ -195,6 +208,100 @@ extension _ChatMessages on _ChatPageState {
             if (m.canRedact && !m.redacted) await m.redactEvent();
           }
         }
+    }
+  }
+
+  /// Кто прочитал сообщение (по отметкам о прочтении: прочитано всё до отметки).
+  Future<void> _showReaders(Event e) async {
+    final ts = e.originServerTs.millisecondsSinceEpoch;
+    final readers = <(User, DateTime)>[];
+    for (final MapEntry(key: uid, value: r) in room.receiptState.global.otherUsers.entries) {
+      if (uid == client.userID || r.ts < ts) continue;
+      readers.add((room.unsafeGetUserFromMemoryOrFallback(uid), DateTime.fromMillisecondsSinceEpoch(r.ts)));
+    }
+    readers.sort((a, b) => a.$2.compareTo(b.$2));
+    final members = room.summary.mJoinedMemberCount ?? 0;
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(readers.isEmpty ? 'Пока никто не прочитал' : 'Прочитали: ${readers.length}${members > 1 ? ' из ${members - 1}' : ''}',
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+          const SizedBox(height: 6),
+          Flexible(
+            child: ListView(shrinkWrap: true, children: [
+              for (final (u, at) in readers)
+                ListTile(
+                  leading: Avatar(mxc: u.avatarUrl, name: u.calcDisplayname(), size: 40),
+                  title: Text(u.calcDisplayname()),
+                  trailing: Text(DateFormat('d MMM, HH:mm', 'ru').format(at), style: TextStyle(color: Theme.of(c).hintColor, fontSize: 12.5)),
+                ),
+            ]),
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
+  /// Все версии изменённого сообщения: исходная и каждая правка со временем.
+  Future<void> _showEditHistory(Event e, Timeline tl) async {
+    final edits = e.aggregatedEvents(tl, RelationshipTypes.edit).toList()..sort((a, b) => a.originServerTs.compareTo(b.originServerTs));
+    String textOf(Event x) {
+      final nc = x.content.tryGetMap<String, Object?>('m.new_content');
+      return stripMarkdown('${nc?['body'] ?? x.body}');
+    }
+
+    final versions = [(e.originServerTs, stripMarkdown(e.calcUnlocalizedBody(hideReply: true)), 'Исходное'), for (final x in edits) (x.originServerTs, textOf(x), 'Правка')];
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (c) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(c).height * 0.7),
+          child: ListView(shrinkWrap: true, padding: const EdgeInsets.fromLTRB(16, 0, 16, 16), children: [
+            const Text('История правок', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+            for (final (at, text, kind) in versions.reversed)
+              Container(
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: Theme.of(c).colorScheme.primary.withValues(alpha: 0.07), borderRadius: BorderRadius.circular(12)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('$kind · ${DateFormat('d MMM, HH:mm', 'ru').format(at)}', style: TextStyle(color: Theme.of(c).hintColor, fontSize: 12.5)),
+                  const SizedBox(height: 4),
+                  SelectableText(text),
+                ]),
+              ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// Неотправленное сообщение: отправить сейчас или убрать.
+  Future<void> _failedMenu(Event e) async {
+    final a = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(padding: EdgeInsets.only(bottom: 6), child: Text('Сообщение не отправлено — уйдёт само, когда появится связь', style: TextStyle(fontSize: 13.5))),
+          ListTile(leading: const Icon(Icons.refresh_rounded), title: const Text('Отправить сейчас'), onTap: () => Navigator.pop(c, 'again')),
+          ListTile(leading: const Icon(Icons.delete_outline, color: Colors.redAccent), title: const Text('Не отправлять', style: TextStyle(color: Colors.redAccent)), onTap: () => Navigator.pop(c, 'drop')),
+        ]),
+      ),
+    );
+    try {
+      if (a == 'again') await e.sendAgain();
+      if (a == 'drop') await e.cancelSend();
+    } on FileNoLongerInCacheException {
+      _toast('Файла уже нет в памяти — отправьте его заново');
+    } catch (_) {
+      _toast('Пока нет связи — отправится автоматически');
     }
   }
 }

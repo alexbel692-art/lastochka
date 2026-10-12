@@ -18,6 +18,27 @@ import 'turn_proxy.dart';
 
 late VoIP voip;
 
+Timer? _netDebounce;
+
+/// Сменилась сеть во время звонка — сразу перезапускаем поиск маршрута (ICE restart), не дожидаясь,
+/// пока старое соединение окончательно оборвётся: разговор продолжается после короткой паузы.
+void _watchNetwork() {
+  onNetworkChanged ??= () {
+    _netDebounce?.cancel();
+    _netDebounce = Timer(const Duration(milliseconds: 1500), () async {
+      for (final c in voip.calls.values) {
+        if (c.state != CallState.kConnected || c.pc == null) continue;
+        Diag.mark('звонок: сменилась сеть — переподключение');
+        try {
+          await c.restartIce();
+        } catch (e) {
+          Diag.err('Переподключение звонка', e);
+        }
+      }
+    });
+  };
+}
+
 class LastochkaVoip implements WebRTCDelegate {
   @override
   MediaDevices get mediaDevices => _Media(rtc.navigator.mediaDevices);
@@ -46,6 +67,7 @@ class LastochkaVoip implements WebRTCDelegate {
   @override
   Future<void> handleNewCall(CallSession session) async {
     CallStats.watch(session);
+    _watchNetwork();
     ringing = session;
     callActive.value = true;
     await setCallMode(true);
