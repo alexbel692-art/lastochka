@@ -71,10 +71,17 @@ class Updater {
 
   bool get supported => Platform.isWindows || Platform.isMacOS || Platform.isAndroid;
 
+  DateTime? _lastCheck;
+
   void start() {
     if (!supported || appVersion == '0.0.0') return;
     Future.delayed(const Duration(seconds: 20), check);
     _timer ??= Timer.periodic(const Duration(hours: 6), (_) => check());
+    // вернулись в Ласточку, а проверяли больше часа назад — проверим снова
+    visibility.addListener(() {
+      final l = _lastCheck;
+      if (appVisible && (l == null || DateTime.now().difference(l).inMinutes >= 60)) check();
+    });
   }
 
   /// Защита от отката: если на устройстве вдруг оказалась версия старее, чем уже стояла
@@ -122,6 +129,7 @@ class Updater {
 
   /// Проверить, есть ли новая версия. Возвращает true, если есть.
   Future<bool> check() async {
+    _lastCheck = DateTime.now();
     final re = await _assetPattern();
     if (re == null) return false;
     final switchAbi = await wrongAbi();
@@ -163,6 +171,9 @@ class Updater {
 
   /// Скачать, проверить подпись и установить.
   Future<void> install() async {
+    if (progress.value != null) return;
+    // сведения могли устареть (проверка раз в 6 часов) — уточняем: вдруг уже вышла версия новее
+    await check();
     final u = available.value;
     if (u == null || progress.value != null) return;
     error.value = null;
@@ -174,7 +185,10 @@ class Updater {
       final s = jsonDecode(sr.body) as Map<String, dynamic>;
       if (!await verifyUpdateSignature(s)) throw 'Подпись обновления неверна — установка отменена';
       if (s['file'] != u.fileName || s['version'] != u.version) throw 'Подпись относится к другому файлу — установка отменена';
-      if (cmpVer('${s['version']}', appVersion) <= 0) throw 'Подписанная версия не новее текущей';
+      final c = cmpVer('${s['version']}', appVersion);
+      // та же версия допускается только для перехода 32-бит → 64-бит на 64-битном телефоне
+      final sameForAbi = c == 0 && await wrongAbi() && RegExp(r'-Android-arm64\.apk$').hasMatch(u.fileName);
+      if (c < 0 || (c == 0 && !sameForAbi)) throw 'Подписанная версия не новее текущей';
 
       // 2. файл: качаем и считаем SHA-256 по ходу
       final dir = await Directory(p.join((await getTemporaryDirectory()).path, 'lastochka-update')).create(recursive: true);
