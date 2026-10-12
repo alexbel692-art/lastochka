@@ -80,11 +80,12 @@ Future<void> saveMedia(BuildContext context, Event e) async {
     }
 
     // компьютер: обычное окно «Сохранить как»
-    final path = await FilePicker.saveFile(dialogTitle: 'Сохранить как', fileName: name);
-    if (path == null) return;
+    // файл расшифровывается заранее — окно сохранения само запишет его в выбранное место
     final f = await e.downloadAndDecryptAttachment();
-    await File(path).writeAsBytes(f.bytes, flush: true);
-    toast('Сохранено: ${p.basename(path)}');
+    final where = await FilePicker.saveFile(dialogTitle: 'Сохранить как', fileName: name, bytes: f.bytes);
+    if (where == null) return;
+    final saved = where.pathSegments.isEmpty ? name : Uri.decodeComponent(where.pathSegments.last);
+    toast('Сохранено: $saved');
   } catch (err, st) {
     Diag.err('Сохранение файла', err, st);
     toast('Не удалось сохранить');
