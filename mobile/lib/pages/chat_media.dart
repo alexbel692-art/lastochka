@@ -6,14 +6,25 @@ Future<void> openAttachment(Event e, void Function(String) toast) async {
   try {
     toast('Загрузка…');
     final f = await e.downloadAndDecryptAttachment();
-    // расшифрованная копия — во внутренней папке приложения; удаляется при следующем запуске
-    final dir = await privateTemp();
     var name = (e.content.tryGet<String>('filename') ?? e.body).replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
     name = name.replaceAll(RegExp(r'[\x00-\x1f]'), '').trim();
     if (name.length > 120) name = name.substring(name.length - 120);
     if (name.isEmpty || RegExp(r'^\.+$').hasMatch(name)) name = 'файл';
-    final path = p.join(dir.path, name);
+    // на компьютере — сразу в «Загрузки» (как в Telegram Desktop), на телефоне — во внутреннюю
+    // папку приложения (удаляется при следующем запуске)
+    final downloads = isDesktop ? await getDownloadsDirectory() : null;
+    final dir = downloads ?? await privateTemp();
+    var path = p.join(dir.path, name);
+    if (downloads != null) {
+      // файл с таким именем уже есть — «имя (1).pdf», «имя (2).pdf»…
+      final dot = name.lastIndexOf('.');
+      final base = dot > 0 ? name.substring(0, dot) : name, ext = dot > 0 ? name.substring(dot) : '';
+      for (var i = 1; File(path).existsSync() && i < 1000; i++) {
+        path = p.join(dir.path, '$base ($i)$ext');
+      }
+    }
     await File(path).writeAsBytes(f.bytes, flush: true);
+    if (downloads != null) toast('Сохранено в «Загрузки»: ${p.basename(path)}');
     final r = await OpenFilex.open(path);
     if (r.type != ResultType.done) toast('Нет программы, чтобы открыть этот файл');
   } catch (e, st) {

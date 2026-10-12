@@ -120,7 +120,7 @@ for plist in ('ios/Runner/Info.plist', 'macos/Runner/Info.plist'):
 
 # --- macOS: разрешения песочницы (сеть, камера, микрофон, выбор файлов) ---
 ENT = ['com.apple.security.network.client', 'com.apple.security.network.server', 'com.apple.security.device.camera',
-       'com.apple.security.device.audio-input', 'com.apple.security.files.user-selected.read-only']
+       'com.apple.security.device.audio-input', 'com.apple.security.files.user-selected.read-only', 'com.apple.security.files.downloads.read-write']
 def ent_fn(s):
     add = ''.join(f'\t<key>{k}</key>\n\t<true/>\n' for k in ENT if f'<key>{k}</key>' not in s)
     i = s.rindex('</dict>')

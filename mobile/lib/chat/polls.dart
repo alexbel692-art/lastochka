@@ -1,8 +1,13 @@
 // Опросы (стандарт Matrix MSC3381 — те же, что в Element): создание, голосование, итоги, завершение.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
+import '../system/diag.dart';
+import '../system/notify.dart';
 import 'autodelete.dart';
 
 const pollStart = 'org.matrix.msc3381.poll.start';
@@ -26,12 +31,15 @@ String _text(Object? o) {
   return '';
 }
 
+const pollEndsKey = 'ru.lastochka.poll_ends'; // когда опрос закрывается сам (мс)
+
 class PollData {
   final String question;
   final List<(String, String)> answers; // id, текст
   final int maxSelections;
   final bool disclosed;
-  PollData(this.question, this.answers, this.maxSelections, this.disclosed);
+  final DateTime? endsAt;
+  PollData(this.question, this.answers, this.maxSelections, this.disclosed, [this.endsAt]);
 
   static PollData? of(Event e) {
     final p = e.content[pollStart] ?? e.content['m.poll'];
@@ -44,7 +52,9 @@ class PollData {
       }
     }
     final max = (p['max_selections'] as num?)?.toInt() ?? 1;
-    return PollData(_text(p['question']), ans, max.clamp(1, ans.isEmpty ? 1 : ans.length), p['kind'] != _kindUndisclosed);
+    final ends = (e.content[pollEndsKey] as num?)?.toInt();
+    return PollData(_text(p['question']), ans, max.clamp(1, ans.isEmpty ? 1 : ans.length), p['kind'] != _kindUndisclosed,
+        ends == null ? null : DateTime.fromMillisecondsSinceEpoch(ends));
   }
 }
 
@@ -54,6 +64,7 @@ Future<void> createPoll(BuildContext context, Room room) async {
   final q = TextEditingController();
   final answers = [TextEditingController(), TextEditingController()];
   var multi = false, anonymous = false;
+  var duration = Duration.zero; // без срока
   final ok = await showDialog<bool>(
     context: context,
     builder: (d) => StatefulBuilder(
@@ -85,6 +96,13 @@ Future<void> createPoll(BuildContext context, Room room) async {
                 ),
               SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Несколько ответов'), value: multi, onChanged: (v) => set(() => multi = v)),
               SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Итоги — после завершения'), value: anonymous, onChanged: (v) => set(() => anonymous = v)),
+              const SizedBox(height: 4),
+              Align(alignment: Alignment.centerLeft, child: Text('Сколько длится опрос', style: TextStyle(color: Theme.of(d).hintColor, fontSize: 13))),
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final (dur, label) in pollDurations)
+                  ChoiceChip(label: Text(label), selected: duration == dur, showCheckmark: false, onSelected: (_) => set(() => duration = dur)),
+              ]),
             ]),
           ),
         ),
@@ -102,8 +120,10 @@ Future<void> createPoll(BuildContext context, Room room) async {
     if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нужен вопрос и хотя бы два варианта')));
     return;
   }
+  final endsAt = duration == Duration.zero ? null : DateTime.now().add(duration);
   final fallback = '$question\n${[for (var i = 0; i < opts.length; i++) '${i + 1}. ${opts[i]}'].join('\n')}';
-  await room.sendEvent({
+  final id = await room.sendEvent({
+    if (endsAt != null) pollEndsKey: endsAt.millisecondsSinceEpoch,
     pollStart: {
       'question': {'org.matrix.msc1767.text': question, 'body': question, 'msgtype': 'm.text'},
       'kind': anonymous ? _kindUndisclosed : _kindDisclosed,
@@ -116,6 +136,92 @@ Future<void> createPoll(BuildContext context, Room room) async {
     'body': fallback,
     ...ttlExtra(room),
   }, type: pollStart);
+  // закрыть опрос в срок будет устройство автора (остальные просто перестают принимать голоса)
+  if (id != null && endsAt != null) await _scheduleClose(room.id, id, endsAt);
+}
+
+const pollDurations = [
+  (Duration.zero, 'Без срока'),
+  (Duration(minutes: 15), '15 мин'),
+  (Duration(hours: 1), '1 час'),
+  (Duration(hours: 3), '3 часа'),
+  (Duration(days: 1), '1 день'),
+  (Duration(days: 3), '3 дня'),
+  (Duration(days: 7), 'Неделя'),
+];
+
+const _closeKey = 'poll.autoClose';
+
+Future<void> _scheduleClose(String roomId, String eventId, DateTime at) async {
+  final prefs = await SharedPreferences.getInstance();
+  final list = prefs.getStringList(_closeKey) ?? [];
+  list.add('$roomId|$eventId|${at.millisecondsSinceEpoch}');
+  await prefs.setStringList(_closeKey, list);
+  _pollTimer ??= Timer.periodic(const Duration(seconds: 30), (_) => closeDuePolls());
+}
+
+Timer? _pollTimer;
+
+/// Запустить проверку опросов со сроком (при запуске приложения).
+void startPollCloser() {
+  _pollTimer ??= Timer.periodic(const Duration(seconds: 30), (_) => closeDuePolls());
+  closeDuePolls();
+}
+
+bool _closing = false;
+
+/// Завершить опросы, у которых вышел срок, и сообщить автору итоги.
+Future<void> closeDuePolls() async {
+  if (_closing || !client.isLogged()) return;
+  _closing = true;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(_closeKey) ?? [];
+    if (list.isEmpty) return;
+    final keep = <String>[];
+    for (final item in list) {
+      final parts = item.split('|');
+      if (parts.length != 3) continue;
+      final at = int.tryParse(parts[2]) ?? 0;
+      if (DateTime.now().millisecondsSinceEpoch < at) {
+        keep.add(item);
+        continue;
+      }
+      final room = client.getRoomById(parts[0]);
+      if (room == null) continue;
+      try {
+        final ev = await room.getEventById(parts[1]);
+        if (ev == null || ev.redacted) continue;
+        await endPoll(room, ev);
+        await _notifyResults(room, ev);
+      } catch (e) {
+        Diag.err('Завершение опроса', e);
+        keep.add(item); // попробуем ещё раз позже
+      }
+    }
+    await prefs.setStringList(_closeKey, keep);
+  } finally {
+    _closing = false;
+  }
+}
+
+Future<void> _notifyResults(Room room, Event start) async {
+  final p = PollData.of(start);
+  if (p == null) return;
+  var body = 'Откройте чат «${room.getLocalizedDisplayname()}», чтобы посмотреть итоги';
+  try {
+    final tl = await room.getTimeline();
+    final s = pollState(start, tl, p);
+    tl.cancelSubscriptions();
+    if (s.voters > 0) {
+      final ranked = [...p.answers]..sort((a, b) => (s.counts[b.$1] ?? 0).compareTo(s.counts[a.$1] ?? 0));
+      final top = ranked.first;
+      body = 'Лидер: «${top.$2}» — ${s.counts[top.$1] ?? 0} из ${s.voters}. Проголосовали: ${s.voters}';
+    } else {
+      body = 'Никто не проголосовал';
+    }
+  } catch (_) {}
+  await showSecurityNotification('Опрос завершён: ${p.question}', body);
 }
 
 /// Итоги опроса по ответам в ленте.
@@ -138,6 +244,7 @@ PollState pollState(Event start, Timeline tl, PollData p) {
   for (final e in refs) {
     if (!_isResponse(e)) continue;
     if (s.ended != null && e.originServerTs.isAfter(s.ended!.originServerTs)) continue;
+    if (p.endsAt != null && e.originServerTs.isAfter(p.endsAt!)) continue; // проголосовал после срока
     final prev = latest[e.senderId];
     if (prev == null || e.originServerTs.isAfter(prev.originServerTs)) latest[e.senderId] = e;
   }
@@ -170,6 +277,14 @@ Future<void> endPoll(Room room, Event start) => room.sendEvent({
       'body': 'Опрос завершён',
     }, type: pollEnd);
 
+String _until(DateTime t) {
+  final now = DateTime.now();
+  String two(int n) => n.toString().padLeft(2, '0');
+  final hm = '${two(t.hour)}:${two(t.minute)}';
+  if (t.year == now.year && t.month == now.month && t.day == now.day) return hm;
+  return '${two(t.day)}.${two(t.month)} $hm';
+}
+
 class PollView extends StatelessWidget {
   final Event event;
   final Timeline timeline;
@@ -201,7 +316,8 @@ class PollView extends StatelessWidget {
     final p = PollData.of(event);
     if (p == null) return const Text('Опрос');
     final s = pollState(event, timeline, p);
-    final ended = s.ended != null;
+    final expired = p.endsAt != null && DateTime.now().isAfter(p.endsAt!);
+    final ended = s.ended != null || expired;
     final showResults = ended || (p.disclosed && s.mine.isNotEmpty);
     final hint = Theme.of(context).hintColor;
     return ConstrainedBox(
@@ -210,7 +326,7 @@ class PollView extends StatelessWidget {
         Text(p.question, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
         const SizedBox(height: 2),
         Text(
-          '${ended ? 'Опрос завершён' : p.disclosed ? 'Опрос' : 'Итоги после завершения'}${p.maxSelections > 1 ? ' · несколько ответов' : ''}',
+          '${ended ? 'Опрос завершён' : p.disclosed ? 'Опрос' : 'Итоги после завершения'}${p.maxSelections > 1 ? ' · несколько ответов' : ''}${!ended && p.endsAt != null ? ' · до ${_until(p.endsAt!)}' : ''}',
           style: TextStyle(fontSize: 12.5, color: hint),
         ),
         const SizedBox(height: 6),

@@ -69,6 +69,7 @@ extension _ChatCompose on _ChatPageState {
                 onReact: (k) => _react(e, k),
                 onReplyTap: _jumpTo,
                 album: _albums[e.eventId],
+                highlight: _searching ? _searchCtl.text : null,
               ),
               ),
             ),

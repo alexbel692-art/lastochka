@@ -28,7 +28,18 @@ class StickerPack {
   StickerPack(this.name, this.items, {this.own = false});
 }
 
+// Набор «Смайлы»: объёмные эмодзи Noto 3D (Google, свободная лицензия — assets/stickers/NOTO-LICENSE.txt)
+const _smiles = [
+  ('z_smeh', 'Ха-ха'), ('z_katayus', 'Катаюсь'), ('z_vlyublen', 'Влюблён'), ('z_nezhnost', 'Нежность'), ('z_potseluy', 'Целую'), ('z_kruto', 'Круто'),
+  ('z_dumayu', 'Думаю'), ('z_uzhas', 'Ужас!'), ('z_rydayu', 'Рыдаю'), ('z_besyus', 'Бешусь'), ('z_prazdnik', 'Праздник'), ('z_vostorg', 'Восторг'),
+  ('z_splyu', 'Сплю'), ('z_mozg', 'Взрыв мозга'), ('z_nuuu', 'Ну-ну'), ('z_hitro', 'Хитро'), ('z_like', 'Класс'), ('z_okey', 'Окей'),
+  ('z_spasibo', 'Спасибо'), ('z_sila', 'Сила'), ('z_ogon', 'Огонь'), ('z_serdce', 'Сердце'), ('z_hlopushka', 'Поздравляю'), ('z_sto', 'Сто процентов'),
+  ('z_aplodismenty', 'Браво'), ('z_deal', 'Договорились'), ('z_nu_pozhaluysta', 'Ну пожалуйста'), ('z_obnimashki', 'Обнимашки'), ('z_neudobno', 'Неловко'), ('z_est', 'Есть!'),
+  ('z_umer', 'Умер со смеху'), ('z_ne_vizhu', 'Не вижу'), ('z_oy', 'Ой'), ('z_kotik', 'Котик'), ('z_raketa', 'Погнали'), ('z_podarok', 'Подарок'),
+];
+
 const _builtin = [
+  ('Смайлы', _smiles),
   ('Ласточка', [('privet', 'Привет!'), ('haha', 'Ха-ха!'), ('lyublyu', 'Люблю'), ('super', 'Супер!'), ('ok', 'Ок'), ('ura', 'Ура!'), ('ogo', 'Ого!'), ('spasibo', 'Спасибо!'), ('kofe', 'Кофе?'), ('grushchu', 'Грущу'), ('zlyus', 'Злюсь'), ('splyu', 'Сплю')]),
   ('Котик', [('c_privet', 'Привет!'), ('c_mur', 'Мур'), ('c_ok', 'Окей'), ('c_utro', 'Доброе утро'), ('c_noch', 'Спокойной ночи'), ('c_obnim', 'Обнимаю'), ('c_rabota', 'Работаю'), ('c_zhdu', 'Жду…'), ('c_ura', 'Ура!'), ('c_ups', 'Упс'), ('c_chto', 'Что?!'), ('c_lyublyu', 'Люблю тебя'), ('c_zlyus', 'Сержусь'), ('c_spasibo', 'Спасибо'), ('c_poka', 'Пока!'), ('c_kushat', 'Ням')]),
   ('Эмоции', [('e_klass', 'Класс!'), ('e_ogon', 'Огонь!'), ('e_lyubov', 'Люблю'), ('e_oru', 'Ору'), ('e_plachu', 'Плачу'), ('e_hm', 'Хм…'), ('e_pozdr', 'Поздравляю!'), ('e_bravo', 'Браво!'), ('e_pozh', 'Пожалуйста'), ('e_chetko', 'Чётко'), ('e_shok', 'Шок!'), ('e_100', 'Точно'), ('e_dogovor', 'Договорились'), ('e_ustal', 'Устал'), ('e_facepalm', 'Ну как так'), ('e_obnim', 'Обнимаю')]),
@@ -56,7 +67,12 @@ List<StickerImg> _fromImages(Map? images) {
 List<StickerPack> stickerPacks(Room room) {
   final packs = [
     for (final (name, list) in _builtin)
-      StickerPack(name, [for (final (k, body) in list) StickerImg(key: 'lastochka_$k', body: body, asset: 'assets/stickers/$k.png', info: const {'w': 512, 'h': 512, 'mimetype': 'image/png'})]),
+      StickerPack(name, [
+        for (final (k, body) in list)
+          k.startsWith('z_')
+              ? StickerImg(key: 'lastochka_$k', body: body, asset: 'assets/stickers/$k.webp', info: const {'w': 320, 'h': 320, 'mimetype': 'image/webp'})
+              : StickerImg(key: 'lastochka_$k', body: body, asset: 'assets/stickers/$k.png', info: const {'w': 512, 'h': 512, 'mimetype': 'image/png'}),
+      ]),
   ];
   final own = client.accountData['im.ponies.user_emotes']?.content;
   packs.add(StickerPack('Мои стикеры', _fromImages(own?['images'] as Map?), own: true));
@@ -77,7 +93,7 @@ Future<Uri> _builtinMxc(StickerImg s) async {
   final local = './stickers/${s.asset!.split('/').last}';
   if (cache[local] is String) return Uri.parse(cache[local] as String);
   final bytes = (await rootBundle.load(s.asset!)).buffer.asUint8List();
-  final uri = await client.uploadContent(bytes, filename: s.asset!.split('/').last, contentType: 'image/png');
+  final uri = await client.uploadContent(bytes, filename: s.asset!.split('/').last, contentType: '${s.info['mimetype'] ?? 'image/png'}');
   cache[local] = uri.toString();
   await prefs.setString(key, jsonEncode(cache));
   return uri;

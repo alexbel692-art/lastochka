@@ -517,6 +517,8 @@ class _ChatsPageState extends State<ChatsPage> {
     });
   }
 
+  Color hint(BuildContext context) => Theme.of(context).hintColor;
+
   Widget _list(BuildContext context) {
     final rooms = _rooms;
     final hint = Theme.of(context).hintColor;
@@ -559,54 +561,56 @@ class _ChatsPageState extends State<ChatsPage> {
           // папки: по центру, если помещаются; иначе листаются с одинаковыми отступами по краям
           child: SizedBox(
             height: 46,
-            child: LayoutBuilder(
-              builder: (_, c) => SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minWidth: c.maxWidth - 24),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    for (final (id, name) in [
-                      ...builtinFolders,
-                      for (final f in userFolders()) ('f:${f.id}', f.name),
-                      if (client.rooms.any(isArchived)) ('archive', '🗄 Архив'),
-                    ])
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 7),
-                        child: GestureDetector(
-                          onLongPress: id.startsWith('f:') ? () => _editFolder(userFolders().firstWhere((f) => 'f:${f.id}' == id)) : null,
-                          child: ChoiceChip(
-                            label: Text(name),
-                            selected: _folder == id,
-                            showCheckmark: false,
-                            visualDensity: VisualDensity.compact,
-                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            shape: const StadiumBorder(),
-                            onSelected: (_) => setState(() => _folder = id),
-                          ),
-                        ),
-                      ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 7),
-                      child: Tooltip(
-                        message: 'Новая папка (удерживайте папку, чтобы изменить)',
-                        child: ActionChip(
-                          label: const Icon(Icons.add, size: 18),
-                          visualDensity: VisualDensity.compact,
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          labelPadding: EdgeInsets.zero,
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          shape: const StadiumBorder(),
-                          onPressed: () => _editFolder(),
-                        ),
+            child: LayoutBuilder(builder: (_, c) {
+              final folders = [
+                ...builtinFolders,
+                for (final f in userFolders()) ('f:${f.id}', f.name),
+                if (client.rooms.any(isArchived)) ('archive', '🗄 Архив'),
+              ];
+              final row = Row(mainAxisSize: MainAxisSize.min, children: [
+                for (final (id, name) in folders)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 7),
+                    child: GestureDetector(
+                      onLongPress: id.startsWith('f:') ? () => _editFolder(userFolders().firstWhere((f) => 'f:${f.id}' == id)) : null,
+                      child: ChoiceChip(
+                        label: Text(name),
+                        selected: _folder == id,
+                        showCheckmark: false,
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        labelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500),
+                        side: _folder == id ? BorderSide.none : BorderSide(color: Theme.of(context).dividerColor.withValues(alpha: 0.4)),
+                        shape: const StadiumBorder(),
+                        onSelected: (_) => setState(() => _folder = id),
                       ),
                     ),
-                  ]),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 7),
+                  child: Tooltip(
+                    message: 'Новая папка (удерживайте папку, чтобы изменить)',
+                    child: ActionChip(
+                      label: const Icon(Icons.add, size: 18),
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      labelPadding: EdgeInsets.zero,
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      side: BorderSide(color: Theme.of(context).dividerColor.withValues(alpha: 0.4)),
+                      shape: const StadiumBorder(),
+                      onPressed: () => _editFolder(),
+                    ),
+                  ),
                 ),
-              ),
-            ),
+              ]);
+              // немного папок — всё в одну строку (чуть уменьшается, если тесно); много — листаются
+              if (folders.length <= 6) {
+                return Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: row)));
+              }
+              return SingleChildScrollView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 8), child: row);
+            }),
           ),
         ),
       ),
@@ -674,10 +678,17 @@ class _ChatsPageState extends State<ChatsPage> {
                     final mineLast = last != null && last.senderId == client.userID && last.type == EventTypes.Message;
                     final readLast = mineLast && r.receiptState.global.otherUsers.values.any((x) => x.ts >= last.originServerTs.millisecondsSinceEpoch);
                     final typing = r.typingUsers.where((u) => u.id != client.userID).toList();
-                    return ListTile(
-                      selected: _wide && _selected?.id == r.id,
-                      selectedTileColor: accent.withValues(alpha: 0.12),
-                      selectedColor: Theme.of(context).textTheme.bodyLarge?.color,
+                    // выбранный чат на компьютере — залит цветом, как в Telegram Desktop
+                    final sel = _wide && _selected?.id == r.id;
+                    final hint = sel ? Colors.white.withValues(alpha: 0.78) : this.hint(context);
+                    final accent = sel ? Colors.white : Theme.of(context).colorScheme.primary;
+                    return Padding(
+                      padding: EdgeInsets.symmetric(horizontal: _wide ? 6 : 0, vertical: _wide ? 1 : 0),
+                      child: ListTile(
+                      selected: sel,
+                      selectedTileColor: Theme.of(context).colorScheme.primary,
+                      selectedColor: Colors.white,
+                      shape: _wide ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)) : null,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       minVerticalPadding: 6,
                       leading: saved ? const SavedAvatar() : Avatar(mxc: r.avatar, name: name, size: 54),
@@ -685,7 +696,7 @@ class _ChatsPageState extends State<ChatsPage> {
                         if (r.encrypted && r.isDirectChat) Padding(padding: const EdgeInsets.only(right: 3), child: Icon(Icons.lock, size: 14, color: Colors.green.shade600)),
                         Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16.5))),
                         if (muted) Padding(padding: const EdgeInsets.only(left: 3), child: Icon(Icons.volume_off, size: 15, color: hint)),
-                        if (mineLast) Padding(padding: const EdgeInsets.only(left: 6), child: Icon(readLast ? Icons.done_all : Icons.done, size: 16, color: Colors.green.shade600)),
+                        if (mineLast) Padding(padding: const EdgeInsets.only(left: 6), child: Icon(readLast ? Icons.done_all : Icons.done, size: 16, color: sel ? Colors.white : Colors.green.shade600)),
                         if (ts != null) Padding(padding: const EdgeInsets.only(left: 4), child: Text(shortTime(ts), style: TextStyle(fontSize: 12.5, color: unread > 0 && !muted ? accent : hint))),
                       ]),
                       subtitle: Padding(
@@ -712,13 +723,15 @@ class _ChatsPageState extends State<ChatsPage> {
                               margin: const EdgeInsets.only(left: 6),
                               constraints: const BoxConstraints(minWidth: 22),
                               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                              decoration: BoxDecoration(color: muted ? hint.withValues(alpha: 0.6) : accent, borderRadius: BorderRadius.circular(12)),
-                              child: Text(unread > 0 ? '$unread' : '•', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                              decoration: BoxDecoration(color: sel ? Colors.white : muted ? hint.withValues(alpha: 0.6) : accent, borderRadius: BorderRadius.circular(12)),
+                              child: Text(unread > 0 ? '$unread' : '•', textAlign: TextAlign.center, style: TextStyle(color: sel ? Theme.of(context).colorScheme.primary : Colors.white, fontSize: 12.5, fontWeight: FontWeight.w600)),
                             ),
                         ]),
                       ),
                       onTap: () => _open(r),
                       onLongPress: () => _menu(r),
+                      onSecondaryTap: () => _menu(r),
+                    ),
                     );
                   },
                 ),

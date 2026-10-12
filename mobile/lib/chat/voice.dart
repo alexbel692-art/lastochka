@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 
 import '../system/privacy.dart';
+import '../system/diag.dart';
 
 String fmtDur(int ms) {
   final s = (ms / 1000).round();
@@ -41,19 +42,42 @@ class VoiceRecorder {
   DateTime? started;
   String? _path;
 
-  Future<bool> start() async {
-    if (!await _rec.hasPermission()) return false;
-    final dir = await privateTemp();
-    _path = p.join(dir.path, 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a');
-    levels.clear();
-    await _rec.start(const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 48000, sampleRate: 44100, numChannels: 1), path: _path!);
-    started = DateTime.now();
-    _amp = _rec.onAmplitudeChanged(const Duration(milliseconds: 80)).listen((a) {
-      final db = a.current.isFinite ? a.current : -60.0;
-      levels.add(pow(10, max(-60.0, db) / 20).toDouble());
-    });
-    return true;
+  /// Начать запись. Возвращает текст ошибки или null.
+  Future<String?> start() async {
+    try {
+      if (!await _rec.hasPermission()) return 'Нет доступа к микрофону';
+      if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        final devices = await _rec.listInputDevices();
+        if (devices.isEmpty) {
+          return 'Микрофон не найден. На удалённом рабочем столе включите в настройках подключения «Запись звука с этого компьютера»';
+        }
+      }
+      // AAC (m4a) — как на телефонах; если система его не умеет — WAV
+      final aac = await _rec.isEncoderSupported(AudioEncoder.aacLc);
+      final dir = await privateTemp();
+      _wav = !aac;
+      _path = p.join(dir.path, 'voice_${DateTime.now().millisecondsSinceEpoch}.${aac ? 'm4a' : 'wav'}');
+      levels.clear();
+      await _rec.start(
+          aac
+              ? const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 48000, sampleRate: 44100, numChannels: 1)
+              : const RecordConfig(encoder: AudioEncoder.wav, sampleRate: 16000, numChannels: 1),
+          path: _path!);
+      started = DateTime.now();
+      _amp = _rec.onAmplitudeChanged(const Duration(milliseconds: 80)).listen((a) {
+        final db = a.current.isFinite ? a.current : -60.0;
+        levels.add(pow(10, max(-60.0, db) / 20).toDouble());
+      });
+      return null;
+    } catch (e, st) {
+      Diag.err('Запись голосового', e, st);
+      return 'Не удалось включить микрофон';
+    }
   }
+
+  bool _wav = false;
+  /// Формат последней записи — для отправки.
+  bool get isWav => _wav;
 
   int get elapsedMs => started == null ? 0 : DateTime.now().difference(started!).inMilliseconds;
 
@@ -80,12 +104,13 @@ class VoiceRecorder {
 
 Future<void> sendVoice(Room room, File f, int durationMs, List<int> waveform, {Event? inReplyTo, Map<String, Object> extra = const {}}) async {
   final bytes = await f.readAsBytes();
+  final wav = f.path.toLowerCase().endsWith('.wav');
   await room.sendFileEvent(
-    MatrixAudioFile(bytes: bytes, name: 'Голосовое сообщение.m4a', mimeType: 'audio/mp4', duration: durationMs),
+    MatrixAudioFile(bytes: bytes, name: 'Голосовое сообщение.${wav ? 'wav' : 'm4a'}', mimeType: wav ? 'audio/wav' : 'audio/mp4', duration: durationMs),
     inReplyTo: inReplyTo,
     extraContent: {
       'body': 'Голосовое сообщение',
-      'filename': 'Голосовое сообщение.m4a',
+      'filename': 'Голосовое сообщение.${wav ? 'wav' : 'm4a'}',
       'org.matrix.msc1767.text': 'Голосовое сообщение',
       'org.matrix.msc1767.audio': {'duration': durationMs, 'waveform': waveform},
       'org.matrix.msc3245.voice': <String, Object?>{},
@@ -146,7 +171,7 @@ class VoicePlayback extends ChangeNotifier {
         if (size > 25 * 1024 * 1024) throw Exception('слишком большой файл');
         final f = await e.downloadAndDecryptAttachment();
         final mime = e.content.tryGetMap<String, Object?>('info')?['mimetype']?.toString() ?? '';
-        final ext = mime.contains('ogg') ? 'ogg' : mime.contains('webm') ? 'webm' : mime.contains('mpeg') ? 'mp3' : 'm4a';
+        final ext = mime.contains('ogg') ? 'ogg' : mime.contains('webm') ? 'webm' : mime.contains('mpeg') ? 'mp3' : mime.contains('wav') ? 'wav' : 'm4a';
         path = p.join((await privateTemp()).path, 'play_${e.eventId.hashCode.abs()}.$ext');
         await File(path).writeAsBytes(f.bytes, flush: true);
         _files[e.eventId] = path;

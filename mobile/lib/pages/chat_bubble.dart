@@ -18,8 +18,10 @@ class _Bubble extends StatelessWidget {
   final void Function(String key) onReact;
   final void Function(String id) onReplyTap;
   final List<Event>? album; // несколько фото/видео одним сообщением
+  final String? highlight; // подсветка при поиске в чате
   const _Bubble({
     this.album,
+    this.highlight,
     required this.event,
     required this.timeline,
     required this.room,
@@ -177,6 +179,7 @@ class _Bubble extends StatelessWidget {
     } else {
       content = RichMessage(
         event: e,
+        highlight: highlight,
         style: TextStyle(fontSize: 16, height: 1.3, color: mine ? Bubbles.outText(context) : Theme.of(context).textTheme.bodyLarge?.color),
         // в своих пузырях ссылка — цвета текста (фиолетовая на фиолетовом не читается), в чужих — светлее в тёмной теме
         linkColor: mine

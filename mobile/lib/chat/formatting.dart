@@ -128,7 +128,9 @@ class RichMessage extends StatefulWidget {
   final TextStyle style;
   /// Цвет ссылок (в своих сообщениях — цвет текста пузыря, иначе ссылки сливаются с фоном).
   final Color? linkColor;
-  const RichMessage({super.key, required this.event, required this.style, this.linkColor});
+  /// Подсветить совпадения (поиск в чате).
+  final String? highlight;
+  const RichMessage({super.key, required this.event, required this.style, this.linkColor, this.highlight});
   @override
   State<RichMessage> createState() => _RichMessageState();
 }
@@ -161,7 +163,7 @@ class _RichMessageState extends State<RichMessage> {
     final c = e.content;
     final f = c['format'] == 'org.matrix.custom.html' ? c['formatted_body'] : null;
     // разбираем заново, только когда сообщение изменилось — иначе нажатие на ссылку теряется при обновлениях
-    final key = '${e.eventId}|${c['body']}|$f|$_spoilers|${accent.toARGB32()}';
+    final key = '${e.eventId}|${c['body']}|$f|$_spoilers|${accent.toARGB32()}|${widget.highlight}';
     if (key == _key) return _withCard(accent);
     _key = key;
     for (final r in _rec) {
@@ -223,17 +225,35 @@ class _RichMessageState extends State<RichMessage> {
     ]);
   }
 
+  /// Обычный текст с подсветкой найденного (как в Telegram: жёлтый фон под совпадением).
+  List<InlineSpan> _plain(String text, TextStyle st) {
+    final q = widget.highlight?.trim().toLowerCase() ?? '';
+    if (q.length < 2) return [TextSpan(text: text, style: st)];
+    final low = text.toLowerCase();
+    final out = <InlineSpan>[];
+    var i = 0;
+    while (true) {
+      final j = low.indexOf(q, i);
+      if (j < 0) break;
+      if (j > i) out.add(TextSpan(text: text.substring(i, j), style: st));
+      out.add(TextSpan(text: text.substring(j, j + q.length), style: st.copyWith(backgroundColor: const Color(0xFFFFD54F), color: Colors.black)));
+      i = j + q.length;
+    }
+    if (i < text.length) out.add(TextSpan(text: text.substring(i), style: st));
+    return out;
+  }
+
   List<InlineSpan> _linkify(String text, TextStyle st, Color accent) {
     final out = <InlineSpan>[];
     var last = 0;
     for (final m in _urlRe.allMatches(text)) {
-      if (m.start > last) out.add(TextSpan(text: text.substring(last, m.start), style: st));
+      if (m.start > last) out.addAll(_plain(text.substring(last, m.start), st));
       final u = m[0]!;
       final href = u.toLowerCase().startsWith('www.') ? 'https://$u' : u;
       out.add(TextSpan(text: prettyUrl(u), style: st.copyWith(color: accent, decoration: TextDecoration.underline, decorationColor: accent), recognizer: _tap(() => openLink(context, href))));
       last = m.end;
     }
-    if (last < text.length) out.add(TextSpan(text: text.substring(last), style: st));
+    if (last < text.length) out.addAll(_plain(text.substring(last), st));
     return out;
   }
 

@@ -4,7 +4,8 @@ part of 'chat.dart';
 extension _ChatMessages on _ChatPageState {
   // ---------- голосовые ----------
   Future<void> _startRec() async {
-    if (!await _rec.start()) return _toast('Нет доступа к микрофону');
+    final err = await _rec.start();
+    if (err != null) return _toast(err);
     HapticFeedback.mediumImpact();
     _recTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
       if (mounted) _set(() {});

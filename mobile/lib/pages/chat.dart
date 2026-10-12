@@ -13,6 +13,7 @@ import 'package:intl/intl.dart';
 import 'package:matrix/matrix.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart' show getDownloadsDirectory;
 
 import 'package:photo_manager/photo_manager.dart' show AssetEntity, AssetType, ThumbnailSize;
 
@@ -86,6 +87,7 @@ class _ChatPageState extends State<ChatPage> {
   List<String> _hits = [];
   int _hitIdx = 0;
   bool _searchingMore = false;
+  Timer? _deepTimer; // поиск по старой истории в фоне
   // плавающая дата при прокрутке
   final _listKey = GlobalKey();
   DateTime? _floatDate;
@@ -345,7 +347,13 @@ class _ChatPageState extends State<ChatPage> {
             child: Column(children: [
               _pinBar(context),
               Expanded(
-                child: Stack(children: [
+                // нажатие в ленту закрывает панель эмодзи/стикеров (как в Telegram)
+                child: Listener(
+                  behavior: HitTestBehavior.translucent,
+                  onPointerDown: (_) {
+                    if (_panel) _set(() => _panel = false);
+                  },
+                  child: Stack(children: [
                   tl == null
                       ? const Center(child: CircularProgressIndicator())
                       : ListView.builder(
@@ -385,6 +393,7 @@ class _ChatPageState extends State<ChatPage> {
                       ),
                     ),
                 ]),
+                ),
               ),
               // сжатие видео перед отправкой
               ValueListenableBuilder<double?>(

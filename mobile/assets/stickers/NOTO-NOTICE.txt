@@ -1,0 +1,3 @@
+Набор стикеров «Смайлы» — изображения Noto Emoji 3D (Google), https://github.com/googlefonts/noto-emoji
+Лицензия проекта: шрифты — SIL Open Font License 1.1, изображения — Apache License 2.0 (см. README проекта).
+Изображения уменьшены до 320×320 и сохранены в WebP.
