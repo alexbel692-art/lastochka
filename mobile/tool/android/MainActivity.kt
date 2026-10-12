@@ -46,8 +46,22 @@ class MainActivity : FlutterFragmentActivity() {
         else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
     }
 
+    private var appliedCallMode: Boolean? = null
+
+    /**
+     * Флаги окна меняем не посреди кадра, а после него и только если они действительно меняются:
+     * на Android 15 (One UI 7) смена «поверх блокировки» во время отрисовки перестраивает окно,
+     * и экран конца звонка застывал недорисованным.
+     */
+    fun applyCallModeLater() {
+        val v = window?.decorView ?: return
+        v.post { if (!isFinishing && !isDestroyed) applyCallMode() }
+    }
+
     /** Поверх экрана блокировки — только во время входящего звонка, а не всегда. */
     fun applyCallMode() {
+        if (appliedCallMode == callMode) return
+        appliedCallMode = callMode
         if (Build.VERSION.SDK_INT >= 27) {
             setShowWhenLocked(callMode)
             setTurnScreenOn(callMode)

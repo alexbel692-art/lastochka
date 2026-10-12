@@ -96,16 +96,20 @@ class LastochkaVoip implements WebRTCDelegate {
       Diag.mark('пульс ${++n}${n >= 10 ? ' — готово' : ''}');
       if (n >= 10) t.cancel();
     });
-    await stopRingtone();
-    Diag.mark('звонок: гудки остановлены');
-    // звук окончания — для любого завершения: сбросили вы, собеседник, отклонили или не дозвонились
-    CallSounds.hangup();
+    // звук и флаги окна — не сразу: в эту же секунду экран звонка убирает видео и закрывается.
+    // Тяжёлое для системы делаем по очереди и после того, как экран закрылся, — чтобы ничего не застывало
+    unawaited(stopRingtone());
+    CallSounds.hangup(); // сигнал отбоя — для любого завершения (на Android играет в своём потоке)
     callActive.value = voip.currentCID != null && voip.currentCID?.callId != session.callId;
+    if (ringing == session) ringing = null;
+    await Future.delayed(const Duration(milliseconds: 1400));
     await clearCallNotification();
     Diag.mark('звонок: уведомление убрано');
-    await setCallMode(false);
-    Diag.mark('звонок: режим звонка выключен');
-    if (ringing == session) ringing = null;
+    // «поверх блокировки» выключаем, только если не начался новый звонок
+    if (voip.currentCID == null || voip.currentCID?.callId == session.callId) {
+      await setCallMode(false);
+      Diag.mark('звонок: режим звонка выключен');
+    }
   }
 
   @override

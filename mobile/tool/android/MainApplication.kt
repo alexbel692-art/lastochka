@@ -145,12 +145,15 @@ class MainApplication : Application() {
                         result.success(true)
                     }
                     "callMode" -> {
+                        // ответ — сразу, а флаги окна меняются после текущего кадра (см. applyCallMode)
                         MainActivity.callMode = call.arguments == true
-                        MainActivity.current?.applyCallMode()
                         result.success(true)
+                        MainActivity.current?.applyCallModeLater()
                     }
-                    "tone" -> { Tones.play(ctx, call.arguments as? String ?: ""); result.success(true) }
-                    "toneStop" -> { Tones.stop(ctx); result.success(true) }
+                    // звуки — в отдельном потоке: системный генератор тонов и мелодия звонка
+                    // обращаются к звуковой службе и на некоторых телефонах отвечают сотни миллисекунд
+                    "tone" -> { val k = call.arguments as? String ?: ""; Tones.post { Tones.play(ctx, k) }; result.success(true) }
+                    "toneStop" -> { Tones.post { Tones.stop(ctx) }; result.success(true) }
                     "compressVideo" -> {
                         // сжатие видео перед отправкой (Media3 Transformer, аппаратный кодировщик)
                         try {
@@ -232,7 +235,11 @@ object Tones {
     private var ringtone: android.media.Ringtone? = null
     private var tone: android.media.ToneGenerator? = null
     private var vibrating = false
-    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val thread = android.os.HandlerThread("lastochka-tones").apply { start() }
+    private val handler = android.os.Handler(thread.looper)
+
+    /** Всё про звук звонка — по очереди в своём потоке, не на главном (там рисуется экран). */
+    fun post(f: () -> Unit) { handler.post { try { f() } catch (_: Throwable) {} } }
     private val keepRinging = object : Runnable {
         override fun run() {
             val r = ringtone ?: return

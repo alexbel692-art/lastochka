@@ -51,7 +51,7 @@ class _CallPageState extends State<CallPage> {
     _subs.add(call.onStreamAdd.stream.listen((_) => _bindStreams()));
     _subs.add(call.onStreamRemoved.stream.listen((_) => _bindStreams()));
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && _connectedAt != null) setState(() {});
+      if (mounted && _connectedAt != null && !_closing) setState(() {});
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _onState(call.state));
   }
@@ -73,7 +73,7 @@ class _CallPageState extends State<CallPage> {
   bool _sawRemoteVideo = false;
 
   void _bindStreams() {
-    if (!mounted) return;
+    if (!mounted || _closing) return;
     if (!_renderers && !_closing && _anyVideo) _ensureRenderers();
     final rv = call.remoteUserMediaStream?.stream?.getVideoTracks().isNotEmpty ?? false;
     if (rv && !_sawRemoteVideo) {
@@ -100,9 +100,13 @@ class _CallPageState extends State<CallPage> {
     if (s == CallState.kInviteSent && call.isOutgoing) CallSounds.outgoing();
     if (s == CallState.kConnecting || s == CallState.kConnected) CallSounds.stop();
     if (s == CallState.kEnded) {
+      // сначала убираем с экрана окна видео (одним лёгким кадром), потом закрываем экран;
+      // всё системное (звук, флаги окна, уведомление) модуль звонков делает позже и не на этом кадре
       Diag.mark('звонок: завершён (${call.hangupReason})');
+      _ticker?.cancel();
       _detach();
       _finish();
+      return;
     }
     setState(() {});
     _bindStreams();
@@ -147,11 +151,21 @@ class _CallPageState extends State<CallPage> {
   Future<void> _finish() async {
     if (_closing) return;
     _closing = true;
-    CallSounds.hangup();
-    setState(() {});
-    await Future.delayed(const Duration(milliseconds: 1200));
+    if (mounted) setState(() {});
+    // короткая пауза, чтобы было видно «Звонок завершён»; сигнал отбоя играет модуль звонков
+    await Future.delayed(const Duration(milliseconds: 900));
+    if (!mounted) return;
     Diag.mark('звонок: закрываем экран');
-    if (mounted) Navigator.of(context).maybePop();
+    final route = ModalRoute.of(context);
+    final nav = Navigator.of(context);
+    // закрываем именно экран звонка, даже если поверх него что-то открыто (раньше закрывалось верхнее окно,
+    // а экран звонка оставался висеть)
+    if (route == null) return;
+    if (route.isCurrent) {
+      nav.pop();
+    } else if (route.isActive) {
+      nav.removeRoute(route);
+    }
   }
 
   @override
