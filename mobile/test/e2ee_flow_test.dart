@@ -435,9 +435,9 @@ void main() {
 
   test('после подтверждения: принимаем подтверждённый ключ — переписка снова идёт и расшифровывается', () async {
     // принять можно только ключ, зафиксированный до проверки и подтверждённый ею
-    expect(await Trust.instance.acceptVerified(bob, 'чужой-ключ'), isFalse);
-    expect(await Trust.instance.acceptVerified(bob, null), isFalse);
-    expect(await Trust.instance.acceptVerified(bob, startedKey), isTrue);
+    expect(await Trust.instance.acceptVerified(bob, 'чужой-ключ'), AcceptResult.refused);
+    expect(await Trust.instance.acceptVerified(bob, null), AcceptResult.refused);
+    expect(await Trust.instance.acceptVerified(bob, startedKey), AcceptResult.done);
     await myRoom(dm).sendTextEvent('снова пишем');
     await waitFor(() => bobSaw.contains('снова пишем'), 'Боб расшифровал сообщение после подтверждения');
   });

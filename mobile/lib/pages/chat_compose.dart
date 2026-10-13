@@ -178,12 +178,14 @@ extension _ChatCompose on _ChatPageState {
             Wrap(spacing: 8, alignment: WrapAlignment.end, children: [
               TextButton(
                 onPressed: () async {
-                  final ok = shown != null && await Trust.instance.acceptChange(uid, shownKey: shown);
+                  final r = shown == null ? AcceptResult.refused : await Trust.instance.acceptChange(uid, shownKey: shown);
                   if (!mounted) return;
-                  if (!ok) {
-                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
-                        content: Text('Новый ключ собеседника ещё не получен — подождите немного или подтвердите его лично')));
-                  }
+                  final msg = switch (r) {
+                    AcceptResult.refused => 'Новый ключ собеседника ещё не получен — подождите немного или подтвердите его лично',
+                    AcceptResult.rotating => 'Ключ принят. Шифрование чата обновляется — отправка станет доступна автоматически',
+                    AcceptResult.done => null,
+                  };
+                  if (msg != null) ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(msg)));
                   _set(() {});
                 },
                 child: const Text('Понятно, продолжить'),

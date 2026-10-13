@@ -86,9 +86,9 @@ Future<void> saveMedia(BuildContext context, Event e) async {
     final f = await e.downloadAndDecryptAttachment();
     final where = await FilePicker.saveFile(dialogTitle: 'Сохранить как', fileName: name, bytes: f.bytes);
     if (where == null) return;
-    if (where.isScheme('file')) await markFromInternet(where.toFilePath());
+    final marked = !where.isScheme('file') || await markFromInternet(where.toFilePath());
     final saved = where.pathSegments.isEmpty ? name : where.pathSegments.last;
-    toast('Сохранено: $saved');
+    toast(marked ? 'Сохранено: $saved' : 'Сохранено: $saved. $notMarkedWarning');
   } catch (err, st) {
     Diag.err('Сохранение файла', err, st);
     toast('Не удалось сохранить');

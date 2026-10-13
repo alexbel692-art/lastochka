@@ -102,6 +102,7 @@ class _GalleryStripState extends State<GalleryStrip> {
                             width: 96,
                             height: 96,
                             child: Stack(fit: StackFit.expand, children: [
+                              // миниатюра системной галереи (240×240) — уже маленькая
                               FutureBuilder<Uint8List?>(
                                 future: _thumbs.putIfAbsent(a.id, () => a.thumbnailDataWithSize(const ThumbnailSize.square(240))),
                                 builder: (_, s) => s.data == null

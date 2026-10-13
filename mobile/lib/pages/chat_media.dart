@@ -28,7 +28,10 @@ Future<void> openAttachment(Event e, void Function(String) toast, {BuildContext?
       }
     }
     await File(path).writeAsBytes(f.bytes, flush: true);
-    await markFromInternet(path);
+    if (!await markFromInternet(path) && (Platform.isWindows || Platform.isMacOS)) {
+      final ctx = context;
+      if (ctx != null && ctx.mounted) ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(const SnackBar(content: Text(notMarkedWarning)));
+    }
     if (danger) {
       Diag.add('Получен исполняемый файл (.${fileExt(name)}) — не открыт автоматически');
       final ctx = context;

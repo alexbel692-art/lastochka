@@ -134,7 +134,17 @@ Future<DatabaseApi> _openDatabase() async {
   } catch (e) {
     if (await marker.exists()) rethrow; // своя база не открылась — не удаляем, чтобы не потерять ключи
     Logs().w('[Ласточка] база от старой версии не открылась, создаём новую', e);
-    if (await dbFile.exists()) await dbFile.delete();
+    // единственную копию истории и ключей не удаляем: переименовываем в резервную (её можно восстановить)
+    if (await dbFile.exists()) {
+      final backup = '$path.broken-${DateTime.now().millisecondsSinceEpoch}';
+      await dbFile.rename(backup);
+      // служебные файлы журнала — вместе с ней, иначе новая база подхватила бы чужой журнал
+      for (final sfx in ['-wal', '-shm', '-journal']) {
+        final f = File('$path$sfx');
+        if (await f.exists()) await f.rename('$backup$sfx');
+      }
+      Logs().w('[Ласточка] прежняя база сохранена как ${p.basename(backup)}');
+    }
     final db = await init();
     await marker.writeAsString('1');
     return db;
@@ -234,7 +244,7 @@ typedef RoomSendInfo = ({String? type, String? msgtype});
 
 /// Последний рубеж перед отправкой любого сообщения в чат на сервер (Trust.guardRoomSend):
 /// бросает исключение, если отправлять нельзя.
-void Function(String roomId, RoomSendInfo what)? beforeRoomSend;
+Future<void> Function(String roomId, RoomSendInfo what)? beforeRoomSend;
 
 /// Отбор устройств, которым можно отправить зашифрованное личное сообщение (ключи сеансов,
 /// события проверки и т. п.) — с учётом того, ЧТО отправляется (Trust.allowedDevices).
@@ -313,7 +323,7 @@ class LastochkaClient extends Client {
         throw MatrixException.fromJson({'errcode': 'M_FORBIDDEN', 'error': 'Ласточка: проверка ключей ещё не готова'});
       }
     } else {
-      beforeRoomSend?.call(roomId, what);
+      await beforeRoomSend?.call(roomId, what);
     }
     return super.sendMessage(roomId, eventType, txnId, body);
   }

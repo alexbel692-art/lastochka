@@ -44,21 +44,33 @@ bool isDangerousFile(String name) {
   return _dangerousWin.contains(e) || _dangerousMac.contains(e) || _dangerousAndroid.contains(e) || _dangerousLinux.contains(e);
 }
 
-/// Пометить файл «загружен из интернета».
-Future<void> markFromInternet(String path) async {
+/// Пометить файл «загружен из интернета». false — система не дала пометить (результат проверяется,
+/// а не только отсутствие ошибки): тогда человеку говорят, что защита системы для файла не включена.
+Future<bool> markFromInternet(String path) async {
   try {
     if (Platform.isWindows) {
       // альтернативный поток NTFS — так помечает файлы любой браузер (Mark of the Web)
       await File('$path:Zone.Identifier').writeAsString('[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=about:internet\r\n', flush: true);
+      // FAT32/exFAT и сетевые папки потоков не поддерживают — проверяем, что пометка действительно есть
+      return (await File('$path:Zone.Identifier').readAsString()).contains('ZoneId=3');
     } else if (Platform.isMacOS) {
       // карантин Gatekeeper; дополнительно включён LSFileQuarantineEnabled для всего приложения
       final hex = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toRadixString(16);
-      await Process.run('/usr/bin/xattr', ['-w', 'com.apple.quarantine', '0081;$hex;Lastochka;', path]);
+      final r = await Process.run('/usr/bin/xattr', ['-w', 'com.apple.quarantine', '0081;$hex;Lastochka;', path]);
+      if (r.exitCode != 0) {
+        Diag.add('Пометка «из интернета» не установлена (xattr, код ${r.exitCode}): ${'${r.stderr}'.trim()}');
+        return false;
+      }
     }
+    return true;
   } catch (e) {
     Diag.err('Пометка файла «из интернета»', e);
+    return false;
   }
 }
+
+/// Сообщение, если пометку поставить не удалось.
+const notMarkedWarning = 'Система не пометила файл как загруженный из интернета — открывайте его, только если доверяете отправителю';
 
 /// Показать файл в папке (Проводник / Finder).
 Future<void> revealInFolder(String path) async {

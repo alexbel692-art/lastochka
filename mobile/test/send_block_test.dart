@@ -235,6 +235,11 @@ void main() {
     await Trust.instance.checkNow(); // первая встреча — ключ K1 запомнен
   });
 
+  test('ключ переслало неподтверждённое устройство самого отправителя — предупреждение', () {
+    final w = Trust.instance.debugJudgeSession(bob, ['curve-$bob'], 'curve-$bob', {'ed25519': 'ed-$bob'});
+    expect(w, contains('неподтверждённое устройство отправителя'));
+  });
+
   test('SEC-01: отправка в неизвестный чат не проходит (fail-closed)', () async {
     requests.clear();
     await expectLater(
@@ -261,20 +266,20 @@ void main() {
 
   test('SEC-07: ключ пропал — принять нельзя, отправка остаётся запрещённой', () async {
     setBobKey(null);
-    expect(await Trust.instance.acceptChange(bob), isFalse);
-    expect(await Trust.instance.acceptChange(bob, shownKey: 'K2'), isFalse);
+    expect(await Trust.instance.acceptChange(bob), AcceptResult.refused);
+    expect(await Trust.instance.acceptChange(bob, shownKey: 'K2'), AcceptResult.refused);
     await expectAllBlocked('ключ пропал');
   });
 
   test('ключ ещё не загружен (список устарел) — принять нельзя', () async {
     setBobKey('K2', outdated: true);
-    expect(await Trust.instance.acceptChange(bob, shownKey: 'K2'), isFalse);
+    expect(await Trust.instance.acceptChange(bob, shownKey: 'K2'), AcceptResult.refused);
     await expectAllBlocked('ключ не загружен');
   });
 
   test('подмена ключа после показа — «Понятно» не принимает чужой ключ', () async {
     setBobKey('KEVE');
-    expect(await Trust.instance.acceptChange(bob, shownKey: 'K2'), isFalse);
+    expect(await Trust.instance.acceptChange(bob, shownKey: 'K2'), AcceptResult.refused);
     await expectAllBlocked('показан другой ключ');
   });
 
@@ -324,12 +329,51 @@ void main() {
     }
   });
 
-  test('принят именно показанный ключ — отправка снова работает', () async {
+  test('не удалось сохранить состояние — ключ НЕ принят, запрет остаётся', () async {
+    Trust.instance.debugFailStorage = true;
+    try {
+      expect(await Trust.instance.acceptChange(bob, shownKey: Trust.instance.currentKey(bob)), AcceptResult.refused);
+    } finally {
+      Trust.instance.debugFailStorage = false;
+    }
+    expect(Trust.instance.changedNow.containsKey(bob), isTrue);
+    expect(Trust.instance.rotationPending, isEmpty, reason: 'ничего не начато');
+    await expectAllBlocked('состояние не сохранилось');
+  });
+
+  test('ключ принят, но замена сеансов не удалась — чаты заблокированы, отметка на диске, после восстановления — работает', () async {
     final shown = Trust.instance.currentKey(bob);
     expect(shown, 'KEVE');
-    expect(await Trust.instance.acceptChange(bob, shownKey: shown), isTrue);
-    expect(Trust.instance.changedNow, isEmpty);
-    await expectSent('ключ принят');
+    Trust.instance.debugFailRotation = true;
+    try {
+      expect(await Trust.instance.acceptChange(bob, shownKey: shown), AcceptResult.rotating);
+    } finally {
+      Trust.instance.debugFailRotation = false;
+    }
+    expect(Trust.instance.changedNow, isEmpty, reason: 'ключ принят');
+    expect(Trust.instance.rotationPending, containsAll([roomId, groupId]));
+    // отметка уже на диске — после аварийного перезапуска чаты останутся заблокированными
+    final saved = (await SharedPreferences.getInstance()).getStringList('trust.rotatePending') ?? [];
+    expect(saved, containsAll([roomId, groupId]));
+    await expectAllBlocked('сеанс шифрования ещё не заменён');
+    expect(Trust.instance.allowedDevices(allDevices, EventTypes.RoomKey, roomKey(roomId)).map((d) => d.userId), [me]);
+    // шифрование снова работает — замена повторяется при синхронизации
+    await Trust.instance.checkNow();
+    expect(Trust.instance.rotationPending, isEmpty);
+    expect((await SharedPreferences.getInstance()).getStringList('trust.rotatePending') ?? [], isEmpty);
+    await expectSent('ключ принят, сеансы заменены');
+  });
+
+  test('ключи знакомого собеседника не загружены — отправка ждёт, отсутствие данных не разрешение', () async {
+    app.client.userDeviceKeys[bob] = keysOf(bob, 'KEVE', outdated: true); // сервер «не отдаёт» новый список
+    requests.clear();
+    try {
+      await room.sendTextEvent('пока ключи неизвестны').timeout(const Duration(seconds: 10));
+    } catch (_) {}
+    expect(sends, isEmpty);
+    expect(requests.any((r) => r.contains('/keys/query')), isTrue, reason: 'попытались догрузить ключи');
+    setBobKey('KEVE');
+    await expectSent('ключи загружены');
   });
 
   test('после принятия новая смена снова запрещает отправку', () async {

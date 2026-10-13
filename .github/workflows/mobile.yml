@@ -99,25 +99,40 @@ jobs:
             if [ "$PUBLISH" = "true" ]; then echo "::error title=Сканер уязвимостей::$msg — выпуск остановлен"; exit 1; fi
             echo "::warning title=Сканер::$msg"; exit 0
           fi
-          # найдены уязвимости: все — предупреждением; критические (CVSS 9+) останавливают выпуск
+          # найдены уязвимости. Политика: высокие и критические (CVSS 7+) останавливают выпуск, если не внесены
+          # в .github/osv-allow.txt с обоснованием; средние, низкие и без оценки — предупреждением (разбираются вручную)
           python3 - <<'PY'
-          import json, os
+          import json, os, re
           d = json.load(open('/tmp/osv.json'))
-          rows, crit = [], []
+          allow = {}
+          try:
+              for line in open('../.github/osv-allow.txt', encoding='utf-8'):
+                  line = line.split('#', 1)[0].strip()
+                  if line:
+                      vid, _, why = line.partition(' ')
+                      allow[vid] = why.strip()
+          except FileNotFoundError:
+              pass
+          rows, block, unknown = [], [], []
           for r in d.get('results', []):
               for p in r.get('packages', []):
                   name = p.get('package', {}).get('name', '?')
                   for g in p.get('groups', []):
+                      ids = g.get('ids', [])
                       sev = g.get('max_severity') or '?'
-                      row = f"{name} {','.join(g.get('ids', []))} ({sev})"
+                      row = f"{name} {','.join(ids)} ({sev})"
                       rows.append(row)
+                      if any(i in allow for i in ids):
+                          continue
                       try:
-                          if float(sev) >= 9.0: crit.append(row)
+                          if float(sev) >= 7.0: block.append(row)
                       except ValueError:
-                          pass
+                          unknown.append(row)
           print('::warning title=Уязвимости в зависимостях::' + '; '.join(rows)[:3000])
-          if crit:
-              print('::error title=Критические уязвимости::' + '; '.join(crit)[:3000])
+          if unknown:
+              print('::warning title=Уязвимости без оценки — разобрать вручную::' + '; '.join(unknown)[:3000])
+          if block:
+              print('::error title=Высокие/критические уязвимости::' + '; '.join(block)[:3000])
               if os.environ.get('PUBLISH') == 'true':
                   raise SystemExit(1)
           PY
@@ -474,5 +489,6 @@ jobs:
             • Windows: Lastochka-Setup-….exe — установка для всех пользователей (подходит для RDP), живёт в трее, запускается с Windows. Прежняя версия 3.x удаляется автоматически.
             • macOS (Apple Silicon и Intel): Lastochka-…-arm64.dmg (или -x64.dmg — это тот же файл)
             • Android (телефоны и планшеты): Lastochka-…-Android.apk
-            • iPhone: Lastochka-…-iPhone-unsigned.ipa — без подписи Apple, ставится через Sideloadly/AltStore
+            • iPhone: Lastochka-…-iPhone-unsigned.ipa — НЕ готовый установочный пакет: он не подписан Apple и на iPhone сам не установится. Это заготовка для самостоятельной подписи своим Apple ID (Sideloadly, AltStore) или сертификатом разработчика; подписанная версия для обычной установки появится после подключения учётной записи Apple Developer.
+            • Подлинность любого файла: рядом лежит .sig (подпись Ласточки) и SHA256SUMS.txt.
           files: dist/*
