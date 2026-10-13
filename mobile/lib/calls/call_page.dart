@@ -10,6 +10,8 @@ import '../widgets/avatar.dart';
 import '../system/diag.dart';
 import 'sounds.dart';
 import '../system/notify.dart' show keyguardLocked;
+import '../system/trust.dart' show SendBlocked;
+import 'voip.dart' show answerCall;
 
 const _reasons = {
   CallErrorCode.userHangup: 'Звонок завершён',
@@ -117,12 +119,22 @@ class _CallPageState extends State<CallPage> {
     _bindStreams();
   }
 
+  Future<bool> _answer() async {
+    try {
+      await answerCall(call);
+      return true;
+    } on SendBlocked catch (e) {
+      if (mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(e.toString())));
+      return false;
+    }
+  }
+
   /// Ответить только голосом (на видеозвонок — с выключенной камерой).
   /// Ответ с видео: если звонок пришёл в фоне, камера ещё не включена — включаем после ответа.
   Future<void> _answerVideo() async {
     Diag.mark('звонок: ответ с видео');
     CallSounds.stop();
-    await call.answer();
+    if (!await _answer()) return;
     if (call.localUserMediaStream?.stream?.getVideoTracks().isEmpty ?? false) {
       try {
         await call.setLocalVideoMuted(false);
@@ -134,7 +146,7 @@ class _CallPageState extends State<CallPage> {
   Future<void> _answerAudio() async {
     Diag.mark('звонок: ответ');
     CallSounds.stop();
-    await call.answer();
+    if (!await _answer()) return;
     if (call.type == CallType.kVideo) {
       try {
         await call.setLocalVideoMuted(true);

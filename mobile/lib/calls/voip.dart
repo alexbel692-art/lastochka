@@ -15,6 +15,7 @@ import '../system/diag.dart';
 import '../system/desktop.dart';
 import '../system/lock.dart';
 import '../system/notify.dart';
+import '../system/trust.dart';
 import 'turn_proxy.dart';
 
 late VoIP voip;
@@ -153,6 +154,12 @@ final callActive = ValueNotifier<bool>(false);
 /// Текущий звонок — для панели звонка поверх экрана блокировки.
 final currentCall = ValueNotifier<CallSession?>(null);
 
+/// Ответ на звонок — через ту же проверку смены ключа собеседника, что и отправка сообщений.
+Future<void> answerCall(CallSession c) async {
+  ensureCanSend(c.room);
+  await c.answer();
+}
+
 void initVoip() {
   voip = VoIP(client, LastochkaVoip());
   // кнопки «Ответить» / «Отклонить» в уведомлении
@@ -161,13 +168,13 @@ void initVoip() {
     if (c == null || c.callId != callId) return;
     if (action == 'answer') {
       CallSounds.stop();
-      c.answer().then((_) async {
+      answerCall(c).then((_) async {
         if (c.type == CallType.kVideo && (c.localUserMediaStream?.stream?.getVideoTracks().isEmpty ?? false)) {
           try {
             await c.setLocalVideoMuted(false);
           } catch (_) {}
         }
-      });
+      }, onError: (_) {});
     }
     if (action == 'decline') {
       CallSounds.stop();
@@ -183,6 +190,7 @@ Future<void> startCall(BuildContext context, Room room, {required bool video}) a
     return;
   }
   try {
+    ensureCanSend(room);
     final session = await voip.inviteToCall(room, video ? CallType.kVideo : CallType.kVoice);
     callActive.value = true;
     currentCall.value = session;
@@ -190,7 +198,8 @@ Future<void> startCall(BuildContext context, Room room, {required bool video}) a
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => CallPage(session: session)));
   } catch (e) {
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Не удалось позвонить: нет доступа к микрофону или камере')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e is SendBlocked ? e.toString() : 'Не удалось позвонить: нет доступа к микрофону или камере')));
   }
 }
 

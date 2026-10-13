@@ -152,6 +152,8 @@ extension _ChatCompose on _ChatPageState {
     final uid = who.first;
     final wasVerified = Trust.instance.changed.value[uid] == true;
     final name = room.unsafeGetUserFromMemoryOrFallback(uid).calcDisplayname();
+    // ключ, который человек видит сейчас: «Понятно» примет именно его, а не подменённый позже
+    final shown = Trust.instance.currentKey(uid);
     final color = wasVerified ? Colors.red : Colors.orange.shade800;
     return Material(
       color: color.withValues(alpha: 0.12),
@@ -176,8 +178,13 @@ extension _ChatCompose on _ChatPageState {
             Wrap(spacing: 8, alignment: WrapAlignment.end, children: [
               TextButton(
                 onPressed: () async {
-                  await Trust.instance.acceptChange(uid);
-                  if (mounted) _set(() {});
+                  final ok = shown != null && await Trust.instance.acceptChange(uid, shownKey: shown);
+                  if (!mounted) return;
+                  if (!ok) {
+                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+                        content: Text('Новый ключ собеседника ещё не получен — подождите немного или подтвердите его лично')));
+                  }
+                  _set(() {});
                 },
                 child: const Text('Понятно, продолжить'),
               ),

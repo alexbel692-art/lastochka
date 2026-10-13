@@ -10,8 +10,10 @@ class MediaPolicy {
   static const _stable = 'm.media_preview_config';
   static const _unstable = 'io.element.msc4278.media_preview_config';
 
+  // Element X сейчас пишет только нестабильный ключ: он главнее — иначе устаревший стабильный
+  // (записанный когда-то нами) перекрыл бы изменение, сделанное в Element
   static Map<String, Object?> get _cfg =>
-      client.accountData[_stable]?.content ?? client.accountData[_unstable]?.content ?? const <String, Object?>{};
+      client.accountData[_unstable]?.content ?? client.accountData[_stable]?.content ?? const <String, Object?>{};
 
   /// «on» — везде, «private» — только в закрытых чатах (не публичных), «off» — нигде (по нажатию).
   static String get previews {

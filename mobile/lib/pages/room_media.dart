@@ -14,6 +14,7 @@ import '../widgets/avatar.dart';
 import '../system/diag.dart';
 import '../system/image_guard.dart';
 import '../system/lru.dart';
+import '../system/media_policy.dart';
 import 'chat.dart' show openAttachment;
 
 final _thumbs = Lru<String, Future<Uint8List?>>(150)..register();
@@ -127,6 +128,16 @@ class _RoomMediaPageState extends State<RoomMediaPage> {
                               openExternally: (m) => openAttachment(m, _toast, context: context));
                           if (e.messageType == MessageTypes.Video) {
                             return VideoPreview(event: e, maxWidth: c.maxWidth, height: c.maxHeight, radius: 0, onOpen: open);
+                          }
+                          // настройка «Показ фото и видео» (как в Element): миниатюра не загружается, по нажатию — откроется
+                          if (!MediaPolicy.showIn(widget.room, senderId: e.senderId)) {
+                            return GestureDetector(
+                              onTap: open,
+                              child: ColoredBox(
+                                color: hint.withValues(alpha: 0.12),
+                                child: Icon(Icons.visibility_off_outlined, color: hint),
+                              ),
+                            );
                           }
                           return GestureDetector(
                             onTap: open,

@@ -247,11 +247,14 @@ class AppLock {
     final salt = _p!.getString('lock.salt') ?? '';
     final hNew = await _kdf(pin, salt);
     final hOld = _hash(pin, salt);
-    if (allowDuress && duressEnabled && (_duressNew ? hNew : hOld) == _p!.getString('lock.duress')) {
+    // до перехода на новую схему принимаем и старый, и новый хеш: если приложение закрылось посреди
+    // перехода (хеш уже новый, отметка ещё старая), код не «ломается»
+    bool match(String? stored, bool isNew) => stored != null && (stored == hNew || (!isNew && stored == hOld));
+    if (allowDuress && duressEnabled && match(_p!.getString('lock.duress'), _duressNew)) {
       await onWipe?.call();
       return false;
     }
-    final ok = (_mainNew ? hNew : hOld) == _p!.getString('lock.hash');
+    final ok = match(_p!.getString('lock.hash'), _mainNew);
     if (ok && !_mainNew) {
       // старый код верный — сразу переводим его на новую, медленную схему
       await _p!.setString('lock.hash', hNew);

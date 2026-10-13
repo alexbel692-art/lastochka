@@ -92,7 +92,13 @@ jobs:
           chmod +x /tmp/osv
           set +e; /tmp/osv --format json --lockfile=pubspec.lock > /tmp/osv.json 2>/tmp/osv.err; rc=$?; set -e
           if [ $rc -eq 0 ]; then echo "::notice title=Зависимости::Известных уязвимостей не найдено"; exit 0; fi
-          if [ $rc -ne 1 ]; then echo "::warning title=Сканер::не отработал (код $rc): $(tail -3 /tmp/osv.err | tr '\n' ' ')"; exit 0; fi
+          if [ $rc -ne 1 ]; then
+            # сканер не смог проверить зависимости: для выпуска это остановка (непроверенное не публикуем),
+            # для пробной сборки — предупреждение
+            msg="не отработал (код $rc): $(tail -3 /tmp/osv.err | tr '\n' ' ')"
+            if [ "$PUBLISH" = "true" ]; then echo "::error title=Сканер уязвимостей::$msg — выпуск остановлен"; exit 1; fi
+            echo "::warning title=Сканер::$msg"; exit 0
+          fi
           # найдены уязвимости: все — предупреждением; критические (CVSS 9+) останавливают выпуск
           python3 - <<'PY'
           import json, os
@@ -117,9 +123,6 @@ jobs:
           PY
       - name: Иконки
         run: tool/annotate.sh "icons" dart run flutter_launcher_icons
-      # известные уязвимости в библиотеках (база OSV) — предупреждение в сборке
-      # сканер скачивается и сверяется с официальной контрольной суммой — обязательный шаг:
-      # при несовпадении сборка останавливается
       - name: Проверка кода
         run: tool/annotate.sh "analyze" flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Тесты
@@ -181,9 +184,14 @@ jobs:
             "$AS" sign --ks "$RUNNER_TEMP/k.jks" --ks-pass env:KP --ks-key-alias lastochka --key-pass env:KP --out "out/$(basename "$f")" "$f"
           done
           rm -f "$RUNNER_TEMP/k.jks"
-          # подпись — именно нашим ключом (отпечаток сертификата)
+          # подпись — именно нашим ключом: полный отпечаток сертификата и ровно одна подпись
+          FP=7994c098efa34a2dc89d31cfcbaf72e2b8585d4f0abc53668d5871784a057647
           for f in out/*.apk; do
-            "$AS" verify --print-certs "$f" | grep -qi 'SHA-256 digest: 7994c098efa34a2d' || { echo "::error::$f подписан не тем ключом"; exit 1; }
+            info="$("$AS" verify --verbose --print-certs "$f")" || { echo "::error::$f — подпись не прошла проверку"; exit 1; }
+            grep -qx 'Number of signers: 1' <<<"$info" || { echo "::error::$f — подписей не одна"; exit 1; }
+            got="$(grep -iE '^Signer #1 certificate SHA-256 digest: ' <<<"$info" | awk '{print tolower($NF)}')"
+            [ "$got" = "$FP" ] || { echo "::error::$f подписан не тем ключом ($got)"; exit 1; }
+            grep -qx 'Verified using v2 scheme (APK Signature Scheme v2): true' <<<"$info" || { echo "::error::$f — нет подписи v2"; exit 1; }
           done
           rm -f out/*.idsig
           ls -la out

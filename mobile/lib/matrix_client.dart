@@ -224,9 +224,38 @@ Future<void> wipeLocalStorage() async {
   deviceSecret = null;
 }
 
+/// Вызывается сразу после того, как модуль Matrix скачал ключи устройств (до отправки сообщений).
+/// Сюда подключается проверка смены ключей собеседников (Trust.checkNow).
+Future<void> Function()? afterDeviceKeysUpdate;
+
+/// Клиент Ласточки: после каждой загрузки ключей устройств — немедленная проверка доверия.
+/// Модуль шифрования шлёт ключи сообщений только после updateUserDeviceKeys, поэтому
+/// устройства с подменённым ключом блокируются раньше, чем им что-либо уйдёт.
+class LastochkaClient extends Client {
+  LastochkaClient(
+    super.clientName, {
+    required super.database,
+    super.verificationMethods,
+    super.httpClient,
+    super.importantStateEvents,
+    super.supportedLoginTypes,
+    super.nativeImplementations,
+    super.logLevel,
+    super.shareKeysWith,
+  });
+
+  @override
+  Future<void> updateUserDeviceKeys({Set<String>? additionalUsers}) async {
+    await super.updateUserDeviceKeys(additionalUsers: additionalUsers);
+    try {
+      await afterDeviceKeysUpdate?.call();
+    } catch (_) {}
+  }
+}
+
 Future<Client> createClient() async {
   await vod.init();
-  final client = Client(
+  final client = LastochkaClient(
     clientName,
     httpClient: CertPinning.instance.httpClient(),
     database: await _openDatabase(),

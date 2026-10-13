@@ -5,6 +5,7 @@ import 'package:matrix/matrix.dart';
 
 import '../widgets/avatar.dart';
 import 'sounds.dart';
+import 'voip.dart' show answerCall;
 
 class LockedCallPanel extends StatelessWidget {
   final CallSession session;
@@ -53,7 +54,11 @@ class LockedCallPanel extends StatelessWidget {
                   // ответ с экрана блокировки — только голосом, камера не включается
                   _round(Icons.call, const Color(0xFF43A047), 'Ответить', () async {
                     CallSounds.stop();
-                    await session.answer();
+                    try {
+                      await answerCall(session);
+                    } catch (_) {
+                      return; // ключ собеседника сменился — ответить можно после проверки в чате
+                    }
                     if (session.type == CallType.kVideo) {
                       try {
                         await session.setLocalVideoMuted(true);

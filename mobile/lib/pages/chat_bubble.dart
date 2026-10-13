@@ -231,9 +231,9 @@ class _Bubble extends StatelessWidget {
       );
     }
 
-    // сообщение с устройства, которое собеседник не подтвердил (его мог добавить кто-то, узнавший пароль) —
-    // скрыто, пока вы сами не нажмёте «Показать»; так же поступает Element
-    final untrustedDevice = warn != null && (warn.startsWith('Отправлено с устройства, которое владелец') || warn.startsWith('Ключ устройства не совпадает'));
+    // любое предупреждение о подлинности (неподтверждённое или неизвестное устройство, чужой ключ, ключ
+    // переслан не автором) — содержимое скрыто, пока вы сами не нажмёте «Показать»; так же поступает Element
+    final untrustedDevice = warn != null;
     if (untrustedDevice) {
       final shown = content;
       content = ValueListenableBuilder<Set<String>>(
@@ -245,7 +245,7 @@ class _Bubble extends StatelessWidget {
                 const SizedBox(width: 8),
                 Flexible(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                    Text('Скрыто: отправлено с неподтверждённого устройства', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: mine ? Bubbles.outText(context) : null)),
+                    Text('Скрыто: подлинность не подтверждена', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: mine ? Bubbles.outText(context) : null)),
                     TextButton(
                       style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact, minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                       onPressed: () => _revealedUnverified.value = {..._revealedUnverified.value, event.eventId},

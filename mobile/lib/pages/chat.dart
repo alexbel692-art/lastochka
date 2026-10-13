@@ -196,7 +196,8 @@ class _ChatPageState extends State<ChatPage> {
     setState(() {});
     if (_text.text.isNotEmpty && DateTime.now().difference(_typingSent).inSeconds > 4) {
       _typingSent = DateTime.now();
-      room.setTyping(true, timeout: 6000).catchError((_) {});
+      // «печатает…» тоже раздаёт ключ шифрования участникам — при смене ключа собеседника не шлём
+      if (!Trust.instance.sendBlocked(room)) room.setTyping(true, timeout: 6000).catchError((_) {});
     }
   }
 
