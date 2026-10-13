@@ -70,6 +70,14 @@ class LastochkaVoip implements WebRTCDelegate {
   Future<void> handleNewCall(CallSession session) async {
     CallStats.watch(session);
     _watchNetwork();
+    // модуль Matrix сообщает сюда и об ИСХОДЯЩИХ звонках. Их экран уже открыл startCall — второй экран
+    // звонка не открываем, «поверх блокировки» и уведомление о входящем не включаем (раньше на Android
+    // открывалось два экрана звонка и окно лишний раз перестраивалось — после звонка экран застывал)
+    if (session.isOutgoing) {
+      callActive.value = true;
+      currentCall.value = session;
+      return;
+    }
     ringing = session;
     callActive.value = true;
     currentCall.value = session;
