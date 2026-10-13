@@ -38,7 +38,7 @@ List<String> scan(String path, String src) {
     // проверка — в той же строке или в 6 строках выше
     final before = lines.sublist(ln - 6 < 0 ? 0 : ln - 6, ln + 1).join('\n');
     // сам рубеж в клиенте (LastochkaClient): вызов super.… сразу после проверки beforeRoomSend
-    if (src.substring(0, m.start()).endsWith('super')) {
+    if (src.substring(0, m.start).endsWith('super')) {
       if (!before.contains('beforeRoomSend?.call(')) problems.add('$path:${ln + 1}: рубеж клиента без проверки: ${lines[ln].trim()}');
       continue;
     }

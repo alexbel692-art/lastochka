@@ -372,7 +372,8 @@ List<String> _squash(List<String> lines) {
   String? prev;
   var n = 0;
   void flush() {
-    if (prev != null) out.add(n > 1 ? '$prev  ×$n' : prev!);
+    final p = prev;
+    if (p != null) out.add(n > 1 ? '$p  ×$n' : p);
   }
 
   for (final l in lines) {
