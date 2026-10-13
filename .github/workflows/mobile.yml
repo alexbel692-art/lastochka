@@ -248,7 +248,7 @@ jobs:
         run: |
           if [ "$DEPS" = "upgrade" ]; then tool/annotate.sh "ios pub upgrade" flutter pub upgrade
           elif [ "$DEPS" = "add" ]; then tool/annotate.sh "ios pub get" flutter pub get
-          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "ios pub get" flutter pub get; git diff --exit-code --stat -- pubspec.lock || { echo "::error::pubspec.lock изменился"; exit 1; }
+          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "ios pub get" flutter pub get; git diff --quiet -- pubspec.lock || { echo "::error::pubspec.lock изменился: $(git diff -- pubspec.lock | grep '^[-+] ' | head -20 | tr '\n' ' ')"; exit 1; }
           else tool/annotate.sh "ios pub get" flutter pub get; fi
           dart run flutter_launcher_icons
       # Без платной подписи Apple: собираем приложение без подписи и упаковываем в .ipa.
@@ -290,7 +290,7 @@ jobs:
         run: |
           if [ "$DEPS" = "upgrade" ]; then tool/annotate.sh "macos pub upgrade" flutter pub upgrade
           elif [ "$DEPS" = "add" ]; then tool/annotate.sh "macos pub get" flutter pub get
-          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "macos pub get" flutter pub get; git diff --exit-code --stat -- pubspec.lock || { echo "::error::pubspec.lock изменился"; exit 1; }
+          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "macos pub get" flutter pub get; git diff --quiet -- pubspec.lock || { echo "::error::pubspec.lock изменился: $(git diff -- pubspec.lock | grep '^[-+] ' | head -20 | tr '\n' ' ')"; exit 1; }
           else tool/annotate.sh "macos pub get" flutter pub get; fi
           dart run flutter_launcher_icons
       - name: Сборка macOS
@@ -330,7 +330,7 @@ jobs:
         run: |
           if [ "$DEPS" = "upgrade" ]; then tool/annotate.sh "windows pub upgrade" flutter pub upgrade
           elif [ "$DEPS" = "add" ]; then tool/annotate.sh "windows pub get" flutter pub get
-          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "windows pub get" flutter pub get; git diff --exit-code --stat -- pubspec.lock || { echo "::error::pubspec.lock изменился"; exit 1; }
+          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "windows pub get" flutter pub get; git diff --quiet -- pubspec.lock || { echo "::error::pubspec.lock изменился: $(git diff -- pubspec.lock | grep '^[-+] ' | head -20 | tr '\n' ' ')"; exit 1; }
           else tool/annotate.sh "windows pub get" flutter pub get; fi
           dart run flutter_launcher_icons
       - name: Сборка Windows
