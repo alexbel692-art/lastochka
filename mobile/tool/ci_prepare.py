@@ -92,6 +92,8 @@ android {
         props = '\nval keystoreProperties = Properties().apply { load(FileInputStream(rootProject.file("key.properties"))) }\n\nandroid {'
         s = header + s.replace('\nandroid {', props, 1)
         s = s.replace('signingConfig = signingConfigs.getByName("debug")', 'signingConfig = signingConfigs.getByName("release")')
+        # шаблон Flutter поменялся и подстановка не сработала — лучше остановить сборку, чем выпустить APK с временной подписью
+        assert 'signingConfigs.getByName("release")' in s, 'ci_prepare: подпись release не подставлена в build.gradle.kts'
     return s
 edit(gradle, gradle_fn)
 print('android signing:', 'release key' if signed else 'DEBUG key (секрет ANDROID_KEYSTORE не задан)')

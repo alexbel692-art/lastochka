@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:matrix/matrix.dart';
 
+import '../system/trust.dart';
 import '../main.dart';
 import '../system/diag.dart';
 
@@ -43,6 +44,7 @@ Future<void> retryFailed() async {
         _rooms.remove(id);
         continue;
       }
+      if (Trust.instance.sendBlocked(room)) continue; // ключ собеседника сменился — не переотправляем
       final tl = await room.getTimeline();
       try {
         final failed = tl.events.where((e) => e.status.isError && e.senderId == client.userID).toList()

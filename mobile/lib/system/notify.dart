@@ -14,6 +14,7 @@ import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
+import '../calls/voip.dart' show callActive;
 import '../pages/chat.dart';
 import 'desktop.dart';
 import 'diag.dart';
@@ -151,10 +152,11 @@ void _handle(String action, String payload) {
   _lastTap = key;
   _lastTapAt = DateTime.now();
   if (payload.startsWith('call:')) {
-    final parts = payload.substring(5).split(':');
+    final rest = payload.substring(5);
+    final i = rest.lastIndexOf(':'); // id звонка задаёт собеседник и в нём может быть «:»
     // без верной метки — не наше уведомление: ничего не делаем со звонком
-    if (parts.length != 2 || parts[1] != _callNonce) return;
-    onCallAction?.call(action.isEmpty ? 'open' : action, parts[0]);
+    if (i < 0 || rest.substring(i + 1) != _callNonce) return;
+    onCallAction?.call(action.isEmpty ? 'open' : action, rest.substring(0, i));
     if (action != 'decline') showMainWindow();
     return;
   }
@@ -170,6 +172,13 @@ void openRoom(Room room) {
   final nav = navKey.currentState;
   if (nav == null) return;
   if (openRoomId == room.id) return;
+  // вход ещё не подтверждён — чаты откроются после подтверждения
+  if (client.isUnknownSession && client.encryption?.crossSigning.enabled == true) return;
+  // во время звонка экран звонка не закрываем (иначе звонок бы оборвался) — чат открывается поверх
+  if (callActive.value) {
+    nav.push(MaterialPageRoute(builder: (_) => ChatPage(room: room)));
+    return;
+  }
   nav.popUntil((r) => r.isFirst);
   nav.push(MaterialPageRoute(builder: (_) => ChatPage(room: room)));
 }

@@ -18,7 +18,6 @@ import 'package:path_provider/path_provider.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'desktop.dart';
 import 'pinning.dart';
 import 'notify.dart';
 import 'diag.dart';
@@ -115,10 +114,16 @@ class Updater {
   /// Проверить, скачать и (когда удобно) поставить — без участия человека.
   Future<void> _auto() async {
     if (_busy) return;
-    if (!await check()) return;
-    if (!await autoEnabled()) return; // ручной режим: только полоска «Доступна новая версия»
+    _busy = true; // сразу — чтобы два одновременных вызова не скачивали одно и то же
+    try {
+      if (!await check()) return;
+      if (!await autoEnabled()) return; // ручной режим: только полоска «Доступна новая версия»
+    } finally {
+      _busy = false;
+    }
     final u = available.value;
     if (u == null || ready.value == u.version) return _applyIfQuiet();
+    if (_busy) return;
     _busy = true;
     try {
       _readyFile = await _download(u);
@@ -138,6 +143,12 @@ class Updater {
   Future<void> _applyIfQuiet() async {
     final f = _readyFile;
     if (f == null || _applying || callActive.value || !await autoEnabled()) return;
+    // одна автоматическая попытка на версию раз в 12 часов: если Windows спросила права администратора и человек
+    // отказался или Android ждёт подтверждения, не спрашиваем снова при каждом сворачивании
+    final prefs = await SharedPreferences.getInstance();
+    final tried = prefs.getString('update.tried') ?? '';
+    final triedAt = DateTime.fromMillisecondsSinceEpoch(prefs.getInt('update.triedAt') ?? 0);
+    if (tried == ready.value && DateTime.now().difference(triedAt).inHours < 12) return;
     final justStarted = DateTime.now().difference(_started).inMinutes < 3;
     if (Platform.isWindows) {
       if (remoteSession) return; // сервер RDP: у пользователей нет прав администратора — обновляет админ
@@ -151,6 +162,8 @@ class Updater {
       if (appVisible) return;
     }
     _applying = true;
+    await prefs.setString('update.tried', ready.value ?? '');
+    await prefs.setInt('update.triedAt', DateTime.now().millisecondsSinceEpoch);
     try {
       await _apply(f, interactive: false);
     } catch (e, st) {
@@ -359,9 +372,10 @@ class Updater {
       // тихая установка поверх; после неё Ласточка запустится сама.
       // Windows попросит права администратора (установка для всех пользователей)
       Diag.add('Устанавливаем обновление ${ready.value}');
-      await Process.start(target.path, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'], mode: ProcessStartMode.detached);
-      await Future.delayed(const Duration(milliseconds: 600));
-      await quitApp();
+      // Ласточку закрывает сам установщик — после того как Windows дала права. Если человек отказал
+      // в правах, установщик просто выходит, а Ласточка продолжает работать (раньше она закрывалась сама)
+      await Process.start(target.path, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', '/FORCECLOSEAPPLICATIONS'],
+          mode: ProcessStartMode.detached);
     } else if (Platform.isMacOS) {
       await Process.run('open', [target.path]); // откроется образ — перетащите Ласточку в «Программы»
     } else if (Platform.isAndroid) {

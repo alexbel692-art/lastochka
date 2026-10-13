@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 
+import '../system/trust.dart';
 import '../main.dart';
 import '../system/secure_store.dart';
 import 'autodelete.dart';
@@ -104,6 +105,8 @@ class Scheduler {
       if (!items.value.any((x) => x.id == s.id)) return; // отменено
       final room = client.getRoomById(s.roomId);
       if (room != null && room.membership == Membership.join) {
+        // у собеседника сменился ключ — отложенное ждёт, пока вы не подтвердите новый ключ
+        if (Trust.instance.sendBlocked(room)) return;
         final id = await room.sendEvent({...textContent(s.text, mentions: s.mentions), ...ttlExtra(room)});
         if (id == null) throw StateError('не отправлено');
       }

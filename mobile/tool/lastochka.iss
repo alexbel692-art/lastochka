@@ -71,8 +71,8 @@ end;
 procedure RemoveOldFrom(RootKey: Integer);
 var
   Names: TArrayOfString;
-  I, RC: Integer;
-  Key, Name, Quiet: String;
+  I, RC, P: Integer;
+  Key, Name, Quiet, Exe, Params: String;
 begin
   Key := 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall';
   if not RegGetSubkeyNames(RootKey, Key, Names) then Exit;
@@ -82,8 +82,24 @@ begin
     if not RegQueryStringValue(RootKey, Key + '\' + Names[I], 'DisplayName', Name) then Continue;
     if Pos('Ласточка 3.', Name) <> 1 then Continue;
     if not RegQueryStringValue(RootKey, Key + '\' + Names[I], 'QuietUninstallString', Quiet) then Continue;
+    // команду удаления разбираем сами (без cmd /C) и запускаем только существующий .exe
+    Exe := Trim(Quiet); Params := '';
+    if Copy(Exe, 1, 1) = '"' then
+    begin
+      Delete(Exe, 1, 1);
+      P := Pos('"', Exe);
+      if P = 0 then Continue;
+      Params := Trim(Copy(Exe, P + 1, MaxInt));
+      Exe := Copy(Exe, 1, P - 1);
+    end else Continue;
+    if CompareText(ExtractFileExt(Exe), '.exe') <> 0 then Continue;
+    if not FileExists(Exe) then Continue;
     Log('Удаляем прежнюю версию: ' + Name);
-    Exec(ExpandConstant('{cmd}'), '/C "' + Quiet + '"', '', SW_HIDE, ewWaitUntilTerminated, RC);
+    if RootKey = HKCU then
+      // запись пользователя может подложить любая программа — запускаем без прав администратора
+      ExecAsOriginalUser(Exe, Params, '', SW_HIDE, ewWaitUntilTerminated, RC)
+    else
+      Exec(Exe, Params, '', SW_HIDE, ewWaitUntilTerminated, RC);
   end;
 end;
 

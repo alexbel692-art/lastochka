@@ -9,6 +9,7 @@ import 'package:matrix/matrix.dart';
 import '../widgets/wallpaper.dart';
 import '../chat/formatting.dart';
 import '../main.dart';
+import '../system/trust.dart';
 import '../system/diag.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
@@ -92,6 +93,10 @@ class _ThreadPageState extends State<ThreadPage> {
   Future<void> _send() async {
     final t = _text.text.trim();
     if (t.isEmpty || _sending) return;
+    if (Trust.instance.sendBlocked(room)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('У собеседника сменился ключ — подтвердите его в чате, прежде чем писать')));
+      return;
+    }
     setState(() => _sending = true);
     final last = _sorted.lastOrNull;
     try {

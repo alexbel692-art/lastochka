@@ -73,7 +73,20 @@ class _Bubble extends StatelessWidget {
     final exp = expiryOf(event);
     // проверяем и исходное сообщение, и показанную правку (её мог прислать другой отправитель-устройство)
     final warn = event.redacted ? null : (Trust.instance.senderWarning(event) ?? (e.eventId != event.eventId ? Trust.instance.senderWarning(e) : null));
+    // в защищённом чате пришло сообщение без шифрования (так его мог подложить сервер) — помечаем
+    final plain = room.encrypted &&
+        !event.redacted &&
+        !event.status.isSending &&
+        !event.status.isError &&
+        event.originalSource == null &&
+        (event.type == EventTypes.Message || event.type == EventTypes.Sticker);
     Widget metaOf(Color mc) => Row(mainAxisSize: MainAxisSize.min, children: [
+      if (plain)
+        const Tooltip(
+          message: 'Это сообщение пришло без шифрования. В защищённом чате так не должно быть — его мог подменить сервер или его отправили до включения шифрования.',
+          triggerMode: TooltipTriggerMode.tap,
+          child: Padding(padding: EdgeInsets.only(right: 3), child: Icon(Icons.lock_open_rounded, size: 15, color: Colors.redAccent)),
+        ),
       if (warn != null)
         Tooltip(
           message: warn,

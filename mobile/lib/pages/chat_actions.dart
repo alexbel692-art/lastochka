@@ -93,7 +93,9 @@ extension _ChatActions on _ChatPageState {
     try {
       final content = textContent(t, mentions: mentions);
       if (edit != null) {
-        await room.sendEvent(content, editEventId: edit.eventId);
+        // срок жизни переносим и на правку — иначе текст правки остался бы навсегда
+        final exp = edit.content[expiresKey];
+        await room.sendEvent({...content, if (exp != null) expiresKey: exp}, editEventId: edit.eventId);
       } else {
         await room.sendEvent({...content, ...ttlExtra(room)}, inReplyTo: reply);
       }

@@ -13,6 +13,7 @@ import 'call_stats.dart';
 import 'sounds.dart';
 import '../system/diag.dart';
 import '../system/desktop.dart';
+import '../system/lock.dart';
 import '../system/notify.dart';
 import 'turn_proxy.dart';
 
@@ -209,7 +210,8 @@ class _Media extends MediaDevices {
 
   @override
   Future<MediaStream> getUserMedia(Map<String, dynamic> c) async {
-    if (!appVisible && c['video'] != null && c['video'] != false) {
+    // окно скрыто или Ласточка заблокирована код-паролем — только звук (камера включится после разблокировки кнопкой)
+    if ((!appVisible || AppLock.instance.locked.value) && c['video'] != null && c['video'] != false) {
       return inner.getUserMedia({...c, 'video': false});
     }
     try {

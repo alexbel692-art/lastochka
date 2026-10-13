@@ -27,6 +27,7 @@ class AppLock {
   SharedPreferences? _p;
   DateTime? _hiddenAt;
   final _hiddenWatch = Stopwatch();
+  Future<(int, int)?>? _hiddenUptime; // Android: время с включения телефона в момент сворачивания (идёт и во сне)
   /// Удалить все данные Ласточки на устройстве (задаётся при запуске).
   Future<void> Function()? onWipe;
 
@@ -153,16 +154,28 @@ class AppLock {
         _hiddenWatch
           ..reset()
           ..start();
+        _hiddenUptime = _uptime();
       }
       if (timeout == 0) locked.value = true;
       if (isBlocked) _saveBlock();
     } else {
       final h = _hiddenAt;
+      final hu = _hiddenUptime;
       _hiddenAt = null;
+      _hiddenUptime = null;
       if (h != null) {
         // часы переведены назад — считаем, что время вышло (иначе так можно обойти автоблокировку)
         final wall = DateTime.now().difference(h);
         if (wall.isNegative || wall.inSeconds >= timeout || _hiddenWatch.elapsed.inSeconds >= timeout) locked.value = true;
+        // Android: секундомер во сне телефона стоит, а часы можно перевести вперёд-назад — сверяем по времени
+        // с включения телефона (его не перевести); перезагрузка тоже считается «время вышло»
+        if (hu != null && !locked.value) {
+          () async {
+            final a = await hu, b = await _uptime();
+            if (a == null || b == null) return;
+            if (a.$1 != b.$1 || (b.$2 - a.$2) ~/ 1000 >= timeout) locked.value = true;
+          }();
+        }
       }
       // во сне телефона секундомер стоит — уточняем остаток паузы по времени с включения
       if (isBlocked && Platform.isAndroid) _loadBlock();

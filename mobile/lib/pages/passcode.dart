@@ -47,7 +47,9 @@ class _PasscodePageState extends State<PasscodePage> {
         builder: (c, set) => Scaffold(
           appBar: AppBar(),
           body: PinPad(
-            title: first == null ? 'Придумайте код-пароль' : 'Повторите код-пароль',
+            title: first == null ? 'Придумайте код-пароль из 6 цифр' : 'Повторите код-пароль',
+            // 6 цифр вместо 4: в 100 раз больше вариантов для перебора (прежние 4-значные коды продолжают работать)
+            length: 6,
             onDone: (pin) async {
               if (first == null) {
                 set(() => first = pin);

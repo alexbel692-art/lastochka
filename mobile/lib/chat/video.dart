@@ -16,6 +16,7 @@ import 'package:video_player/video_player.dart';
 
 import '../system/lru.dart';
 import '../system/media_clean.dart';
+import '../system/image_guard.dart';
 import '../system/privacy.dart';
 import 'autodelete.dart';
 import 'voice.dart' show fmtDur;
@@ -236,7 +237,7 @@ const _autoFrameLimit = 30 * 1024 * 1024;
 Future<Uint8List?> _preview(Event e) => _previews.putIfAbsent(e.eventId, () async {
       if (e.hasThumbnail) {
         try {
-          return (await e.downloadAndDecryptAttachment(getThumbnail: true)).bytes;
+          return await guardImage((await e.downloadAndDecryptAttachment(getThumbnail: true)).bytes);
         } catch (err) {
           Diag.err('Превью видео', err);
         }

@@ -372,6 +372,7 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
       ('Закреплять сообщения', 'm.room.pinned_events', '', 50),
     ];
     final allowed = {for (final (t, ev, key, def) in items) t: lvl(ev, key, def) <= 0};
+    final initial = Map<String, bool>.of(allowed);
     final ok = await showDialog<bool>(
       context: context,
       builder: (d) => StatefulBuilder(
@@ -391,6 +392,8 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
     );
     if (ok != true) return;
     for (final (t, ev, key, _) in items) {
+      // не тронутые переключатели не меняем: особый уровень (например, 100 — только владелец) сохраняется
+      if (allowed[t] == initial[t]) continue;
       final v = allowed[t]! ? 0 : 50;
       if (ev == null) {
         pl[key] = v;

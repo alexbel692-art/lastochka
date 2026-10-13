@@ -54,6 +54,8 @@ class Diag {
   /// Выход из аккаунта или экстренное удаление: журнал и следы шагов стираются с устройства.
   static Future<void> wipeLocal() async {
     _saveTimer?.cancel();
+    _logKey = null; // без ключа журнал больше не пишется на диск
+    _trail = null;
     _session.clear();
     _buf.clear();
     _prev = const [];

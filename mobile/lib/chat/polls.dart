@@ -245,6 +245,7 @@ Future<void> _notifyResults(Room room, Event start) async {
 /// Сравнивать голоса по времени отправки ненадёжно: если часы телефона отстают от сервера,
 /// новый голос выглядел «старше» прежнего и проигрывал — переголосовать не получалось.
 final _myPick = <String, Set<String>>{};
+final _myPickAt = <String, DateTime>{};
 final pollChanged = ValueNotifier<int>(0);
 
 /// Итоги опроса по ответам в ленте.
@@ -285,6 +286,12 @@ PollState pollState(Event start, Timeline tl, PollData p) {
   }
 
   final me = client.userID;
+  // подсказка живёт, пока голос в пути; через 2 минуты верим ленте (например, проголосовали с другого устройства)
+  final at = _myPickAt[start.eventId];
+  if (at != null && DateTime.now().difference(at).inMinutes >= 2 && !(latest[me]?.status.isSending ?? false)) {
+    _myPick.remove(start.eventId);
+    _myPickAt.remove(start.eventId);
+  }
   final over = _myPick[start.eventId];
   if (over != null && me != null) {
     final mineNow = latest[me];
@@ -347,7 +354,13 @@ class PollView extends StatelessWidget {
         ..add(id);
       if (s.mine.contains(id)) next.clear(); // повторное нажатие — отменить голос
     } else {
-      next.contains(id) ? next.remove(id) : next.add(id);
+      if (next.contains(id)) {
+        next.remove(id);
+      } else if (next.length < p.maxSelections) {
+        next.add(id);
+      } else {
+        return; // больше вариантов выбрать нельзя
+      }
     }
     await _send(context, next);
   }
@@ -355,14 +368,16 @@ class PollView extends StatelessWidget {
   Future<void> _send(BuildContext context, Set<String> next) async {
     final before = _myPick[event.eventId];
     _myPick[event.eventId] = next; // сразу показываем новый выбор
+    _myPickAt[event.eventId] = DateTime.now();
     pollChanged.value++;
     try {
-      await event.room.sendEvent({
+      final sent = await event.room.sendEvent({
         'm.relates_to': {'rel_type': 'm.reference', 'event_id': event.eventId},
         pollResponse: {'answers': next.toList()},
         // стабильное название (Element и др.)
         'm.selections': next.toList(),
       }, type: pollResponse);
+      if (sent == null) throw StateError('не отправлено'); // модуль Matrix сообщает об ошибке так, а не исключением
     } catch (_) {
       if (before == null) {
         _myPick.remove(event.eventId);

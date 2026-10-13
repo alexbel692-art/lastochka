@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 
 import '../main.dart';
+import '../system/trust.dart';
 import '../widgets/avatar.dart';
 import 'autodelete.dart';
 import 'saved.dart';
@@ -18,7 +19,7 @@ String? forwardedFrom(Event e) {
   if (from is String && from.startsWith('@') && from.contains(':')) {
     final u = e.room.unsafeGetUserFromMemoryOrFallback(from);
     final name = u.calcDisplayname();
-    return name == from.localpart ? from : '$name ($from)';
+    return '${name == from.localpart ? from : '$name ($from)'} · со слов отправителя';
   }
   final n = f['name'];
   return n is String && n.isNotEmpty ? '«${n.characters.take(40)}» (не проверено)' : null;
@@ -52,7 +53,12 @@ Future<void> forwardEvents(BuildContext context, List<Event> events, Timeline? t
   final targets = await showDialog<List<Room>>(context: context, builder: (_) => const _PickRooms());
   if (targets == null || targets.isEmpty) return;
   var failed = 0;
+  var blocked = 0;
   for (final r in targets) {
+    if (Trust.instance.sendBlocked(r)) {
+      blocked++; // в чат со сменившимся ключом собеседника не пересылаем
+      continue;
+    }
     for (final e in list) {
       try {
         await r.sendEvent(_forwardContent(e, tl, r), type: e.type == EventTypes.Sticker ? EventTypes.Sticker : EventTypes.Message);
@@ -63,7 +69,7 @@ Future<void> forwardEvents(BuildContext context, List<Event> events, Timeline? t
   }
   if (context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(failed > 0 ? 'Не всё переслано — проверьте подключение' : targets.length == 1 ? 'Переслано в «${targets.first.getLocalizedDisplayname()}»' : 'Переслано в ${targets.length} чата(ов)'),
+      content: Text(blocked > 0 ? 'В $blocked чат(а) не переслано: у собеседника сменился ключ — подтвердите его в чате' : failed > 0 ? 'Не всё переслано — проверьте подключение' : targets.length == 1 ? 'Переслано в «${targets.first.getLocalizedDisplayname()}»' : 'Переслано в ${targets.length} чата(ов)'),
     ));
   }
 }

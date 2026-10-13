@@ -89,6 +89,30 @@ Future<void> main(List<String> args) async {
               const Text('Ласточка не смогла открыть хранилище', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               Text('$e', textAlign: TextAlign.center),
+              const SizedBox(height: 20),
+              // выход из тупика: локальные данные стираются, переписка загрузится с сервера после входа
+              Builder(
+                builder: (ctx) => OutlinedButton(
+                  onPressed: () async {
+                    final ok = await showDialog<bool>(
+                      context: ctx,
+                      builder: (d) => AlertDialog(
+                        title: const Text('Начать заново на этом устройстве?'),
+                        content: const Text('Локальная база Ласточки на этом устройстве будет удалена. После входа переписка загрузится с сервера; '
+                            'старые зашифрованные сообщения откроются после подтверждения входа секретной фразой или с другого устройства.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
+                          TextButton(onPressed: () => Navigator.pop(d, true), child: const Text('Удалить и выйти', style: TextStyle(color: Colors.redAccent))),
+                        ],
+                      ),
+                    );
+                    if (ok != true) return;
+                    await wipeLocalStorage();
+                    exit(0);
+                  },
+                  child: const Text('Удалить данные на этом устройстве и войти заново'),
+                ),
+              ),
             ]),
           ),
         ),
@@ -259,17 +283,21 @@ class _LastochkaAppState extends State<LastochkaApp> {
           final locked = AppLock.instance.locked.value && client.isLogged();
           final call = currentCall.value;
           return Stack(children: [
-            ExcludeFocus(excluding: locked, child: child ?? const SizedBox.shrink()),
+            // под блокировкой приложение недоступно ни клавиатуре, ни экранному диктору (TalkBack/VoiceOver)
+            ExcludeSemantics(
+              excluding: locked,
+              child: ExcludeFocus(excluding: locked, child: TickerMode(enabled: !locked, child: child ?? const SizedBox.shrink())),
+            ),
             // iPhone: в переключателе приложений вместо переписки — заставка
             if (_switcherCover.value && (screenProtect.value || AppLock.instance.enabled) && !locked)
               Positioned.fill(child: ColoredBox(color: Theme.of(context).scaffoldBackgroundColor, child: Center(child: Image.asset('assets/icon.png', width: 96)))),
-            if (CertPinning.instance.alert.value != null && !locked) Positioned.fill(child: _CertAlertScreen(CertPinning.instance.alert.value!)),
+            if (CertPinning.instance.alert.value != null && !locked) Positioned.fill(child: KeyedSubtree(key: ValueKey('${CertPinning.instance.alert.value!.host}|${CertPinning.instance.alert.value!.got}'), child: _CertAlertScreen(CertPinning.instance.alert.value!))),
             if (locked)
               Positioned.fill(
-                child: LockScreen(onForgot: () async {
+                child: BlockSemantics(child: LockScreen(onForgot: () async {
                   await logoutNow(); // экран блокировки держится, пока данные не удалены
                   await AppLock.instance.disable();
-                }),
+                })),
               ),
             if (locked && call != null && callActive.value) Positioned(left: 0, right: 0, top: 0, child: LockedCallPanel(session: call)),
           ]);
@@ -381,7 +409,7 @@ class _CertAlertScreenState extends State<_CertAlertScreen> {
                 ),
                 const SizedBox(height: 8),
                 TextButton(
-                  onPressed: () => _confirm ? CertPinning.instance.trustNew() : setState(() => _confirm = true),
+                  onPressed: () => _confirm ? CertPinning.instance.trustNew(widget.a) : setState(() => _confirm = true),
                   child: Text(_confirm ? 'Да, доверять новому сертификату' : 'Администратор подтвердил смену', style: const TextStyle(color: Colors.red)),
                 ),
               ]),

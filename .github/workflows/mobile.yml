@@ -6,7 +6,6 @@ on:
       version:
         description: 'Версия (например 0.4.0)'
         required: true
-        default: '4.0.0'
       publish:
         description: 'Опубликовать в релизах'
         type: boolean
@@ -23,6 +22,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  DEPS: ${{ inputs.deps }}
 
 defaults:
   run:
@@ -50,7 +52,7 @@ jobs:
           channel: stable
           # одна версия Flutter для всех сборок: иначе при её выходе «плывут» версии библиотек
           flutter-version: 3.47.7
-          cache: true
+          cache: ${{ inputs.deps == 'locked' }}
       - name: Версия Flutter
         run: echo "::notice title=Flutter::$(flutter --version | head -1)"
       - name: Платформенные папки
@@ -65,9 +67,9 @@ jobs:
       # библиотеки строго по зафиксированным версиям: подменённое обновление чужой библиотеки само не попадёт
       - name: Зависимости
         run: |
-          if [ "${{ inputs.deps }}" = "upgrade" ]; then
+          if [ "$DEPS" = "upgrade" ]; then
             tool/annotate.sh "pub upgrade" flutter pub upgrade
-          elif [ "${{ inputs.deps }}" = "add" ] || ! git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then
+          elif [ "$DEPS" = "add" ] || ! git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then
             tool/annotate.sh "pub get" flutter pub get
           else
             tool/annotate.sh "pub get" flutter pub get
@@ -80,28 +82,48 @@ jobs:
       # pubspec.lock сохраняет отдельное задание без чужого кода (у сборки нет прав на запись)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          retention-days: 7
           name: pubspec-lock
           path: mobile/pubspec.lock
+      # сканер скачивается, сверяется с официальной контрольной суммой и запускается одним шагом —
+      # до того, как начнёт работать сторонний код из библиотек (генератор иконок и т. п.)
+      - name: Проверка зависимостей на уязвимости
+        env:
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          curl -sSL --retry 3 -o /tmp/osv https://github.com/google/osv-scanner/releases/download/v1.9.2/osv-scanner_linux_amd64
+          echo "d6af4b67fa5de658598bd2d445efb99e90d1734b3146962418719c4350ecb74b  /tmp/osv" | sha256sum -c - || { echo "::error::Сканер уязвимостей не совпал с официальным"; exit 1; }
+          chmod +x /tmp/osv
+          set +e; /tmp/osv --format json --lockfile=pubspec.lock > /tmp/osv.json 2>/tmp/osv.err; rc=$?; set -e
+          if [ $rc -eq 0 ]; then echo "::notice title=Зависимости::Известных уязвимостей не найдено"; exit 0; fi
+          if [ $rc -ne 1 ]; then echo "::warning title=Сканер::не отработал (код $rc): $(tail -3 /tmp/osv.err | tr '\n' ' ')"; exit 0; fi
+          # найдены уязвимости: все — предупреждением; критические (CVSS 9+) останавливают выпуск
+          python3 - <<'PY'
+          import json, os
+          d = json.load(open('/tmp/osv.json'))
+          rows, crit = [], []
+          for r in d.get('results', []):
+              for p in r.get('packages', []):
+                  name = p.get('package', {}).get('name', '?')
+                  for g in p.get('groups', []):
+                      sev = g.get('max_severity') or '?'
+                      row = f"{name} {','.join(g.get('ids', []))} ({sev})"
+                      rows.append(row)
+                      try:
+                          if float(sev) >= 9.0: crit.append(row)
+                      except ValueError:
+                          pass
+          print('::warning title=Уязвимости в зависимостях::' + '; '.join(rows)[:3000])
+          if crit:
+              print('::error title=Критические уязвимости::' + '; '.join(crit)[:3000])
+              if os.environ.get('PUBLISH') == 'true':
+                  raise SystemExit(1)
+          PY
       - name: Иконки
         run: tool/annotate.sh "icons" dart run flutter_launcher_icons
       # известные уязвимости в библиотеках (база OSV) — предупреждение в сборке
       # сканер скачивается и сверяется с официальной контрольной суммой — обязательный шаг:
       # при несовпадении сборка останавливается
-      - name: Сканер уязвимостей
-        run: |
-          curl -sSL --retry 3 -o /tmp/osv https://github.com/google/osv-scanner/releases/download/v1.9.2/osv-scanner_linux_amd64
-          echo "d6af4b67fa5de658598bd2d445efb99e90d1734b3146962418719c4350ecb74b  /tmp/osv" | sha256sum -c - || { echo "::error::Сканер уязвимостей не совпал с официальным"; exit 1; }
-          chmod +x /tmp/osv
-      - name: Проверка зависимостей на уязвимости
-        continue-on-error: true
-        run: |
-          if /tmp/osv --lockfile=pubspec.lock > /tmp/osv.txt 2>&1; then
-            echo "::notice title=Зависимости::Известных уязвимостей не найдено"
-          else
-            msg=$(grep -E '\|' /tmp/osv.txt | head -40); [ -z "$msg" ] && msg=$(tail -20 /tmp/osv.txt)
-            msg="${msg//'%'/'%25'}"; msg="${msg//$'\n'/'%0A'}"
-            echo "::warning title=Уязвимости в зависимостях::$msg"
-          fi
       - name: Проверка кода
         run: tool/annotate.sh "analyze" flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Тесты
@@ -123,6 +145,7 @@ jobs:
             echo "::warning::Секрет ANDROID_KEYSTORE не задан — APK подписан временным ключом (только для проверки)"
           fi
       - name: Сборка APK
+        id: apk
         run: |
           mkdir -p ../dist
           B="--release --dart-define=APP_VERSION=$V --build-name=$V --build-number=${{ github.run_number }}"
@@ -136,8 +159,15 @@ jobs:
           tool/annotate.sh "build apk" flutter build apk $B
           cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android.apk"
           for f in ../dist/*.apk; do echo "::notice::$(basename $f) — $(( $(stat -c%s $f) / 1048576 )) МБ, $(unzip -l $f | grep -oE 'lib/[^/]+/' | sort -u | tr '\n' ' ')"; done
+      - name: Убрать ключ подписи
+        if: always()
+        run: |
+          rm -f android/app/upload.jks android/key.properties
+          (cd android 2>/dev/null && ./gradlew --stop >/dev/null 2>&1) || true
+          pkill -f GradleDaemon || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          retention-days: 7
           name: android
           path: dist/*
 
@@ -145,12 +175,14 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           # одна версия Flutter для всех сборок: иначе при её выходе «плывут» версии библиотек
           flutter-version: 3.47.7
-          cache: true
+          cache: ${{ inputs.deps == 'locked' }}
       - name: Платформенные папки
         run: |
           tool/annotate.sh "create" flutter create --no-pub --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
@@ -158,8 +190,8 @@ jobs:
           python3 tool/ci_prepare.py
       - name: Зависимости
         run: |
-          if [ "${{ inputs.deps }}" = "upgrade" ]; then tool/annotate.sh "ios pub upgrade" flutter pub upgrade
-          elif [ "${{ inputs.deps }}" = "add" ]; then tool/annotate.sh "ios pub get" flutter pub get
+          if [ "$DEPS" = "upgrade" ]; then tool/annotate.sh "ios pub upgrade" flutter pub upgrade
+          elif [ "$DEPS" = "add" ]; then tool/annotate.sh "ios pub get" flutter pub get
           elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "ios pub get" flutter pub get; git diff --exit-code --stat -- pubspec.lock || { echo "::error::pubspec.lock изменился"; exit 1; }
           else tool/annotate.sh "ios pub get" flutter pub get; fi
           dart run flutter_launcher_icons
@@ -177,6 +209,7 @@ jobs:
           zip -qry "../../dist/Lastochka-$V-iPhone-unsigned.ipa" Payload
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          retention-days: 7
           name: ios
           path: dist/*
 
@@ -184,12 +217,14 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           # одна версия Flutter для всех сборок: иначе при её выходе «плывут» версии библиотек
           flutter-version: 3.47.7
-          cache: true
+          cache: ${{ inputs.deps == 'locked' }}
       - name: Платформенные папки
         run: |
           tool/annotate.sh "create" flutter create --no-pub --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
@@ -197,8 +232,8 @@ jobs:
           python3 tool/ci_prepare.py
       - name: Зависимости
         run: |
-          if [ "${{ inputs.deps }}" = "upgrade" ]; then tool/annotate.sh "macos pub upgrade" flutter pub upgrade
-          elif [ "${{ inputs.deps }}" = "add" ]; then tool/annotate.sh "macos pub get" flutter pub get
+          if [ "$DEPS" = "upgrade" ]; then tool/annotate.sh "macos pub upgrade" flutter pub upgrade
+          elif [ "$DEPS" = "add" ]; then tool/annotate.sh "macos pub get" flutter pub get
           elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "macos pub get" flutter pub get; git diff --exit-code --stat -- pubspec.lock || { echo "::error::pubspec.lock изменился"; exit 1; }
           else tool/annotate.sh "macos pub get" flutter pub get; fi
           dart run flutter_launcher_icons
@@ -214,6 +249,7 @@ jobs:
           cp "../dist/Lastochka-$V-arm64.dmg" "../dist/Lastochka-$V-x64.dmg"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          retention-days: 7
           name: macos
           path: dist/*
 
@@ -221,12 +257,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           # одна версия Flutter для всех сборок: иначе при её выходе «плывут» версии библиотек
           flutter-version: 3.47.7
-          cache: true
+          cache: ${{ inputs.deps == 'locked' }}
       - name: Платформенные папки
         run: |
           tool/annotate.sh "create" flutter create --no-pub --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
@@ -234,8 +272,8 @@ jobs:
           python tool/ci_prepare.py
       - name: Зависимости
         run: |
-          if [ "${{ inputs.deps }}" = "upgrade" ]; then tool/annotate.sh "windows pub upgrade" flutter pub upgrade
-          elif [ "${{ inputs.deps }}" = "add" ]; then tool/annotate.sh "windows pub get" flutter pub get
+          if [ "$DEPS" = "upgrade" ]; then tool/annotate.sh "windows pub upgrade" flutter pub upgrade
+          elif [ "$DEPS" = "add" ]; then tool/annotate.sh "windows pub get" flutter pub get
           elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "windows pub get" flutter pub get; git diff --exit-code --stat -- pubspec.lock || { echo "::error::pubspec.lock изменился"; exit 1; }
           else tool/annotate.sh "windows pub get" flutter pub get; fi
           dart run flutter_launcher_icons
@@ -255,6 +293,7 @@ jobs:
           ls -la ../dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          retention-days: 7
           name: windows
           path: dist/*
 
@@ -274,14 +313,18 @@ jobs:
           name: pubspec-lock
           path: lockdl
       - name: Сохранить pubspec.lock
+        env:
+          REF: ${{ github.ref_name }}
         run: |
+          # только библиотеки с официального pub.dev
+          if grep -E '^\s+url:' lockdl/pubspec.lock | grep -v '"https://pub.dev"'; then echo "::error::в pubspec.lock чужой источник"; exit 1; fi
           cp lockdl/pubspec.lock mobile/pubspec.lock
           if [ -n "$(git status --porcelain -- mobile/pubspec.lock)" ]; then
             git config user.name "alexbel692-art"
             git config user.email "alexbel692-art@users.noreply.github.com"
             git add mobile/pubspec.lock
             git commit -m "Зафиксированы версии библиотек (pubspec.lock)"
-            git push origin HEAD:${{ github.ref_name }} || echo "::warning::Не удалось сохранить pubspec.lock"
+            git push origin "HEAD:refs/heads/$REF" || echo "::warning::Не удалось сохранить pubspec.lock"
           fi
 
   # Проверка на эмуляторе Android 7 (как Samsung A5): ставится, запускается, не падает, показывает вход
@@ -319,11 +362,13 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
+          retention-days: 7
           name: android7-check
           path: smoke/
 
   release:
-    if: ${{ always() && inputs.publish && needs.android.result == 'success' && needs.emulator.result == 'success' }}
+    # все платформы обязательны: неполный выпуск не публикуется
+    if: ${{ inputs.publish && !cancelled() && !failure() }}
     needs: [android, ios, macos, windows, emulator]
     runs-on: ubuntu-latest
     permissions:
@@ -340,13 +385,21 @@ jobs:
       - name: Отбор файлов для выпуска
         env:
           V: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::Неверный номер версии: $V"; exit 1; }
+          # такой выпуск уже есть или версия не новее последней — не публикуем
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$V" >/dev/null 2>&1; then echo "::error::Выпуск v$V уже существует"; exit 1; fi
+          cur=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" --jq '.[]|select(.draft|not)|.tag_name|ltrimstr("v")' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          if [ -n "$cur" ] && [ "$(printf '%s\n%s\n' "$cur" "$V" | sort -V | tail -1)" != "$V" ]; then echo "::error::$V не новее $cur"; exit 1; fi
           mkdir -p dist
           take() {
             src="art/$1"; shift
             for n in "$@"; do
-              [ -f "$src/$n" ] || continue
+              # каждый файл обязателен, обычный файл (не ссылка), разумного размера
+              [ -f "$src/$n" ] && [ ! -L "$src/$n" ] || { echo "::error::$1: нет файла $n"; exit 1; }
+              sz=$(stat -c%s "$src/$n")
+              [ "$sz" -gt 1000000 ] && [ "$sz" -lt 2000000000 ] || { echo "::error::$n: странный размер $sz"; exit 1; }
               [ -e "dist/$n" ] && { echo "::error::Файл $n пришёл дважды"; exit 1; }
               cp "$src/$n" dist/
             done
@@ -355,6 +408,7 @@ jobs:
           take ios "Lastochka-$V-iPhone-unsigned.ipa"
           take macos "Lastochka-$V-arm64.dmg" "Lastochka-$V-x64.dmg"
           take windows "Lastochka-Setup-$V.exe" "Lastochka-$V-Windows-portable.zip"
+          [ "$(ls dist | wc -l)" -eq 8 ] || { echo "::error::ожидалось 8 файлов"; ls -la dist; exit 1; }
           ls -la dist
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

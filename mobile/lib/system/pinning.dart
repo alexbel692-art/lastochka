@@ -55,9 +55,10 @@ class CertPinning {
   }
 
   /// Пользователь уверен, что смена сертификата законна (сервер перешёл к другому центру).
-  Future<void> trustNew() async {
+  /// [shown] — то предупреждение, которое человек прочитал (не подменённое пришедшим позже).
+  Future<void> trustNew([CertAlert? shown]) async {
     final a = alert.value;
-    if (a == null) return;
+    if (a == null || (shown != null && (shown.host != a.host || shown.got != a.got))) return;
     _pins[a.host] = a.got;
     await _p?.setString('tls.pins', jsonEncode(_pins));
     alert.value = null;

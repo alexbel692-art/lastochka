@@ -30,7 +30,10 @@ class Trust {
   void Function()? onOwnIdentityReset;
 
   /// Ключи сбрасываем сами на этом устройстве («Забыли секретную фразу?») — не пугать уведомлением.
-  bool selfReset = false;
+  /// Действует 10 минут: позже настоящий чужой сброс снова вызовет тревогу.
+  DateTime? _selfResetAt;
+  bool get selfReset => _selfResetAt != null && DateTime.now().difference(_selfResetAt!).inMinutes < 10;
+  set selfReset(bool v) => _selfResetAt = v ? DateTime.now() : null;
 
   SharedPreferences? _p;
   Map<String, String> _pins = {};
@@ -170,6 +173,10 @@ class Trust {
   }
 
   /// Кто в этом чате сменил ключ личности.
+  /// В чате есть собеседник со сменившимся ключом, которого вы ещё не приняли, — отправлять туда нельзя
+  /// ни одним способом (ветка, пересылка, отложенные, повтор неотправленных).
+  bool sendBlocked(Room room) => room.encrypted && changedIn(room).isNotEmpty;
+
   List<String> changedIn(Room room) {
     final c = changed.value;
     if (c.isEmpty) return const [];

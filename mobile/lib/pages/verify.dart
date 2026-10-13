@@ -95,6 +95,7 @@ class _VerifyGateState extends State<VerifyGate> {
 
   /// «Забыли секретную фразу?» — новая фраза вместо старой, со сбросом ключей (после двух предупреждений).
   bool _resetting = false;
+  bool _partial = false; // сброс начался, но не закончился — продолжить можно только сбросом
 
   /// Есть ли другое подтверждённое устройство, которое заходило недавно. Тогда сброс не нужен (и опасен:
   /// так поступил бы и злоумышленник, узнавший пароль) — подтверждать нужно с того устройства.
@@ -108,7 +109,12 @@ class _VerifyGateState extends State<VerifyGate> {
         if (d.deviceId == client.deviceID) continue;
         final seen = d.lastSeenTs;
         final recent = seen != null && now - seen < const Duration(days: 14).inMilliseconds;
-        if (recent && keys[d.deviceId]?.verified == true) return d.displayName?.isNotEmpty == true ? d.displayName! : d.deviceId;
+        // устройство подписано текущим ключом аккаунта (с нового неподтверждённого устройства
+        // обычное «verified» всегда ложно — проверяем саму цепочку подписей)
+        final k = keys[d.deviceId];
+        if (recent && k != null && k.hasValidSignatureChain(verifiedByTheirMasterKey: true)) {
+          return d.displayName?.isNotEmpty == true ? d.displayName! : d.deviceId;
+        }
       }
     } catch (e) {
       Diag.err('Проверка устройств перед сбросом', e);
@@ -128,8 +134,7 @@ class _VerifyGateState extends State<VerifyGate> {
           content: Text(
             'У вас есть подтверждённое устройство «$other», которое недавно было в сети. '
             'Нажмите «С другого устройства» и подтвердите вход там — секретная фраза не понадобится, переписка сохранится.\n\n'
-            'Сброс ключей доступен, только если других подтверждённых устройств нет или они не заходили 14 дней. '
-            'Так злоумышленник, узнавший пароль, не сможет сбросить ваши ключи, пока вы пользуетесь Ласточкой.',
+            'Сброс ключей в Ласточке доступен, только если других подтверждённых устройств нет или они не заходили 14 дней.',
           ),
           actions: [FilledButton(onPressed: () => Navigator.pop(d), child: const Text('Понятно'))],
         ),
@@ -253,7 +258,8 @@ class _VerifyGateState extends State<VerifyGate> {
       _resetting = false;
       setState(() {});
     } catch (e) {
-      if (wipe) Trust.instance.selfReset = false;
+      // после частичного сброса старая фраза может уже не подойти — вариант «я вспомнил» убираем
+      if (wipe) _partial = true;
       Diag.err('Настройка защиты${wipe ? ' (сброс)' : ''}', e);
       setState(() => _setupError = 'Не удалось настроить защиту. Проверьте подключение и попробуйте ещё раз.');
     } finally {
@@ -312,8 +318,10 @@ class _VerifyGateState extends State<VerifyGate> {
                   child: _setupRunning ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)) : const Text('Сохранить фразу'),
                 ),
                 const SizedBox(height: 14),
-                if (_resetting)
+                if (_resetting && !_partial)
                   TextButton(onPressed: _setupRunning ? null : () => setState(() => _resetting = false), child: const Text('Отмена — я вспомнил фразу'))
+                else if (_resetting)
+                  const SizedBox.shrink()
                 else
                   TextButton(onPressed: () => logout(context), child: const Text('Выйти из аккаунта', style: TextStyle(color: Colors.redAccent))),
               ]),
