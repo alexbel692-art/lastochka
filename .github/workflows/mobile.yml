@@ -85,13 +85,16 @@ jobs:
       - name: Иконки
         run: tool/annotate.sh "icons" dart run flutter_launcher_icons
       # известные уязвимости в библиотеках (база OSV) — предупреждение в сборке
+      # сканер скачивается и сверяется с официальной контрольной суммой — обязательный шаг:
+      # при несовпадении сборка останавливается
+      - name: Сканер уязвимостей
+        run: |
+          curl -sSL --retry 3 -o /tmp/osv https://github.com/google/osv-scanner/releases/download/v1.9.2/osv-scanner_linux_amd64
+          echo "d6af4b67fa5de658598bd2d445efb99e90d1734b3146962418719c4350ecb74b  /tmp/osv" | sha256sum -c - || { echo "::error::Сканер уязвимостей не совпал с официальным"; exit 1; }
+          chmod +x /tmp/osv
       - name: Проверка зависимостей на уязвимости
         continue-on-error: true
         run: |
-          curl -sSL -o /tmp/osv https://github.com/google/osv-scanner/releases/download/v1.9.2/osv-scanner_linux_amd64
-          # проверка, что скачан именно официальный сканер (контрольная сумма из выпуска v1.9.2)
-          echo "d6af4b67fa5de658598bd2d445efb99e90d1734b3146962418719c4350ecb74b  /tmp/osv" | sha256sum -c - || { echo "::error::Сканер уязвимостей подменён"; exit 1; }
-          chmod +x /tmp/osv
           if /tmp/osv --lockfile=pubspec.lock > /tmp/osv.txt 2>&1; then
             echo "::notice title=Зависимости::Известных уязвимостей не найдено"
           else

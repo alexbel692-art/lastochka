@@ -220,7 +220,8 @@ class VideoFramePlugin : public flutter::Plugin {
         auto p = st->pending.find(id);
         if (p != st->pending.end()) p->second.value = std::move(v);
       }
-      PostMessage(top, kDoneMessage, static_cast<WPARAM>(id), 0);
+      // окно могли закрыть, пока разбиралось видео, — тогда сообщать некому
+      if (IsWindow(top)) PostMessage(top, kDoneMessage, static_cast<WPARAM>(id), 0);
     }).detach();
   }
 

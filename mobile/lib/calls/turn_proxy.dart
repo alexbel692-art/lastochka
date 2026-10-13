@@ -235,12 +235,26 @@ class TurnProxy {
 
   Future<void> _handle(Socket sock) async {
     // только с этого устройства и не больше 8 соединений сразу (звонку хватает 1–2)
-    if (_open >= 8 || !await _own(sock.remoteAddress)) {
+    // место занимаем сразу (до асинхронной проверки адреса), чтобы одновременные подключения не обошли предел
+    if (_open >= 8) {
       sock.destroy();
       return;
     }
     _open++;
-    sock.done.whenComplete(() => _open--).ignore();
+    var released = false;
+    void release() {
+      if (!released) {
+        released = true;
+        _open--;
+      }
+    }
+
+    sock.done.whenComplete(release).ignore();
+    if (!await _own(sock.remoteAddress)) {
+      sock.destroy();
+      release();
+      return;
+    }
     Socket up;
     try {
       up = await Socket.connect(_ip!, _port, timeout: const Duration(seconds: 8));

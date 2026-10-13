@@ -67,12 +67,20 @@ Future<String> _databaseKey(bool dbExists) async {
   }
   final rnd = Random.secure();
   key = base64Url.encode(List<int>.generate(32, (_) => rnd.nextInt(256))).replaceAll('=', '');
-  try {
-    await _secure.write(key: _dbKeyName, value: key);
-  } catch (e) {
-    await fallback.writeAsString(key, flush: true);
+  // новый ключ — только в защищённое хранилище системы (Keystore / Keychain / DPAPI), открытым файлом
+  // он больше не сохраняется. Старые установки с файлом ключа читаются и переносятся выше.
+  Object? writeError;
+  for (var i = 0; i < 3; i++) {
+    try {
+      await _secure.write(key: _dbKeyName, value: key);
+      if (await _secure.read(key: _dbKeyName) == key) return key;
+    } catch (e) {
+      writeError = e;
+    }
+    await Future.delayed(const Duration(milliseconds: 500));
   }
-  return key;
+  throw StateError('Не удалось сохранить ключ базы в защищённом хранилище системы${writeError == null ? '' : ' ($writeError)'}. '
+      'Перезапустите Ласточку; если не поможет — перезагрузите устройство.');
 }
 
 Future<DatabaseApi> _openDatabase() async {
