@@ -171,11 +171,11 @@ class VideoFramePlugin : public flutter::Plugin {
 
   ~VideoFramePlugin() override {
     registrar_->UnregisterTopLevelWindowProcDelegate(delegate_);
-    // модуль закрывается вместе с движком Flutter: незавершённые запросы отвечать уже некому —
-    // отпускаем их, не вызывая ответ в закрытый движок (иначе обращение к освобождённой памяти)
+    // модуль закрывается вместе с движком Flutter: незавершённые запросы отвечать уже некому. Объекты ответа
+    // удаляем (не утекают): их деструктор в библиотеке Flutter ничего не отправляет в движок — только пишет
+    // предупреждение, поэтому это безопасно и после закрытия движка
     std::lock_guard<std::mutex> lock(st_->mu);
     st_->closed = true;
-    for (auto& kv : st_->pending) (void)kv.second.result.release();
     st_->pending.clear();
   }
 
@@ -229,15 +229,11 @@ class VideoFramePlugin : public flutter::Plugin {
         auto p = st->pending.find(id);
         if (p != st->pending.end()) p->second.value = std::move(v);
       }
-      // окно могли закрыть, пока разбиралось видео, — тогда сообщать некому: запись о запросе убираем,
-      // а сам ответ отпускаем без вызова (движок, которому он предназначен, уже закрыт)
+      // окно могли закрыть, пока разбиралось видео, — тогда сообщать некому: запрос убираем вместе с объектом
+      // ответа (его удаление безопасно и ничего не шлёт в закрытый движок — см. деструктор модуля)
       if (!IsWindow(top) || !PostMessage(top, kDoneMessage, static_cast<WPARAM>(id), 0)) {
         std::lock_guard<std::mutex> lock(st->mu);
-        auto p = st->pending.find(id);
-        if (p != st->pending.end()) {
-          (void)p->second.result.release();
-          st->pending.erase(p);
-        }
+        st->pending.erase(id);
       }
     }).detach();
   }

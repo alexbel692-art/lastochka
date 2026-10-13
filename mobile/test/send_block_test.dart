@@ -230,6 +230,9 @@ void main() {
     await c.abortSync();
     expect(c.getRoomById(roomId)?.encrypted, isTrue, reason: 'тестовый чат должен быть защищённым');
     await Trust.instance.init();
+    // в этих тестах нет модуля шифрования (нет vodozemac) — разрешаем работу без него;
+    // как ведёт себя приложение без шифрования, проверяет отдельный тест ниже
+    Trust.instance.debugAllowNoEncryption = true;
     c.userDeviceKeys[me] = keysOf(me, 'MY-MASTER');
     setBobKey('K1');
     await Trust.instance.checkNow(); // первая встреча — ключ K1 запомнен
@@ -377,6 +380,18 @@ void main() {
     expect(requests.any((r) => r.contains('/keys/query')), isTrue, reason: 'попытались догрузить ключи');
     setBobKey('KEVE');
     await expectSent('ключи загружены');
+  });
+
+  test('модуль шифрования не работает — в защищённый чат ничего не уходит, замена сеанса не считается успешной', () async {
+    Trust.instance.debugAllowNoEncryption = false;
+    try {
+      await expectAllBlocked('шифрование не работает');
+      expect(await Trust.instance.debugRotateRoom(roomId), isFalse);
+      expect(Trust.instance.rotationPending, isEmpty, reason: 'отметки не было — нечего и снимать');
+    } finally {
+      Trust.instance.debugAllowNoEncryption = true;
+    }
+    await expectSent('шифрование снова работает');
   });
 
   test('после принятия новая смена снова запрещает отправку', () async {

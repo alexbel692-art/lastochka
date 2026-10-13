@@ -424,7 +424,16 @@ Future<void> showVerificationDialog(BuildContext context, KeyVerification req, {
   // подтверждённый ключ, отправка снова разрешена
   final uid = req.userId;
   if (uid != client.userID && req.state == KeyVerificationState.done) {
-    await Trust.instance.acceptVerified(uid, startKey);
+    final r = await Trust.instance.acceptVerified(uid, startKey);
+    final msg = switch (r) {
+      AcceptResult.done => null,
+      AcceptResult.rotating => 'Собеседник подтверждён. Шифрование чата обновляется — отправка станет доступна автоматически',
+      // подтверждён не тот ключ (сменился во время проверки) или состояние не удалось сохранить
+      AcceptResult.refused => Trust.instance.changedNow.containsKey(uid)
+          ? 'Подтверждение не принято: ключ собеседника изменился во время проверки или его не удалось сохранить. Подтвердите ещё раз'
+          : null,
+    };
+    if (msg != null && context.mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(msg)));
   }
 }
 

@@ -32,6 +32,9 @@ void ensureCanSend(Room room) {
   if (Trust.instance.checkFailed) {
     throw const SendBlocked('Не удалось проверить ключи собеседников — отправка в защищённые чаты приостановлена. Попробуйте через минуту');
   }
+  if (!client.encryptionEnabled && !Trust.instance.debugAllowNoEncryption) {
+    throw const SendBlocked('Шифрование на этом устройстве не работает — отправка в защищённые чаты запрещена. Перезапустите Ласточку');
+  }
   if (Trust.instance.rotationPending.contains(room.id)) {
     throw const SendBlocked('Шифрование этого чата обновляется — отправка возобновится автоматически, попробуйте через минуту');
   }
@@ -129,12 +132,18 @@ class Trust {
     });
   }
 
+  /// Записать состояние доверия. Проверяется результат КАЖДОЙ записи (хранилище может вернуть false
+  /// без исключения) — не записалось хоть что-то, значит не записалось ничего.
   Future<void> _save() async {
-    await _p!.setString('trust.pins', jsonEncode(_pins));
-    await _p!.setString('trust.pinVerified', jsonEncode(_pinVerified));
-    await _p!.setString('trust.changed', jsonEncode(_changed));
-    await _p!.setStringList('trust.mySessions', _mySessions.toList());
-    await _p!.setStringList('trust.newLogins', newLogins.value);
+    final p = _p!;
+    final ok = [
+      await p.setString('trust.pins', jsonEncode(_pins)),
+      await p.setString('trust.pinVerified', jsonEncode(_pinVerified)),
+      await p.setString('trust.changed', jsonEncode(_changed)),
+      await p.setStringList('trust.mySessions', _mySessions.toList()),
+      await p.setStringList('trust.newLogins', newLogins.value),
+    ];
+    if (ok.contains(false)) throw StateError('хранилище не подтвердило запись');
   }
 
   /// Проверить ключи сейчас — синхронно, без ожиданий. Вызывается перед каждой отправкой и раздачей
@@ -243,6 +252,10 @@ class Trust {
       // чат неизвестен — не можем проверить ни шифрование, ни участников: не отправляем (fail-closed)
       throw MatrixException.fromJson({'errcode': 'M_FORBIDDEN', 'error': 'Ласточка: неизвестный чат — отправка не проверена'});
     }
+    if (room.encrypted && !client.encryptionEnabled && !debugAllowNoEncryption) {
+      // без работающего модуля шифрования модуль Matrix отправил бы сообщение в защищённый чат ОТКРЫТЫМ текстом
+      throw MatrixException.fromJson({'errcode': 'M_FORBIDDEN', 'error': 'Ласточка: шифрование не работает — отправка в защищённый чат запрещена'});
+    }
     if (room.encrypted) await _ensureKeysKnown(room);
     if (_rotatePending.contains(roomId)) {
       throw MatrixException.fromJson({'errcode': 'M_FORBIDDEN', 'error': 'Ласточка: сеанс шифрования не обновлён'});
@@ -324,6 +337,15 @@ class Trust {
   final Set<String> _rotatePending = {};
   Set<String> get rotationPending => Set.unmodifiable(_rotatePending);
 
+  /// Отметка о незавершённых заменах точно лежит на диске. Пока нет — ни одна замена не начинается
+  /// (чаты при этом заблокированы в памяти), запись повторяется перед каждой попыткой.
+  bool _pendingSaved = true;
+
+  /// Только для тестов: разрешить работу без модуля шифрования (в обычных тестах его нет).
+  /// В приложении без шифрования отправка в защищённые чаты запрещена, а замена сеанса не «успешна».
+  @visibleForTesting
+  bool debugAllowNoEncryption = false;
+
   /// Только для тестов: смоделировать сбой замены сеанса шифрования / записи на диск.
   @visibleForTesting
   bool debugFailRotation = false;
@@ -346,11 +368,11 @@ class Trust {
     try {
       if (debugFailStorage) throw StateError('хранилище: тестовый сбой');
       final p = _p;
-      if (p == null) return false;
-      return await p.setStringList('trust.rotatePending', _rotatePending.toList());
+      if (p == null) return _pendingSaved = false;
+      return _pendingSaved = await p.setStringList('trust.rotatePending', _rotatePending.toList());
     } catch (e, s) {
       Logs().e('[Ласточка] Не удалось сохранить отметку о замене сеансов шифрования', e, s);
-      return false;
+      return _pendingSaved = false;
     }
   }
 
@@ -364,10 +386,10 @@ class Trust {
     if (add.isNotEmpty) {
       _rotatePending.addAll(add);
       if (!await _persistPending()) {
-        if (!keepIfNotSaved) {
-          _rotatePending.removeAll(add);
-          return null;
-        }
+        // защитное состояние не записано — замену НЕ начинаем; с keepIfNotSaved чаты остаются
+        // заблокированными в памяти, запись и замена повторятся после следующей синхронизации
+        if (!keepIfNotSaved) _rotatePending.removeAll(add);
+        return null;
       }
     }
     var ok = true;
@@ -381,7 +403,12 @@ class Trust {
     final enc = client.encryption;
     try {
       if (debugFailRotation) throw StateError('замена сеанса: тестовый сбой');
-      if (enc != null) {
+      // отметка о замене должна лежать на диске до начала замены
+      if (!_pendingSaved && !await _persistPending()) throw StateError('отметка о замене не записана');
+      if (enc == null || !client.encryptionEnabled) {
+        // модуль шифрования не работает — подтвердить замену нечем: это не успех
+        if (!debugAllowNoEncryption) throw StateError('модуль шифрования недоступен');
+      } else {
         await enc.keyManager.clearOrUseOutboundGroupSession(roomId, wipe: true);
         // проверяем результат, а не только отсутствие ошибки
         if (enc.keyManager.getOutboundGroupSession(roomId)?.outboundGroupSession != null) {
@@ -396,6 +423,9 @@ class Trust {
       return false;
     }
   }
+
+  @visibleForTesting
+  Future<bool> debugRotateRoom(String roomId) => _rotateRoom(roomId);
 
   Future<void> _retryRotations() async {
     for (final rid in _rotatePending.toList()) {
@@ -553,6 +583,7 @@ class Trust {
   /// ни одним способом (ветка, пересылка, отложенные, повтор неотправленных).
   bool sendBlocked(Room room) {
     if (!room.encrypted) return false;
+    if (!client.encryptionEnabled && !debugAllowNoEncryption) return true;
     refresh();
     if (_checkFailed || _rotatePending.contains(room.id)) return true;
     final c = _changed;
