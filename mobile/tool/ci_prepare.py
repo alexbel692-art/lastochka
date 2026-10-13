@@ -41,6 +41,14 @@ def manifest(s):
 '''
     if '.SyncService' not in s:
         s = s.replace('</application>', comps + '    </application>', 1)
+    # окно Ласточки — всегда одно: уведомление о звонке, нажатие на сообщение, обновление открывают
+    # уже существующее окно (onNewIntent), а не второе. Два окна на один движок Flutter роняли
+    # приложение после звонка («FlutterEngine … attached to by another activity»)
+    s, n = re.subn(r'android:launchMode="[^"]*"', 'android:launchMode="singleTask"', s, count=1)
+    if n == 0:
+        s = s.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n            android:launchMode="singleTask"', 1)
+    if 'android:launchMode="singleTask"' not in s:
+        raise SystemExit('не удалось задать launchMode="singleTask" для окна Ласточки')
     return s
 edit('android/app/src/main/AndroidManifest.xml', manifest)
 

@@ -1,20 +1,25 @@
 package app.lastochka.lastochka
 
-import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterFragmentActivity
-import io.flutter.embedding.engine.FlutterEngine
 
 // FragmentActivity — нужна для входа по отпечатку/лицу (код-пароль)
 class MainActivity : FlutterFragmentActivity() {
-    // окно подключается к уже работающей Ласточке, а при закрытии окна она продолжает работать
-    override fun provideFlutterEngine(context: Context): FlutterEngine = MainApplication.engine(application)
+    // окно подключается к уже работающей Ласточке (общий движок из кэша), а при закрытии окна она
+    // продолжает работать. Движок именно «из кэша», а не «свой»: тогда, если система всё же создаст
+    // второе окно, первое спокойно отдаст ему движок, а не уронит приложение
+    override fun getCachedEngineId(): String {
+        MainApplication.engine(application)
+        return MainApplication.ENGINE_ID
+    }
     override fun shouldDestroyEngineWithHost(): Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // движок должен быть в кэше до того, как окно создаст свою часть Flutter
+        MainApplication.engine(application)
         super.onCreate(savedInstanceState)
         current = this
         applyCallMode()

@@ -86,6 +86,7 @@ class MainApplication : Application() {
 
     companion object {
         private const val ID = "lastochka"
+        const val ENGINE_ID = ID
 
         fun engine(app: Application): FlutterEngine {
             FlutterEngineCache.getInstance().get(ID)?.let { cached ->
