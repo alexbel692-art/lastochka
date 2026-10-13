@@ -344,19 +344,22 @@ void main() {
   test('ключ принят, но замена сеансов не удалась — чаты заблокированы, отметка на диске, после восстановления — работает', () async {
     final shown = Trust.instance.currentKey(bob);
     expect(shown, 'KEVE');
+    // замена сеансов «не работает» всё время, пока проверяем блокировку (повторные попытки тоже неудачны)
     Trust.instance.debugFailRotation = true;
     try {
       expect(await Trust.instance.acceptChange(bob, shownKey: shown), AcceptResult.rotating);
+      expect(Trust.instance.changedNow, isEmpty, reason: 'ключ принят');
+      expect(Trust.instance.rotationPending, containsAll([roomId, groupId]));
+      // отметка уже на диске — после аварийного перезапуска чаты останутся заблокированными
+      final saved = (await SharedPreferences.getInstance()).getStringList('trust.rotatePending') ?? [];
+      expect(saved, containsAll([roomId, groupId]));
+      await expectAllBlocked('сеанс шифрования ещё не заменён');
+      expect(Trust.instance.allowedDevices(allDevices, EventTypes.RoomKey, roomKey(roomId)).map((d) => d.userId), [me]);
+      await Trust.instance.checkNow(); // повтор при синхронизации — снова неудачно
+      expect(Trust.instance.rotationPending, containsAll([roomId, groupId]));
     } finally {
       Trust.instance.debugFailRotation = false;
     }
-    expect(Trust.instance.changedNow, isEmpty, reason: 'ключ принят');
-    expect(Trust.instance.rotationPending, containsAll([roomId, groupId]));
-    // отметка уже на диске — после аварийного перезапуска чаты останутся заблокированными
-    final saved = (await SharedPreferences.getInstance()).getStringList('trust.rotatePending') ?? [];
-    expect(saved, containsAll([roomId, groupId]));
-    await expectAllBlocked('сеанс шифрования ещё не заменён');
-    expect(Trust.instance.allowedDevices(allDevices, EventTypes.RoomKey, roomKey(roomId)).map((d) => d.userId), [me]);
     // шифрование снова работает — замена повторяется при синхронизации
     await Trust.instance.checkNow();
     expect(Trust.instance.rotationPending, isEmpty);
