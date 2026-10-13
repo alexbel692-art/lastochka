@@ -1,6 +1,5 @@
 // Каждый показ картинки из байтов (Image.memory / MemoryImage) должен декодировать её уменьшенной
 // (cacheWidth / cacheHeight / ResizeImage) — иначе большая картинка распакуется в память целиком.
-// Исключение — системные миниатюры галереи (они уже маленькие): помечены комментарием «миниатюра».
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -25,8 +24,7 @@ void main() {
         }
         final args = src.substring(m.start, end);
         final line = src.substring(0, m.start).split('\n').length;
-        final ctx = src.split('\n').sublist((line - 4).clamp(0, 1 << 30), line).join('\n');
-        if (!RegExp(r'cacheWidth|cacheHeight|ResizeImage').hasMatch(args) && !ctx.contains('миниатюра')) {
+        if (!RegExp(r'cacheWidth|cacheHeight|ResizeImage').hasMatch(args)) {
           problems.add('${f.path}:$line');
         }
       }
