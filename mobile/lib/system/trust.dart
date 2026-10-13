@@ -32,6 +32,9 @@ void ensureCanSend(Room room) {
   if (Trust.instance.checkFailed) {
     throw const SendBlocked('Не удалось проверить ключи собеседников — отправка в защищённые чаты приостановлена. Попробуйте через минуту');
   }
+  if (Trust.instance.rotationPending.contains(room.id)) {
+    throw const SendBlocked('Шифрование этого чата обновляется — отправка возобновится автоматически, попробуйте через минуту');
+  }
   throw const SendBlocked();
 }
 
@@ -102,6 +105,7 @@ class Trust {
     _mySessions = (my ?? []).toSet();
     newLogins.value = _p!.getStringList('trust.newLogins') ?? [];
     _blockedByUs.addAll(_p!.getStringList('trust.blockedDevs') ?? const []);
+    _rotatePending.addAll(_p!.getStringList('trust.rotatePending') ?? const []);
     // рубежи в самом клиенте Matrix: проверка сразу после загрузки ключей, перед отправкой любого
     // сообщения на сервер и перед отправкой ключей шифрования устройствам
     afterDeviceKeysUpdate = checkNow;
@@ -141,6 +145,7 @@ class Trust {
   /// После каждой синхронизации и сразу после загрузки ключей устройств (LastochkaClient).
   Future<void> checkNow() async {
     refresh();
+    await _retryRotations();
     await _releaseOldBlocks();
   }
 
@@ -195,6 +200,8 @@ class Trust {
     refresh();
     final me = client.userID;
     if (_checkFailed) return devices.where((d) => d.userId == me).toList();
+    final rk = message['room_id'];
+    if (rk is String && _rotatePending.contains(rk)) return devices.where((d) => d.userId == me).toList();
     final c = _changed;
     if (c.isEmpty) return devices;
     bool exempt(DeviceKeys d) {
@@ -226,6 +233,9 @@ class Trust {
       // чат неизвестен — не можем проверить ни шифрование, ни участников: не отправляем (fail-closed)
       throw MatrixException.fromJson({'errcode': 'M_FORBIDDEN', 'error': 'Ласточка: неизвестный чат — отправка не проверена'});
     }
+    if (_rotatePending.contains(roomId)) {
+      throw MatrixException.fromJson({'errcode': 'M_FORBIDDEN', 'error': 'Ласточка: сеанс шифрования не обновлён'});
+    }
     if (!sendBlocked(room)) return;
     if (_verifyingRoom(room) && isVerificationEvent(what.type, what.msgtype)) return;
     throw MatrixException.fromJson({
@@ -244,14 +254,18 @@ class Trust {
   }
 
   /// Сравнение эмодзи с собеседником: на это время его устройства получают ключи личного чата.
-  /// Если он так и не подтверждён — сеансы шифрования с ним заменяются новыми, чтобы устройства,
-  /// получившие ключи во время проверки, не прочли дальнейшую переписку.
+  /// Проверка начинается только после успешной замены сеансов шифрования с ним (иначе — исключение
+  /// [SendBlocked], проверка не начинается). Если он так и не подтверждён — сеансы заменяются снова, чтобы
+  /// устройства, получившие ключи во время проверки, не прочли дальнейшую переписку; пока замена не удалась,
+  /// отправка в эти чаты запрещена, а замена повторяется после каждой синхронизации.
   Future<T> whileVerifying<T>(String userId, Future<T> Function() run) async {
     if (userId == client.userID) return run();
     final first = !_verifying.containsKey(userId);
+    // сначала новый сеанс шифрования, и только потом — исключение для проверки
+    if (first && _changed.containsKey(userId) && !await _rotateWith(userId)) {
+      throw const SendBlocked('Не удалось обновить шифрование чата — сравнение эмодзи не начато. Попробуйте ещё раз через минуту');
+    }
     _verifying.update(userId, (n) => n + 1, ifAbsent: () => 1);
-    // проверка начинается с нового сеанса шифрования: прежние сообщения личного чата им не прочитать
-    if (first && _changed.containsKey(userId)) await _rotateWith(userId);
     try {
       return await run();
     } finally {
@@ -265,20 +279,55 @@ class Trust {
     }
   }
 
+  /// Чаты, где замена сеанса шифрования ещё не удалась: туда ничего не отправляется, их ключи никому,
+  /// кроме своих устройств, не раздаются; замена повторяется после каждой синхронизации.
+  final Set<String> _rotatePending = {};
+  Set<String> get rotationPending => Set.unmodifiable(_rotatePending);
+
+  /// Только для тестов: смоделировать сбой замены сеанса шифрования.
+  @visibleForTesting
+  bool debugFailRotation = false;
+
   /// Заменить исходящие сеансы шифрования во всех защищённых чатах с этим собеседником.
-  Future<void> _rotateWith(String userId) async {
+  /// true — во всех чатах замена подтверждена (старого исходящего сеанса больше нет).
+  Future<bool> _rotateWith(String userId) async {
     final enc = client.encryption;
-    if (enc == null) return;
+    if (enc == null) return true; // шифрования нет — и сеансов, которые надо менять
+    var ok = true;
     for (final r in client.rooms) {
       if (!r.encrypted) continue;
       final has = r.directChatMatrixID == userId ||
           r.getParticipants([Membership.join, Membership.invite]).any((u) => u.id == userId);
       if (!has) continue;
-      try {
-        await enc.keyManager.clearOrUseOutboundGroupSession(r.id, wipe: true);
-      } catch (e, s) {
-        Logs().e('[Ласточка] Не удалось заменить сеанс шифрования', e, s);
+      if (!await _rotateRoom(r.id)) ok = false;
+    }
+    return ok;
+  }
+
+  Future<bool> _rotateRoom(String roomId) async {
+    final enc = client.encryption;
+    if (enc == null) return true;
+    try {
+      if (debugFailRotation) throw StateError('замена сеанса: тестовый сбой');
+      await enc.keyManager.clearOrUseOutboundGroupSession(roomId, wipe: true);
+      // проверяем результат, а не только отсутствие ошибки
+      if (enc.keyManager.getOutboundGroupSession(roomId)?.outboundGroupSession != null) {
+        throw StateError('старый сеанс шифрования остался');
       }
+      if (_rotatePending.remove(roomId)) await _p?.setStringList('trust.rotatePending', _rotatePending.toList());
+      return true;
+    } catch (e, s) {
+      if (_rotatePending.add(roomId)) {
+        Logs().e('[Ласточка] Не удалось заменить сеанс шифрования — отправка в чат приостановлена', e, s);
+        await _p?.setStringList('trust.rotatePending', _rotatePending.toList());
+      }
+      return false;
+    }
+  }
+
+  Future<void> _retryRotations() async {
+    for (final rid in _rotatePending.toList()) {
+      await _rotateRoom(rid);
     }
   }
 
@@ -393,7 +442,7 @@ class Trust {
   bool sendBlocked(Room room) {
     if (!room.encrypted) return false;
     refresh();
-    if (_checkFailed) return true;
+    if (_checkFailed || _rotatePending.contains(room.id)) return true;
     final c = _changed;
     if (c.isEmpty) return false;
     // и загруженные участники, и все, кого сервер называет участниками в сводке чата

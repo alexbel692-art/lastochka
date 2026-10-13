@@ -405,14 +405,21 @@ Future<void> showIncomingVerification(BuildContext context, KeyVerification req)
 Future<void> showVerificationDialog(BuildContext context, KeyVerification req, {String? startedKey}) async {
   // ключ личности собеседника — фиксируем ДО сравнения: принять потом можно только его
   final startKey = startedKey ?? Trust.instance.currentKey(req.userId);
-  await Trust.instance.whileVerifying(
-    req.userId,
-    () => showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _VerificationDialog(req),
-    ),
-  );
+  try {
+    await Trust.instance.whileVerifying(
+      req.userId,
+      () => showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _VerificationDialog(req),
+      ),
+    );
+  } on SendBlocked catch (e) {
+    // шифрование чата не удалось обновить — проверку не начинаем (и отменяем запрос собеседника)
+    unawaited(req.cancel('m.user').catchError((_) {}));
+    if (context.mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(e.toString())));
+    return;
+  }
   // собеседник подтверждён сравнением эмодзи (и по нашему запросу, и по его) — принимаем именно
   // подтверждённый ключ, отправка снова разрешена
   final uid = req.userId;
@@ -576,9 +583,10 @@ Future<void> verifyUser(BuildContext context, String userId) async {
       if (!context.mounted) return;
       await showVerificationDialog(context, req, startedKey: startKey);
     });
-  } catch (_) {
+  } catch (e) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось начать подтверждение — собеседник должен быть в сети')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is SendBlocked ? e.toString() : 'Не удалось начать подтверждение — собеседник должен быть в сети')));
     }
   }
 }

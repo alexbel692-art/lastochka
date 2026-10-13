@@ -369,6 +369,24 @@ void main() {
     expect(bobSaw, isNot(contains('не должно уйти')));
   });
 
+  test('SEC-04: замена сеанса шифрования не удалась — сравнение не начинается, чат ждёт замены', () async {
+    Trust.instance.debugFailRotation = true;
+    var ran = false;
+    try {
+      await expectLater(Trust.instance.whileVerifying(bob, () async => ran = true), throwsA(isA<SendBlocked>()));
+    } finally {
+      Trust.instance.debugFailRotation = false;
+    }
+    expect(ran, isFalse, reason: 'проверка не началась');
+    expect(Trust.instance.rotationPending, contains(dm));
+    final bobDevs = my.userDeviceKeys[bob]!.deviceKeys.values.toList();
+    expect(Trust.instance.allowedDevices(bobDevs, EventTypes.RoomKey, {'room_id': dm}), isEmpty);
+    expect(() => ensureCanSend(myRoom(dm)), throwsA(isA<SendBlocked>()));
+    // шифрование снова работает — замена повторяется при следующей синхронизации
+    await Trust.instance.checkNow();
+    expect(Trust.instance.rotationPending, isEmpty);
+  });
+
   test('сравнение эмодзи проходит целиком; обычные сообщения в это время не уходят; ключ группы — тоже', () async {
     // Боб после сброса заново настроил свою подпись (как сделает любой клиент): его новый ключ личности
     // подтверждён на его стороне — тогда он включает его в сверку, и мы подтверждаем именно ключ личности
