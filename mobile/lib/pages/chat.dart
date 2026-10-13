@@ -277,7 +277,13 @@ class _ChatPageState extends State<ChatPage> {
     if (typing.isNotEmpty) {
       return room.isDirectChat ? 'печатает…' : '${typing.map((u) => u.calcDisplayname()).take(2).join(', ')} ${typing.length > 1 ? 'печатают' : 'печатает'}…';
     }
-    if (room.isDirectChat) return room.encrypted ? 'защищённый чат' : 'личный чат';
+    if (room.isDirectChat) {
+      if (!room.encrypted) return 'личный чат';
+      // ключ собеседника запомнен при первой встрече, но подлинность не проверена сравнением эмодзи —
+      // так и пишем, чтобы не путать с подтверждённым собеседником (проверить — в профиле чата)
+      final other = room.directChatMatrixID;
+      return other != null && Trust.instance.userVerified(other) ? 'защищённый чат · собеседник подтверждён' : 'защищённый чат · собеседник не подтверждён';
+    }
     final n = room.summary.mJoinedMemberCount ?? room.getParticipants([Membership.join]).length;
     return '$n ${_plural(n, 'участник', 'участника', 'участников')}';
   }

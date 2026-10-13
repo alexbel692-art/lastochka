@@ -61,6 +61,7 @@ Future<void> forwardEvents(BuildContext context, List<Event> events, Timeline? t
     }
     for (final e in list) {
       try {
+        ensureCanSend(r);
         await r.sendEvent(_forwardContent(e, tl, r), type: e.type == EventTypes.Sticker ? EventTypes.Sticker : EventTypes.Message);
       } catch (_) {
         failed++;

@@ -55,10 +55,23 @@ Future<String> _databaseKey(bool dbExists) async {
     key = (await fallback.readAsString()).trim();
     // ключ лежал в файле (защищённое хранилище было недоступно) — переносим туда и удаляем файл
     if (key.isNotEmpty) {
+      var moved = false;
       try {
         await _secure.write(key: _dbKeyName, value: key);
-        if (await _secure.read(key: _dbKeyName) == key) await fallback.delete();
+        if (await _secure.read(key: _dbKeyName) == key) {
+          await fallback.delete();
+          moved = true;
+        }
       } catch (_) {}
+      if (!moved) {
+        // перенести пока не удалось — не молча: запись в отчёт, файл доступен только владельцу, попытка при каждом запуске
+        Logs().w('[Ласточка] ключ базы всё ещё в файле: защищённое хранилище системы недоступно');
+        if (!Platform.isWindows) {
+          try {
+            await Process.run('chmod', ['600', fallback.path]);
+          } catch (_) {}
+        }
+      }
     }
   }
   if (key != null && key.isNotEmpty) return key;

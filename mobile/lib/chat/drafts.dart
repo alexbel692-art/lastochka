@@ -107,6 +107,7 @@ class Scheduler {
       if (room != null && room.membership == Membership.join) {
         // у собеседника сменился ключ — отложенное ждёт, пока вы не подтвердите новый ключ
         if (Trust.instance.sendBlocked(room)) return;
+        ensureCanSend(room);
         final id = await room.sendEvent({...textContent(s.text, mentions: s.mentions), ...ttlExtra(room)});
         if (id == null) throw StateError('не отправлено');
       }

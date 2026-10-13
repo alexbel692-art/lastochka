@@ -259,6 +259,7 @@ class _SettingsPageState extends State<SettingsPage> {
     var ok = 0;
     for (final r in rooms) {
       try {
+        ensureCanSend(r);
         await r.sendFileEvent(MatrixFile(bytes: Uint8List.fromList(utf8.encode(text)), name: 'Ласточка-отчёт-$stamp.txt', mimeType: 'text/plain'));
         ok++;
       } catch (e) {

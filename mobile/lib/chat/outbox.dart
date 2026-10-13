@@ -52,6 +52,7 @@ Future<void> retryFailed() async {
         if (failed.isEmpty) _rooms.remove(id);
         for (final e in failed) {
           try {
+            ensureCanSend(e.room);
             await e.sendAgain();
           } on FileNoLongerInCacheException {
             // файл уже не в кэше — переотправить нельзя, остаётся с красным значком

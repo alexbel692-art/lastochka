@@ -54,8 +54,8 @@ if os.path.isdir('android'):
     shutil.copy('tool/android/ic_notification.xml', 'android/app/src/main/res/drawable/ic_notification.xml')
 
 gradle = 'android/app/build.gradle.kts'
-# ключ подписи кладётся на диск позже, прямо перед сборкой APK — о нём сообщает переменная окружения
-signed = os.path.exists('android/key.properties') or os.environ.get('ANDROID_SIGNED') == 'true'
+# в CI APK подписывается отдельным этапом (android-sign); здесь — только если ключ положили для локальной сборки
+signed = os.path.exists('android/key.properties')
 def gradle_fn(s):
     s = s.replace('minSdk = flutter.minSdkVersion', 'minSdk = 23')
     # уведомлениям нужна поддержка новых функций Java на старых Android

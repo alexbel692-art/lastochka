@@ -3,9 +3,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:cryptography/cryptography.dart' as cg;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
@@ -182,6 +184,18 @@ class AppLock {
     }
   }
 
+  /// Современная медленная функция для код-пароля: PBKDF2-HMAC-SHA256, 150 000 повторений
+  /// (в отдельном потоке, экран не замирает). Перебор украденного файла настроек становится в сотни раз дороже.
+  static Future<String> _kdf(String pin, String salt) => Isolate.run(() async {
+        final k = await cg.Pbkdf2(macAlgorithm: cg.Hmac.sha256(), iterations: 150000, bits: 256)
+            .deriveKeyFromPassword(password: pin, nonce: utf8.encode('lastochka-lock|$salt'));
+        return base64.encode(await k.extractBytes());
+      });
+  static const _p2 = 'pbkdf2-150k';
+  bool get _mainNew => _p?.getString('lock.kdf') == _p2;
+  bool get _duressNew => _p?.getString('lock.duressKdf') == _p2;
+
+  /// Прежняя схема (до 4.19.1) — только чтобы проверить старый код и сразу перевести его на новую.
   static String _hash(String pin, String salt) {
     List<int> d = utf8.encode('$salt:$pin');
     for (var i = 0; i < 5000; i++) {
@@ -193,14 +207,15 @@ class AppLock {
   Future<void> setPin(String pin) async {
     final salt = base64.encode(List.generate(16, (_) => Random.secure().nextInt(256)));
     await _p!.setString('lock.salt', salt);
-    await _p!.setString('lock.hash', _hash(pin, salt));
+    await _p!.setString('lock.hash', await _kdf(pin, salt));
+    await _p!.setString('lock.kdf', _p2);
     await _p!.setInt('lock.len', pin.length);
     await _p!.remove('lock.duress'); // код экстренного удаления привязан к прежней «соли» — задаётся заново
     unawaited(_syncRecents());
   }
 
   Future<void> disable() async {
-    for (final k in ['lock.hash', 'lock.salt', 'lock.duress', 'lock.fails', 'lock.blockedUntil', 'lock.wipe']) {
+    for (final k in ['lock.hash', 'lock.salt', 'lock.kdf', 'lock.duress', 'lock.duressKdf', 'lock.fails', 'lock.blockedUntil', 'lock.wipe']) {
       await _p!.remove(k);
     }
     _blockBase = 0;
@@ -212,9 +227,11 @@ class AppLock {
   /// Код для экстренного удаления: при его вводе Ласточка тихо стирает все данные на устройстве.
   Future<bool> setDuress(String pin) async {
     final salt = _p!.getString('lock.salt') ?? '';
-    final h = _hash(pin, salt);
-    if (h == _p!.getString('lock.hash')) return false; // совпадает с обычным кодом
+    final h = await _kdf(pin, salt);
+    final asMain = _mainNew ? h : _hash(pin, salt);
+    if (asMain == _p!.getString('lock.hash')) return false; // совпадает с обычным кодом
     await _p!.setString('lock.duress', h);
+    await _p!.setString('lock.duressKdf', _p2);
     return true;
   }
 
@@ -227,12 +244,19 @@ class AppLock {
   /// а с включённым удалением после $wipeAfterFails ошибок подряд данные стираются.
   Future<bool> check(String pin, {bool allowDuress = true}) async {
     if (isBlocked) return false;
-    final h = _hash(pin, _p!.getString('lock.salt') ?? '');
-    if (allowDuress && duressEnabled && h == _p!.getString('lock.duress')) {
+    final salt = _p!.getString('lock.salt') ?? '';
+    final hNew = await _kdf(pin, salt);
+    final hOld = _hash(pin, salt);
+    if (allowDuress && duressEnabled && (_duressNew ? hNew : hOld) == _p!.getString('lock.duress')) {
       await onWipe?.call();
       return false;
     }
-    final ok = h == _p!.getString('lock.hash');
+    final ok = (_mainNew ? hNew : hOld) == _p!.getString('lock.hash');
+    if (ok && !_mainNew) {
+      // старый код верный — сразу переводим его на новую, медленную схему
+      await _p!.setString('lock.hash', hNew);
+      await _p!.setString('lock.kdf', _p2);
+    }
     if (ok) {
       await _p!.remove('lock.fails');
       _blockBase = 0;

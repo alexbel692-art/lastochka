@@ -13,6 +13,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
 
+/// Отправка запрещена: у собеседника сменился ключ, а вы его ещё не приняли.
+class SendBlocked implements Exception {
+  @override
+  String toString() => 'У собеседника сменился ключ — подтвердите его в чате, прежде чем отправлять';
+}
+
+/// Единая проверка перед ЛЮБОЙ отправкой в чат (текст, файлы, голосовые, стикеры, реакции, опросы,
+/// пересылка, повтор). Тест send_guard_test следит, чтобы ни одна отправка не обходила её.
+void ensureCanSend(Room room) {
+  if (Trust.instance.sendBlocked(room)) throw SendBlocked();
+}
+
 class Trust {
   Trust._();
   static final instance = Trust._();

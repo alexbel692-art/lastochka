@@ -25,6 +25,7 @@ import 'perf.dart' show remoteSession;
 import '../calls/voip.dart' show callActive;
 
 const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '0.0.0');
+const _maxUpdate = 400 * 1024 * 1024;
 const _repo = 'alexbel692-art/lastochka';
 // публичный ключ Ed25519 (последние 32 байта SPKI «MCowBQYDK2VwAyEA…»)
 const _publicKeyB64 = 'MCowBQYDK2VwAyEAt/kw3nU6I8XI9xvrdyCFpvd+w8gjfAALDSDl5BRRQgE=';
@@ -335,14 +336,25 @@ class Updater {
       final resp = await _http.send(req);
       if (resp.statusCode != 200) throw 'Не удалось скачать обновление (${resp.statusCode})';
       final total = resp.contentLength ?? u.size;
+      // предел по размеру: не больше заявленного в выпуске (с запасом) и не больше 400 МБ —
+      // подменённый или бесконечный ответ не забьёт диск
+      final limit = u.size > 0 ? (u.size + 1024 * 1024 < _maxUpdate ? u.size + 1024 * 1024 : _maxUpdate) : _maxUpdate;
+      if (resp.contentLength != null && resp.contentLength! > limit) throw 'Файл обновления больше ожидаемого — загрузка отменена';
       final out = target.openWrite();
       final digestSink = _DigestSink();
       final sha = hash.sha256.startChunkedConversion(digestSink);
       var got = 0;
       await for (final chunk in resp.stream) {
+        got += chunk.length;
+        if (got > limit) {
+          await out.close();
+          try {
+            await target.delete();
+          } catch (_) {}
+          throw 'Файл обновления больше ожидаемого — загрузка отменена';
+        }
         out.add(chunk);
         sha.add(chunk);
-        got += chunk.length;
         if (total > 0) progress.value = got / total;
       }
       await out.close();

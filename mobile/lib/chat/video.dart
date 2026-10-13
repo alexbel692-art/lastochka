@@ -14,6 +14,7 @@ import 'package:matrix/matrix.dart';
 import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
+import '../system/trust.dart';
 import '../system/lru.dart';
 import '../system/media_clean.dart';
 import '../system/image_guard.dart';
@@ -191,6 +192,7 @@ Future<String?> sendVideoFile(Room room, String path, String name, {Event? inRep
     final base = name.contains('.') ? name.substring(0, name.lastIndexOf('.')) : 'Видео';
     // превью-кадр, чтобы у собеседника видео выглядело как в Telegram, а не как файл
     final frame = await videoFrame(path);
+    ensureCanSend(room);
     await room.sendFileEvent(
       MatrixVideoFile(
         bytes: clean,

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../system/trust.dart';
 import '../main.dart';
 import '../system/diag.dart';
 import '../system/notify.dart';
@@ -124,6 +125,7 @@ Future<void> createPoll(BuildContext context, Room room) async {
   }
   final endsAt = duration == Duration.zero ? null : DateTime.now().add(duration);
   final fallback = '$question\n${[for (var i = 0; i < opts.length; i++) '${i + 1}. ${opts[i]}'].join('\n')}';
+  ensureCanSend(room);
   final id = await room.sendEvent({
     if (endsAt != null) pollEndsKey: endsAt.millisecondsSinceEpoch,
     pollStart: {
@@ -325,12 +327,15 @@ Event? pollStateOf(Event start, Timeline tl) {
   return p == null ? null : pollState(start, tl, p).ended;
 }
 
-Future<void> endPoll(Room room, Event start) => room.sendEvent({
+Future<void> endPoll(Room room, Event start) {
+  ensureCanSend(room);
+  return room.sendEvent({
       'm.relates_to': {'rel_type': 'm.reference', 'event_id': start.eventId},
       pollEnd: <String, Object?>{},
       'org.matrix.msc1767.text': 'Опрос завершён',
       'body': 'Опрос завершён',
     }, type: pollEnd);
+}
 
 String _until(DateTime t) {
   final now = DateTime.now();
@@ -371,6 +376,7 @@ class PollView extends StatelessWidget {
     _myPickAt[event.eventId] = DateTime.now();
     pollChanged.value++;
     try {
+      ensureCanSend(event.room);
       final sent = await event.room.sendEvent({
         'm.relates_to': {'rel_type': 'm.reference', 'event_id': event.eventId},
         pollResponse: {'answers': next.toList()},

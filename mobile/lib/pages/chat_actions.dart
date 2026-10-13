@@ -18,6 +18,7 @@ extension _ChatActions on _ChatPageState {
       if (!mounted) return;
       if (!await _confirmSend('Отправить картинку из буфера обмена?')) return;
       final clean = await cleanPhoto(img, 'Картинка.png');
+      ensureCanSend(room);
       await room.sendFileEvent(MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height), extraContent: ttlExtra(room));
       _toBottom();
     } catch (_) {}
@@ -52,13 +53,16 @@ extension _ChatActions on _ChatPageState {
         final lower = name.toLowerCase();
         if (RegExp(r'\.(jpe?g|png|webp)$').hasMatch(lower)) {
           final clean = await cleanPhoto(bytes, name);
+          ensureCanSend(room);
           await room.sendFileEvent(MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height), inReplyTo: reply, extraContent: ttlExtra(room));
         } else if (RegExp(r'\.(mp4|mov|m4v)$').hasMatch(lower)) {
           // видео — без места съёмки; не получилось очистить — не отправляем
           final clean = await cleanVideo(bytes);
           if (clean == null) throw StateError('video');
+          ensureCanSend(room);
           await room.sendFileEvent(MatrixFile.fromMimeType(bytes: clean, name: name), inReplyTo: reply, extraContent: ttlExtra(room));
         } else {
+          ensureCanSend(room);
           await room.sendFileEvent(MatrixFile.fromMimeType(bytes: bytes, name: name), inReplyTo: reply, extraContent: ttlExtra(room));
         }
       } catch (_) {
@@ -95,8 +99,10 @@ extension _ChatActions on _ChatPageState {
       if (edit != null) {
         // срок жизни переносим и на правку — иначе текст правки остался бы навсегда
         final exp = edit.content[expiresKey];
+        ensureCanSend(room);
         await room.sendEvent({...content, if (exp != null) expiresKey: exp}, editEventId: edit.eventId);
       } else {
+        ensureCanSend(room);
         await room.sendEvent({...content, ...ttlExtra(room)}, inReplyTo: reply);
       }
     } catch (_) {
@@ -309,6 +315,7 @@ extension _ChatActions on _ChatPageState {
             failed++;
             continue;
           }
+          ensureCanSend(room);
           await room.sendFileEvent(
             MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height),
             inReplyTo: r,
@@ -395,6 +402,7 @@ extension _ChatActions on _ChatPageState {
         if (f == null) return;
         final bytes = await f.readAsBytes();
         _set(() => _replyTo = null);
+        ensureCanSend(room);
         await room.sendFileEvent(MatrixFile.fromMimeType(bytes: bytes, name: f.name), inReplyTo: reply, extraContent: ttlExtra(room));
       }
       _toBottom();

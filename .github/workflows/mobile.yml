@@ -59,8 +59,6 @@ jobs:
           tool/annotate.sh "create" flutter create --no-pub --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
           rm -f test/widget_test.dart
       - name: Настройка проекта
-        env:
-          ANDROID_SIGNED: ${{ secrets.ANDROID_KEYSTORE != '' }}
         run: python3 tool/ci_prepare.py
       # библиотеки строго по зафиксированным версиям: подменённое обновление чужой библиотеки само не попадёт
       - name: Зависимости
@@ -126,22 +124,8 @@ jobs:
         run: tool/annotate.sh "analyze" flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Тесты
         run: tool/annotate.sh "tests" flutter test
-      # ключ подписи Android появляется на диске только перед самой сборкой APK — сторонний код
-      # (библиотеки, генератор иконок, проверки) его не застаёт
-      - name: Ключ подписи
-        env:
-          KS: ${{ secrets.ANDROID_KEYSTORE }}
-          KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          PUBLISH: ${{ inputs.publish }}
-        run: |
-          if [ -n "$KS" ]; then
-            echo "$KS" | base64 -d > android/app/upload.jks
-            printf 'storeFile=upload.jks\nstorePassword=%s\nkeyAlias=lastochka\nkeyPassword=%s\n' "$KP" "$KP" > android/key.properties
-          elif [ "$PUBLISH" = "true" ]; then
-            echo "::error::Секрет ANDROID_KEYSTORE не задан — выпуск с временным ключом запрещён"; exit 1
-          else
-            echo "::warning::Секрет ANDROID_KEYSTORE не задан — APK подписан временным ключом (только для проверки)"
-          fi
+      # APK собирается БЕЗ ключа подписи (временной подписью сборки) — настоящую подпись ставит отдельный
+      # этап android-sign на чистой машине, где не работает ни код сборки, ни сторонние библиотеки
       - name: Сборка APK
         id: apk
         run: |
@@ -157,17 +141,57 @@ jobs:
           tool/annotate.sh "build apk" flutter build apk $B
           cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android.apk"
           for f in ../dist/*.apk; do echo "::notice::$(basename $f) — $(( $(stat -c%s $f) / 1048576 )) МБ, $(unzip -l $f | grep -oE 'lib/[^/]+/' | sort -u | tr '\n' ' ')"; done
-      - name: Убрать ключ подписи
-        if: always()
-        run: |
-          rm -f android/app/upload.jks android/key.properties
-          (cd android 2>/dev/null && ./gradlew --stop >/dev/null 2>&1) || true
-          pkill -f GradleDaemon || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           retention-days: 7
           name: android
           path: dist/*
+
+  # подпись APK настоящим ключом: только apksigner из Android SDK, без кода проекта и библиотек
+  android-sign:
+    needs: android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android
+          path: in
+      - name: Подпись APK
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE }}
+          KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p out
+          if [ -z "$KS" ]; then
+            [ "$PUBLISH" = "true" ] && { echo "::error::Секрет ANDROID_KEYSTORE не задан — выпуск невозможен"; exit 1; }
+            echo "::warning::Ключ не задан — APK остаются с временной подписью (только для проверки)"
+            cp in/*.apk out/; exit 0
+          fi
+          AS="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          printf '%s' "$KS" | base64 -d > "$RUNNER_TEMP/k.jks"
+          for f in in/*.apk; do
+            "$AS" sign --ks "$RUNNER_TEMP/k.jks" --ks-pass env:KP --ks-key-alias lastochka --key-pass env:KP --out "out/$(basename "$f")" "$f"
+          done
+          rm -f "$RUNNER_TEMP/k.jks"
+          # подпись — именно нашим ключом (отпечаток сертификата)
+          for f in out/*.apk; do
+            "$AS" verify --print-certs "$f" | grep -qi 'SHA-256 digest: 7994c098efa34a2d' || { echo "::error::$f подписан не тем ключом"; exit 1; }
+          done
+          rm -f out/*.idsig
+          ls -la out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          retention-days: 7
+          name: android-signed
+          path: out/*
 
   ios:
     runs-on: macos-latest
@@ -367,7 +391,7 @@ jobs:
   release:
     # все платформы обязательны: неполный выпуск не публикуется
     if: ${{ inputs.publish && !cancelled() && !failure() }}
-    needs: [android, ios, macos, windows, emulator]
+    needs: [android, android-sign, ios, macos, windows, emulator]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -402,7 +426,7 @@ jobs:
               cp "$src/$n" dist/
             done
           }
-          take android "Lastochka-$V-Android-arm64.apk" "Lastochka-$V-Android-arm.apk" "Lastochka-$V-Android.apk"
+          take android-signed "Lastochka-$V-Android-arm64.apk" "Lastochka-$V-Android-arm.apk" "Lastochka-$V-Android.apk"
           take ios "Lastochka-$V-iPhone-unsigned.ipa"
           take macos "Lastochka-$V-arm64.dmg" "Lastochka-$V-x64.dmg"
           take windows "Lastochka-Setup-$V.exe" "Lastochka-$V-Windows-portable.zip"

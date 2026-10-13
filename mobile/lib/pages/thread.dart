@@ -100,6 +100,7 @@ class _ThreadPageState extends State<ThreadPage> {
     setState(() => _sending = true);
     final last = _sorted.lastOrNull;
     try {
+      ensureCanSend(room);
       await room.sendTextEvent(t, threadRootEventId: widget.root.eventId, threadLastEventId: last?.eventId ?? widget.root.eventId);
       _text.clear();
     } catch (e) {

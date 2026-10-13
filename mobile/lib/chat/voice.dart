@@ -10,6 +10,7 @@ import 'package:matrix/matrix.dart';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 
+import '../system/trust.dart';
 import '../system/privacy.dart';
 import '../system/diag.dart';
 
@@ -124,6 +125,7 @@ class VoiceRecorder {
 Future<void> sendVoice(Room room, File f, int durationMs, List<int> waveform, {Event? inReplyTo, Map<String, Object> extra = const {}}) async {
   final bytes = await f.readAsBytes();
   final wav = f.path.toLowerCase().endsWith('.wav');
+  ensureCanSend(room);
   await room.sendFileEvent(
     MatrixAudioFile(bytes: bytes, name: 'Голосовое сообщение.${wav ? 'wav' : 'm4a'}', mimeType: wav ? 'audio/wav' : 'audio/mp4', duration: durationMs),
     inReplyTo: inReplyTo,

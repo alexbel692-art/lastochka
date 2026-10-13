@@ -13,6 +13,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../system/trust.dart';
 import '../main.dart';
 import 'autodelete.dart';
 import '../system/diag.dart';
@@ -106,6 +107,7 @@ Future<Uri> _builtinMxc(StickerImg s) async {
 
 Future<void> sendSticker(Room room, StickerImg s, {Event? inReplyTo}) async {
   final url = s.url ?? await _builtinMxc(s);
+  ensureCanSend(room);
   await room.sendEvent({'body': s.body, 'url': url.toString(), 'info': {...s.info}, ...ttlExtra(room)}, type: EventTypes.Sticker, inReplyTo: inReplyTo);
 }
 

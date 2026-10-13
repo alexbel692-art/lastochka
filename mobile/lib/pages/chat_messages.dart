@@ -45,6 +45,7 @@ extension _ChatMessages on _ChatPageState {
           await r.redactEvent();
         }
       } else {
+        ensureCanSend(room);
         await room.sendReaction(e.eventId, key);
       }
     } catch (_) {
@@ -363,7 +364,10 @@ extension _ChatMessages on _ChatPageState {
       ),
     );
     try {
-      if (a == 'again') await e.sendAgain();
+      if (a == 'again') {
+        ensureCanSend(e.room);
+        await e.sendAgain();
+      }
       if (a == 'drop') await e.cancelSend();
     } on FileNoLongerInCacheException {
       _toast('Файла уже нет в памяти — отправьте его заново');
