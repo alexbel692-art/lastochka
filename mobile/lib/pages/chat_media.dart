@@ -106,8 +106,10 @@ class _ImageState extends State<_Image> {
     final decodeW = (maxW * dpr).ceil().clamp(64, 1600);
     // размер указывает отправитель: если не указан — тоже не грузим сами
     // стикер тоже может оказаться огромным файлом — свыше 3 МБ только по нажатию
+    // настройка «Показ фото и видео» (как в Element): в этом чате медиа сами не загружаются
+    final hiddenByPolicy = !sticker && !MediaPolicy.showIn(event.room, senderId: event.senderId);
     final big = !_manualLoaded.contains(event.eventId) &&
-        (sticker ? size > 3 * 1024 * 1024 : (!event.hasThumbnail && (size <= 0 || size > _autoLoadLimit)));
+        (hiddenByPolicy || (sticker ? size > 3 * 1024 * 1024 : (!event.hasThumbnail && (size <= 0 || size > _autoLoadLimit))));
     Widget frame(Widget child) => box != null
         ? SizedBox(width: box!.width, height: box!.height, child: child)
         : SizedBox(width: maxW, child: AspectRatio(aspectRatio: sticker ? 1 : ratio.clamp(0.5, 2.5), child: child));
@@ -132,8 +134,8 @@ class _ImageState extends State<_Image> {
                     color: Colors.black12,
                     alignment: Alignment.center,
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      const Icon(Icons.download_outlined, size: 32),
-                      Text(size > 0 ? '${(size / 1048576).toStringAsFixed(0)} МБ — нажмите, чтобы загрузить' : 'Нажмите, чтобы загрузить', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12.5)),
+                      Icon(hiddenByPolicy ? Icons.visibility_off_outlined : Icons.download_outlined, size: 32),
+                      Text(hiddenByPolicy ? 'Фото скрыто — нажмите, чтобы показать' : size > 0 ? '${(size / 1048576).toStringAsFixed(0)} МБ — нажмите, чтобы загрузить' : 'Нажмите, чтобы загрузить', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12.5)),
                     ]),
                   )
                 : FutureBuilder<Uint8List?>(

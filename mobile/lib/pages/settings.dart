@@ -25,6 +25,7 @@ import 'storage.dart';
 import '../system/pinning.dart';
 import '../system/clipboard.dart';
 import 'sessions.dart';
+import '../system/media_policy.dart';
 import '../system/privacy.dart';
 import '../system/trust.dart';
 import '../widgets/avatar.dart';
@@ -130,6 +131,71 @@ class _SettingsPageState extends State<SettingsPage> {
         value: value,
         onChanged: onChanged,
       );
+
+  Future<void> _mediaPolicy() async {
+    final v = await showDialog<String>(
+      context: context,
+      builder: (d) => SimpleDialog(
+        title: const Text('Показ фото и видео'),
+        children: [
+          for (final (k, t, sub) in const [
+            ('on', 'Сразу во всех чатах', ''),
+            ('private', 'Только в закрытых чатах', 'В открытых группах — по нажатию'),
+            ('off', 'Только по нажатию', 'Ничего не загружается само'),
+          ])
+            RadioListTile<String>(
+              value: k,
+              groupValue: MediaPolicy.previews,
+              title: Text(t),
+              subtitle: sub.isEmpty ? null : Text(sub),
+              onChanged: (x) => Navigator.pop(d, x),
+            ),
+        ],
+      ),
+    );
+    if (v == null) return;
+    try {
+      await MediaPolicy.set(previews: v);
+    } catch (_) {}
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _blocked() async {
+    await showDialog<void>(
+      context: context,
+      builder: (d) => StatefulBuilder(
+        builder: (d, set) {
+          final list = client.ignoredUsers;
+          return AlertDialog(
+            title: const Text('Заблокированные'),
+            content: SizedBox(
+              width: 380,
+              child: list.isEmpty
+                  ? const Text('Никого не заблокировано. Заблокировать можно из меню сообщения.')
+                  : ListView(shrinkWrap: true, children: [
+                      for (final id in list)
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(id),
+                          trailing: TextButton(
+                            onPressed: () async {
+                              try {
+                                await client.unignoreUser(id);
+                              } catch (_) {}
+                              set(() {});
+                            },
+                            child: const Text('Разблокировать'),
+                          ),
+                        ),
+                    ]),
+            ),
+            actions: [TextButton(onPressed: () => Navigator.pop(d), child: const Text('Готово'))],
+          );
+        },
+      ),
+    );
+    if (mounted) setState(() {});
+  }
 
   Widget _header(String t) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 18, 16, 4),
@@ -301,6 +367,14 @@ class _SettingsPageState extends State<SettingsPage> {
           await setScreenProtect(v);
           setState(() {});
         }),
+        _row(Icons.image_outlined, 'Показ фото и видео',
+            sub: switch (MediaPolicy.previews) { 'off' => 'Только по нажатию', 'private' => 'Сразу — в закрытых чатах, в открытых группах — по нажатию', _ => 'Сразу во всех чатах' },
+            onTap: _mediaPolicy),
+        _switch(Icons.face_retouching_off_outlined, 'Аватары в приглашениях', 'Показывать фото тех, кто вас приглашает (общая настройка с Element)', MediaPolicy.inviteAvatars, (v) async {
+          await MediaPolicy.set(inviteAvatars: v);
+          if (mounted) setState(() {});
+        }),
+        _row(Icons.block, 'Заблокированные', sub: client.ignoredUsers.isEmpty ? 'Никого' : '${client.ignoredUsers.length}', onTap: _blocked),
         _switch(Icons.how_to_reg_outlined, 'Принимать личные чаты автоматически', 'От коллег с вашего сервера — без нажатия «Вступить»', _pref('invites.autoAccept'), (v) => _set('invites.autoAccept', v)),
         _row(Icons.data_usage, 'Хранилище', sub: 'Сколько места занято, очистка кэша', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StoragePage()))),
         _header('Оформление'),

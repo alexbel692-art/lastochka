@@ -14,6 +14,9 @@ void _autoLoadKey(Event e) {
     Diag.err('Ключ из резервной копии', err);
   });
 }
+/// Сообщения с неподтверждённых устройств, которые вы решили показать (до перезапуска).
+final _revealedUnverified = ValueNotifier<Set<String>>({});
+
 class _Bubble extends StatelessWidget {
   final Event event;
   final Timeline timeline;
@@ -228,6 +231,31 @@ class _Bubble extends StatelessWidget {
       );
     }
 
+    // сообщение с устройства, которое собеседник не подтвердил (его мог добавить кто-то, узнавший пароль) —
+    // скрыто, пока вы сами не нажмёте «Показать»; так же поступает Element
+    final untrustedDevice = warn != null && (warn.startsWith('Отправлено с устройства, которое владелец') || warn.startsWith('Ключ устройства не совпадает'));
+    if (untrustedDevice) {
+      final shown = content;
+      content = ValueListenableBuilder<Set<String>>(
+        valueListenable: _revealedUnverified,
+        builder: (context, set, _) => set.contains(event.eventId)
+            ? shown
+            : Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.gpp_bad_outlined, color: Colors.redAccent, size: 22),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                    Text('Скрыто: отправлено с неподтверждённого устройства', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: mine ? Bubbles.outText(context) : null)),
+                    TextButton(
+                      style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact, minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      onPressed: () => _revealedUnverified.value = {..._revealedUnverified.value, event.eventId},
+                      child: const Text('Показать'),
+                    ),
+                  ]),
+                ),
+              ]),
+      );
+    }
     final replyId = event.content.tryGetMap<String, Object?>('m.relates_to')?.tryGetMap<String, Object?>('m.in_reply_to')?.tryGet<String>('event_id');
     final maxW = min(paneWidth(context) * (avatarSpace ? 0.74 : 0.8), 520.0);
     final bareMedia = isSticker || (isRound(e) && !event.redacted); // стикер и «кружок» без пузыря, как в Telegram

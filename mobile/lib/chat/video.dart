@@ -17,6 +17,7 @@ import 'package:video_player/video_player.dart';
 import '../system/lru.dart';
 import '../system/media_clean.dart';
 import '../system/image_guard.dart';
+import '../system/media_policy.dart';
 import '../system/privacy.dart';
 import 'autodelete.dart';
 import 'voice.dart' show fmtDur;
@@ -293,7 +294,7 @@ class VideoPreview extends StatelessWidget {
                 decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF2A3440), Color(0xFF151A20)])),
               ),
               FutureBuilder<Uint8List?>(
-                future: _preview(event),
+                future: MediaPolicy.showIn(event.room, senderId: event.senderId) ? _preview(event) : null,
                 builder: (_, s) => s.data == null
                     ? const SizedBox.shrink()
                     : Image.memory(s.data!, fit: BoxFit.cover, gaplessPlayback: true, cacheWidth: decodeW, errorBuilder: (_, __, ___) => const SizedBox.shrink()),

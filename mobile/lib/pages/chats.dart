@@ -16,6 +16,7 @@ import 'people.dart';
 import 'qr.dart';
 import '../chat/formatting.dart';
 import '../chat/polls.dart';
+import '../system/media_policy.dart';
 import '../system/perf.dart';
 import '../widgets/avatar.dart';
 import '../widgets/login_banner.dart';
@@ -741,7 +742,10 @@ class _ChatsPageState extends State<ChatsPage> {
                       shape: _wide ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)) : null,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       minVerticalPadding: 6,
-                      leading: saved ? const SavedAvatar() : Avatar(mxc: r.avatar, name: name, size: 54),
+                      // приглашение от незнакомца: аватар не загружаем, если так настроено (как в Element)
+                      leading: saved
+                          ? const SavedAvatar()
+                          : Avatar(mxc: r.membership == Membership.invite && !MediaPolicy.inviteAvatars ? null : r.avatar, name: name, size: 54),
                       title: Row(children: [
                         if (r.encrypted && r.isDirectChat) Padding(padding: const EdgeInsets.only(right: 3), child: Icon(Icons.lock, size: 14, color: Colors.green.shade600)),
                         Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16.5))),

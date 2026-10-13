@@ -143,6 +143,10 @@ extension _ChatMessages on _ChatPageState {
             ListTile(leading: const Icon(Icons.download_rounded), title: Text(saveMediaLabel), onTap: () => Navigator.pop(c, 'save')),
           if (isImg && !e.redacted) ListTile(leading: const Icon(Icons.emoji_emotions_outlined), title: const Text('В мои стикеры'), onTap: () => Navigator.pop(c, 'sticker')),
           if (disp.hasAttachment && !isImg && !e.redacted) ListTile(leading: const Icon(Icons.download_outlined), title: const Text('Открыть файл'), onTap: () => Navigator.pop(c, 'open')),
+          if (!mine && !e.redacted)
+            ListTile(leading: const Icon(Icons.flag_outlined), title: const Text('Пожаловаться администратору'), onTap: () => Navigator.pop(c, 'report')),
+          if (!mine && !client.ignoredUsers.contains(e.senderId))
+            ListTile(leading: const Icon(Icons.block), title: const Text('Заблокировать отправителя'), onTap: () => Navigator.pop(c, 'block')),
           if (e.canRedact && !e.redacted)
             ListTile(
               leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
@@ -195,6 +199,10 @@ extension _ChatMessages on _ChatPageState {
         await openAttachment(disp, _toast, context: context);
       case 'save':
         if (mounted) await saveMedia(context, disp);
+      case 'report':
+        await _report(e);
+      case 'block':
+        await _block(e.senderId);
       case 'del':
         final ok = await showDialog<bool>(
           context: context,
@@ -212,6 +220,59 @@ extension _ChatMessages on _ChatPageState {
             if (m.canRedact && !m.redacted) await m.redactEvent();
           }
         }
+    }
+  }
+
+  /// Жалоба администратору сервера (как «Пожаловаться» в Element): сервер получает ссылку на сообщение и причину.
+  Future<void> _report(Event e) async {
+    final reason = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: const Text('Пожаловаться администратору'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Администратор сервера увидит это сообщение${room.encrypted ? ' (в защищённом чате — только его служебные данные, без текста)' : ''} и вашу причину.',
+              style: TextStyle(color: Theme.of(d).hintColor, fontSize: 13)),
+          const SizedBox(height: 10),
+          TextField(controller: reason, autofocus: true, maxLength: 300, decoration: const InputDecoration(hintText: 'Причина: спам, оскорбления…')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Отправить')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await client.reportEvent(room.id, e.eventId, reason: reason.text.trim().isEmpty ? null : reason.text.trim());
+      _toast('Жалоба отправлена');
+    } catch (err) {
+      Diag.err('Жалоба', err);
+      _toast('Не удалось отправить жалобу');
+    }
+  }
+
+  /// Заблокировать пользователя: его сообщения и приглашения перестают приходить (как «Игнорировать» в Element).
+  Future<void> _block(String userId) async {
+    final name = room.unsafeGetUserFromMemoryOrFallback(userId).calcDisplayname();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: Text('Заблокировать $name?'),
+        content: const Text('Вы перестанете видеть его сообщения и приглашения. Разблокировать можно в «Настройки → Заблокированные».'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
+          TextButton(onPressed: () => Navigator.pop(d, true), child: const Text('Заблокировать', style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await client.ignoreUser(userId, leaveRooms: false);
+      _toast('$name заблокирован');
+    } catch (err) {
+      Diag.err('Блокировка', err);
+      _toast('Не удалось заблокировать');
     }
   }
 
