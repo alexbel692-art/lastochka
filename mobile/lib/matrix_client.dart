@@ -228,12 +228,17 @@ Future<void> wipeLocalStorage() async {
 /// Сюда подключается проверка смены ключей собеседников (Trust.checkNow).
 Future<void> Function()? afterDeviceKeysUpdate;
 
+/// Что именно отправляется: тип и msgtype исходного (ещё не зашифрованного) события.
+/// type == null — неизвестно (тогда считается обычным сообщением).
+typedef RoomSendInfo = ({String? type, String? msgtype});
+
 /// Последний рубеж перед отправкой любого сообщения в чат на сервер (Trust.guardRoomSend):
 /// бросает исключение, если отправлять нельзя.
-void Function(String roomId)? beforeRoomSend;
+void Function(String roomId, RoomSendInfo what)? beforeRoomSend;
 
-/// Отбор устройств, которым можно отправить ключи шифрования (Trust.allowedDevices).
-List<DeviceKeys> Function(List<DeviceKeys> devices)? filterKeyRecipients;
+/// Отбор устройств, которым можно отправить зашифрованное личное сообщение (ключи сеансов,
+/// события проверки и т. п.) — с учётом того, ЧТО отправляется (Trust.allowedDevices).
+List<DeviceKeys> Function(List<DeviceKeys> devices, String eventType, Map<String, dynamic> message)? filterKeyRecipients;
 
 /// Клиент Ласточки. Защита при смене ключа собеседника встроена в сам клиент, а не только в экраны:
 /// • после каждой загрузки ключей устройств — немедленная проверка;
@@ -254,6 +259,32 @@ class LastochkaClient extends Client {
     super.shareKeysWith,
   });
 
+  /// Исходные типы отправляемых событий по номеру отправки (txnId). Модуль Matrix сначала показывает
+  /// неотправленное событие (через handleSync), потом шифрует его и вызывает sendMessage уже с типом
+  /// m.room.encrypted — по этой записи рубеж знает, что на самом деле уходит.
+  final Map<String, RoomSendInfo> _pendingSends = {};
+
+  @override
+  Future<void> handleSync(SyncUpdate sync, {Direction? direction}) {
+    final join = sync.rooms?.join;
+    if (join != null) {
+      for (final r in join.values) {
+        for (final e in r.timeline?.events ?? const <MatrixEvent>[]) {
+          final tx = e.unsigned?['transaction_id'];
+          // своё неотправленное событие: у него номер события = номер отправки
+          if (tx is! String || e.eventId != tx || e.senderId != userID) continue;
+          final mt = e.content['msgtype'];
+          _pendingSends.remove(tx);
+          _pendingSends[tx] = (type: e.type, msgtype: mt is String ? mt : null);
+          while (_pendingSends.length > 500) {
+            _pendingSends.remove(_pendingSends.keys.first);
+          }
+        }
+      }
+    }
+    return super.handleSync(sync, direction: direction);
+  }
+
   @override
   Future<void> updateUserDeviceKeys({Set<String>? additionalUsers}) async {
     await super.updateUserDeviceKeys(additionalUsers: additionalUsers);
@@ -266,11 +297,15 @@ class LastochkaClient extends Client {
   }
 
   /// Пока защита не подключена (запуск) — ключи только своим устройствам (fail-closed).
-  List<DeviceKeys> _allowed(List<DeviceKeys> devices) =>
-      filterKeyRecipients?.call(devices) ?? devices.where((d) => d.userId == userID).toList();
+  List<DeviceKeys> _allowed(List<DeviceKeys> devices, String eventType, Map<String, dynamic> message) =>
+      filterKeyRecipients?.call(devices, eventType, message) ?? devices.where((d) => d.userId == userID).toList();
 
   @override
   Future<String> sendMessage(String roomId, String eventType, String txnId, Map<String, Object?> body) async {
+    final mt = body['msgtype'];
+    final RoomSendInfo what = eventType == EventTypes.Encrypted
+        ? (_pendingSends[txnId] ?? (type: null, msgtype: null))
+        : (type: eventType, msgtype: mt is String ? mt : null);
     final guard = beforeRoomSend;
     if (guard == null) {
       // защита ещё не подключена (идёт запуск) — в защищённые чаты не отправляем (fail-closed)
@@ -278,7 +313,7 @@ class LastochkaClient extends Client {
         throw MatrixException.fromJson({'errcode': 'M_FORBIDDEN', 'error': 'Ласточка: проверка ключей ещё не готова'});
       }
     } else {
-      beforeRoomSend?.call(roomId);
+      beforeRoomSend?.call(roomId, what);
     }
     return super.sendMessage(roomId, eventType, txnId, body);
   }
@@ -291,14 +326,14 @@ class LastochkaClient extends Client {
     String? messageId,
     bool onlyVerified = false,
   }) {
-    final allowed = _allowed(deviceKeys);
+    final allowed = _allowed(deviceKeys, eventType, message);
     if (allowed.isEmpty) return Future.value();
     return super.sendToDeviceEncrypted(allowed, eventType, message, messageId: messageId, onlyVerified: onlyVerified);
   }
 
   @override
   Future<void> sendToDeviceEncryptedChunked(List<DeviceKeys> deviceKeys, String eventType, Map<String, dynamic> message) {
-    final allowed = _allowed(deviceKeys);
+    final allowed = _allowed(deviceKeys, eventType, message);
     if (allowed.isEmpty) return Future.value();
     return super.sendToDeviceEncryptedChunked(allowed, eventType, message);
   }

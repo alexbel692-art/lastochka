@@ -17,7 +17,7 @@ import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-const me = '@me:test', bob = '@bob:test', roomId = '!r:test';
+const me = '@me:test', bob = '@bob:test', roomId = '!r:test', groupId = '!g:test';
 
 /// Запросы, дошедшие до «сервера».
 final requests = <String>[];
@@ -59,9 +59,64 @@ final syncJson = {
         },
         'timeline': {'events': [], 'limited': false},
       },
+      // групповой защищённый чат с тем же собеседником
+      groupId: {
+        'summary': {'m.joined_member_count': 3, 'm.invited_member_count': 0},
+        'state': {
+          'events': [
+            _state('m.room.create', '', {'creator': me}, me),
+            _state('m.room.encryption', '', {'algorithm': 'm.megolm.v1.aes-sha2'}, me),
+            _state('m.room.member', me, {'membership': 'join'}, me),
+            _state('m.room.member', bob, {'membership': 'join'}, bob),
+            _state('m.room.member', '@carol:test', {'membership': 'join'}, '@carol:test'),
+          ],
+        },
+        'timeline': {'events': [], 'limited': false},
+      },
     },
   },
 };
+
+List<DeviceKeys> get bobDevices => app.client.userDeviceKeys[bob]!.deviceKeys.values.toList();
+List<DeviceKeys> get allDevices => [...app.client.userDeviceKeys[me]!.deviceKeys.values, ...bobDevices];
+Map<String, dynamic> roomKey(String rid) => {'algorithm': 'm.megolm.v1.aes-sha2', 'room_id': rid, 'session_id': 's', 'session_key': 'k'};
+
+/// Как модуль Matrix в защищённом чате: сначала показывает неотправленное событие (исходный тип),
+/// потом вызывает sendMessage уже с типом m.room.encrypted и шифротекстом.
+Future<void> sendEncryptedLike(String rid, String type, Map<String, Object?> content) async {
+  final tx = 'tx${_ev++}';
+  final update = SyncUpdate.fromJson({
+    'next_batch': '',
+    'rooms': {
+      'join': {
+        rid: {
+          'timeline': {
+            'events': [
+              {
+                'type': type,
+                'content': content,
+                'event_id': tx,
+                'sender': me,
+                'origin_server_ts': 1,
+                'unsigned': {'transaction_id': tx},
+              },
+            ],
+          },
+        },
+      },
+    },
+  });
+  await app.client.database.transaction(() => app.client.handleSync(update));
+  await app.client.sendMessage(rid, EventTypes.Encrypted, tx, {'algorithm': 'm.megolm.v1.aes-sha2', 'ciphertext': 'x'});
+}
+
+Future<bool> passes(Future<void> Function() send) async {
+  requests.clear();
+  try {
+    await send();
+  } catch (_) {}
+  return sends.isNotEmpty;
+}
 
 Future<http.Response> _server(http.Request r) async {
   final path = r.url.path;
@@ -192,9 +247,9 @@ void main() {
   });
 
   test('ключи шифрования не раздаются устройствам собеседника со сменившимся ключом', () {
-    final all = [...app.client.userDeviceKeys[me]!.deviceKeys.values, ...app.client.userDeviceKeys[bob]!.deviceKeys.values];
-    final allowed = Trust.instance.allowedDevices(all);
-    expect(allowed.map((d) => d.userId), [me]);
+    expect(Trust.instance.allowedDevices(allDevices, EventTypes.RoomKey, roomKey(roomId)).map((d) => d.userId), [me]);
+    expect(Trust.instance.allowedDevices(allDevices, EventTypes.RoomKey, roomKey(groupId)).map((d) => d.userId), [me]);
+    expect(Trust.instance.allowedDevices(allDevices, 'm.forwarded_room_key', roomKey(roomId)).map((d) => d.userId), [me]);
   });
 
   test('SEC-07: ключ пропал — принять нельзя, отправка остаётся запрещённой', () async {
@@ -216,16 +271,36 @@ void main() {
     await expectAllBlocked('показан другой ключ');
   });
 
-  test('во время сравнения эмодзи в личном чате проходят сообщения проверки, после — снова запрет', () async {
+  test('во время сравнения эмодзи проходят ТОЛЬКО события проверки и только в личном чате', () async {
     await Trust.instance.whileVerifying(bob, () async {
-      requests.clear();
-      await app.client.sendMessage(roomId, 'm.room.message', 'v${_ev++}', {'msgtype': 'm.key.verification.request'});
-      expect(sends, hasLength(1));
+      // события проверки в личном чате — проходят (и открытым, и зашифрованным путём)
+      expect(await passes(() => app.client.sendMessage(roomId, 'm.room.message', 'v${_ev++}', {'msgtype': 'm.key.verification.request'})), isTrue);
+      expect(await passes(() => app.client.sendMessage(roomId, 'm.key.verification.start', 'v${_ev++}', {})), isTrue);
+      expect(await passes(() => sendEncryptedLike(roomId, 'm.key.verification.mac', {})), isTrue);
+      expect(await passes(() => sendEncryptedLike(roomId, 'm.room.message', {'msgtype': 'm.key.verification.request'})), isTrue);
+
+      // SEC-01: обычные сообщения в тот же личный чат в это время — запрещены
+      expect(await passes(() => app.client.sendMessage(roomId, 'm.room.message', 'm${_ev++}', {'msgtype': 'm.text', 'body': 'секрет'})), isFalse);
+      expect(await passes(() => sendEncryptedLike(roomId, 'm.room.message', {'msgtype': 'm.text', 'body': 'секрет'})), isFalse);
+      expect(await passes(() => sendEncryptedLike(roomId, 'm.reaction', {})), isFalse);
+      // зашифрованное событие неизвестного происхождения — тоже нет
+      expect(await passes(() => app.client.sendMessage(roomId, EventTypes.Encrypted, 'unknown${_ev++}', {'ciphertext': 'x'})), isFalse);
+      // события проверки в групповой чат — нет (исключение только для личного)
+      expect(await passes(() => app.client.sendMessage(groupId, 'm.key.verification.start', 'v${_ev++}', {})), isFalse);
+      await expectAllBlocked('идёт сравнение эмодзи, обычные отправки');
+
+      // SEC-02: ключ сеанса — только личного чата проверки; ключи других чатов и пересылаемые — нет
+      expect(Trust.instance.allowedDevices(bobDevices, EventTypes.RoomKey, roomKey(roomId)), hasLength(1));
+      expect(Trust.instance.allowedDevices(bobDevices, EventTypes.RoomKey, roomKey(groupId)), isEmpty);
+      expect(Trust.instance.allowedDevices(bobDevices, 'm.forwarded_room_key', roomKey(roomId)), isEmpty);
+      expect(Trust.instance.allowedDevices(bobDevices, 'm.call.invite', {}), isEmpty);
+      expect(Trust.instance.allowedDevices(bobDevices, 'm.key.verification.start', {}), hasLength(1));
       // интерфейс по-прежнему не даёт писать
       expect(() => ensureCanSend(room), throwsA(isA<SendBlocked>()));
-      // ключи получает и собеседник — иначе он не расшифрует запрос проверки
-      expect(Trust.instance.allowedDevices(app.client.userDeviceKeys[bob]!.deviceKeys.values.toList()), hasLength(1));
     });
+    // проверка закончилась без подтверждения — снова полный запрет
+    expect(await passes(() => app.client.sendMessage(roomId, 'm.key.verification.start', 'v${_ev++}', {})), isFalse);
+    expect(Trust.instance.allowedDevices(bobDevices, EventTypes.RoomKey, roomKey(roomId)), isEmpty);
     await expectAllBlocked('проверка эмодзи закончилась без подтверждения');
   });
 
@@ -235,7 +310,7 @@ void main() {
       await expectAllBlocked('проверка ключей не удалась');
       expect(Trust.instance.checkFailed, isTrue);
       final all = [...app.client.userDeviceKeys[me]!.deviceKeys.values, ...app.client.userDeviceKeys[bob]!.deviceKeys.values];
-      expect(Trust.instance.allowedDevices(all).map((d) => d.userId), [me]);
+      expect(Trust.instance.allowedDevices(all, EventTypes.RoomKey, roomKey(groupId)).map((d) => d.userId), [me]);
     } finally {
       Trust.instance.debugFailChecks = false;
     }

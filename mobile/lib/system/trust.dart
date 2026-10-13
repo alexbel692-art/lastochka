@@ -14,7 +14,7 @@ import 'trust_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
-import '../matrix_client.dart' show afterDeviceKeysUpdate, beforeRoomSend, filterKeyRecipients;
+import '../matrix_client.dart' show RoomSendInfo, afterDeviceKeysUpdate, beforeRoomSend, filterKeyRecipients;
 
 /// Отправка запрещена: у собеседника сменился ключ, а вы его ещё не приняли (или проверка ключей не удалась).
 class SendBlocked implements Exception {
@@ -168,28 +168,59 @@ class Trust {
     unawaited(_save());
   }
 
-  /// Кому можно отправить ключи шифрования (ключи сообщений, звонков, ответы на запросы ключей).
-  /// Устройства собеседника со сменившимся непринятым ключом исключаются — кроме идущего сравнения
-  /// эмодзи с ним. Проверка не удалась — ключи получают только ваши устройства.
-  List<DeviceKeys> allowedDevices(List<DeviceKeys> devices) {
+  /// События протокола сравнения эмодзи (в личном чате запрос идёт как m.room.message с msgtype
+  /// m.key.verification.request). Ничего секретного в них нет: только ключи для сверки.
+  static const _verificationTypes = {
+    'm.key.verification.ready',
+    'm.key.verification.start',
+    'm.key.verification.accept',
+    'm.key.verification.key',
+    'm.key.verification.mac',
+    'm.key.verification.cancel',
+    'm.key.verification.done',
+  };
+
+  static bool isVerificationEvent(String? type, String? msgtype) =>
+      type != null &&
+      (_verificationTypes.contains(type) || (type == EventTypes.Message && msgtype == EventTypes.KeyVerificationRequest));
+
+  /// Кому можно отправить зашифрованное личное сообщение устройству (ключи сеансов, ответы на запросы
+  /// ключей, сигналы звонков, события проверки). Устройства собеседника со сменившимся непринятым ключом
+  /// исключаются. Единственное исключение — идущее сравнение эмодзи с ним: тогда пропускаются только
+  /// события проверки и ключ сеанса ТОГО личного чата, где идёт проверка (сеанс заменяется в начале
+  /// и в конце проверки). Ключи любых других чатов и пересылаемые ключи ему не уходят никогда.
+  /// Проверка не удалась — сообщения получают только ваши устройства.
+  List<DeviceKeys> allowedDevices(List<DeviceKeys> devices, String eventType, Map<String, dynamic> message) {
     refresh();
     final me = client.userID;
     if (_checkFailed) return devices.where((d) => d.userId == me).toList();
     final c = _changed;
     if (c.isEmpty) return devices;
-    final out = devices.where((d) => !c.containsKey(d.userId) || _verifying.containsKey(d.userId)).toList();
+    bool exempt(DeviceKeys d) {
+      if (!_verifying.containsKey(d.userId)) return false;
+      if (_verificationTypes.contains(eventType) || eventType == EventTypes.KeyVerificationRequest) return true;
+      if (eventType == EventTypes.RoomKey) {
+        final rid = message['room_id'];
+        final r = rid is String ? client.getRoomById(rid) : null;
+        return r != null && r.directChatMatrixID == d.userId && _verifyingRoom(r);
+      }
+      return false;
+    }
+
+    final out = devices.where((d) => !c.containsKey(d.userId) || exempt(d)).toList();
     if (out.length != devices.length) {
-      Logs().w('[Ласточка] Ключи не отправлены ${devices.length - out.length} устройствам собеседников со сменившимся ключом');
+      Logs().w('[Ласточка] $eventType не отправлено ${devices.length - out.length} устройствам собеседников со сменившимся ключом');
     }
     return out;
   }
 
   /// Последний рубеж перед отправкой ЛЮБОГО сообщения в чат на сервер (вызывает LastochkaClient.sendMessage).
+  /// Во время сравнения эмодзи в личном чате пропускаются только события проверки — не сообщения.
   /// Ошибка M_FORBIDDEN: модуль Matrix не повторяет отправку и помечает сообщение неотправленным.
-  void guardRoomSend(String roomId) {
+  void guardRoomSend(String roomId, RoomSendInfo what) {
     final room = client.getRoomById(roomId);
     if (room == null || !sendBlocked(room)) return;
-    if (_verifyingRoom(room)) return;
+    if (_verifyingRoom(room) && isVerificationEvent(what.type, what.msgtype)) return;
     throw MatrixException.fromJson({
       'errcode': 'M_FORBIDDEN',
       'error': _checkFailed ? 'Ласточка: проверка ключей не удалась' : 'Ласточка: у собеседника сменился ключ',
@@ -210,7 +241,10 @@ class Trust {
   /// получившие ключи во время проверки, не прочли дальнейшую переписку.
   Future<T> whileVerifying<T>(String userId, Future<T> Function() run) async {
     if (userId == client.userID) return run();
+    final first = !_verifying.containsKey(userId);
     _verifying.update(userId, (n) => n + 1, ifAbsent: () => 1);
+    // проверка начинается с нового сеанса шифрования: прежние сообщения личного чата им не прочитать
+    if (first && _changed.containsKey(userId)) await _rotateWith(userId);
     try {
       return await run();
     } finally {
