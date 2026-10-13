@@ -35,15 +35,11 @@ jobs:
             echo "::error::pubspec.lock изменился: $(git diff -- pubspec.lock | grep '^[-+] ' | head -20 | tr '\n' ' ')"
             exit 1
           fi
-      - name: Разведка vodozemac (временно)
-        continue-on-error: true
-        run: |
-          for d in "${PUB_CACHE:-$HOME/.pub-cache}"/hosted/pub.dev/flutter_vodozemac-* "${PUB_CACHE:-$HOME/.pub-cache}"/hosted/pub.dev/vodozemac-*; do
-            echo "::notice title=$(basename $d)::$(ls $d | tr '\n' ' ') | rust: $(ls $d/rust 2>/dev/null | tr '\n' ' ') | hook: $(ls $d/hook 2>/dev/null | tr '\n' ' ')"
-            [ -f "$d/rust/Cargo.toml" ] && echo "::notice title=Cargo $(basename $d)::$(grep -E '^(name|crate-type|version)' $d/rust/Cargo.toml | tr '\n' ' ')"
-          done
-          echo "::notice title=cargo::$(cargo --version 2>&1)"
+      - name: Библиотека шифрования для тестов
+        run: tool/build_vodozemac_test_lib.sh >> "$GITHUB_ENV"
       - name: Анализ кода
         run: tool/annotate.sh "analyze" flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Тесты
+        env:
+          REQUIRE_E2EE_TEST: '1'
         run: tool/annotate.sh "tests" flutter test

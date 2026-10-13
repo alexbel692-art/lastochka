@@ -125,7 +125,12 @@ jobs:
         run: tool/annotate.sh "icons" dart run flutter_launcher_icons
       - name: Проверка кода
         run: tool/annotate.sh "analyze" flutter analyze --no-fatal-infos --no-fatal-warnings
+      # библиотека шифрования для сквозного теста (собирается из того же пакета, что и в приложении)
+      - name: Библиотека шифрования для тестов
+        run: tool/build_vodozemac_test_lib.sh >> "$GITHUB_ENV"
       - name: Тесты
+        env:
+          REQUIRE_E2EE_TEST: '1'
         run: tool/annotate.sh "tests" flutter test
       # APK собирается БЕЗ ключа подписи (временной подписью сборки) — настоящую подпись ставит отдельный
       # этап android-sign на чистой машине, где не работает ни код сборки, ни сторонние библиотеки
