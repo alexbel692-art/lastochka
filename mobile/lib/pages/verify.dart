@@ -402,14 +402,22 @@ Future<void> showIncomingVerification(BuildContext context, KeyVerification req)
 
 /// На время сравнения эмодзи сообщения проверки в личном чате доходят и до устройств собеседника
 /// со сменившимся ключом (иначе подтвердить его было бы невозможно); см. Trust.whileVerifying.
-Future<void> showVerificationDialog(BuildContext context, KeyVerification req) => Trust.instance.whileVerifying(
-      req.userId,
-      () => showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => _VerificationDialog(req),
-      ),
-    );
+Future<void> showVerificationDialog(BuildContext context, KeyVerification req) async {
+  await Trust.instance.whileVerifying(
+    req.userId,
+    () => showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _VerificationDialog(req),
+    ),
+  );
+  // собеседник подтверждён сравнением эмодзи (и по нашему запросу, и по его) — принимаем именно
+  // подтверждённый ключ, отправка снова разрешена
+  final uid = req.userId;
+  if (uid != client.userID && req.state == KeyVerificationState.done && Trust.instance.userVerified(uid)) {
+    await Trust.instance.acceptChange(uid, shownKey: Trust.instance.currentKey(uid));
+  }
+}
 
 class _VerificationDialog extends StatefulWidget {
   final KeyVerification req;
