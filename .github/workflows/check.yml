@@ -42,4 +42,4 @@ jobs:
       - name: Тесты
         env:
           REQUIRE_E2EE_TEST: '1'
-        run: tool/annotate.sh "tests" flutter test
+        run: tool/annotate.sh "tests" flutter test --reporter github
