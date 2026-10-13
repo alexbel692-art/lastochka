@@ -23,9 +23,6 @@ on:
 permissions:
   contents: read
 
-env:
-  DEPS: ${{ inputs.deps }}
-
 defaults:
   run:
     working-directory: mobile
@@ -33,6 +30,7 @@ defaults:
 
 env:
   V: ${{ inputs.version }}
+  DEPS: ${{ inputs.deps }}
   PYTHONIOENCODING: utf-8
   PYTHONUTF8: '1'
 
