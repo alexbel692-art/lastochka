@@ -199,7 +199,9 @@ class Trust {
     if (c.isEmpty) return devices;
     bool exempt(DeviceKeys d) {
       if (!_verifying.containsKey(d.userId)) return false;
-      if (_verificationTypes.contains(eventType) || eventType == EventTypes.KeyVerificationRequest) return true;
+      // Сравнение эмодзи с собеседником идёт сообщениями в личном чате, а не личными сообщениями
+      // устройствам, поэтому событиям проверки исключение здесь не нужно: им — ничего, кроме ключа
+      // сеанса ТОГО личного чата, где идёт проверка (иначе он не прочтёт сами события проверки).
       if (eventType == EventTypes.RoomKey) {
         final rid = message['room_id'];
         final r = rid is String ? client.getRoomById(rid) : null;
@@ -220,7 +222,11 @@ class Trust {
   /// Ошибка M_FORBIDDEN: модуль Matrix не повторяет отправку и помечает сообщение неотправленным.
   void guardRoomSend(String roomId, RoomSendInfo what) {
     final room = client.getRoomById(roomId);
-    if (room == null || !sendBlocked(room)) return;
+    if (room == null) {
+      // чат неизвестен — не можем проверить ни шифрование, ни участников: не отправляем (fail-closed)
+      throw MatrixException.fromJson({'errcode': 'M_FORBIDDEN', 'error': 'Ласточка: неизвестный чат — отправка не проверена'});
+    }
+    if (!sendBlocked(room)) return;
     if (_verifyingRoom(room) && isVerificationEvent(what.type, what.msgtype)) return;
     throw MatrixException.fromJson({
       'errcode': 'M_FORBIDDEN',
@@ -365,6 +371,15 @@ class Trust {
     // новые устройства собеседника пока не получали ключей — начинаем с ними новые сеансы шифрования
     await _rotateWith(userId);
     return true;
+  }
+
+  /// Принять ключ, подтверждённый сравнением эмодзи. [startedKey] — ключ личности собеседника,
+  /// зафиксированный ДО начала проверки: принимается только если сравнение подтвердило именно его
+  /// (он помечен подтверждённым) и он же остаётся текущим. Сменился во время проверки — не принимаем.
+  Future<bool> acceptVerified(String userId, String? startedKey) async {
+    final mk = client.userDeviceKeys[userId]?.masterKey;
+    if (startedKey == null || mk == null || mk.publicKey != startedKey || !mk.verified) return false;
+    return acceptChange(userId, shownKey: startedKey);
   }
 
   Future<void> confirmLogin(String deviceId) async {

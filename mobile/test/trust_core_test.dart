@@ -88,6 +88,8 @@ void main() {
   group('принятие смены', () {
     test('только показанный человеку ключ', () {
       expect(TrustCore.canAccept(currentKey: 'K2', shownKey: 'K2', outdated: false), isTrue);
+      // SEC-02: без указания, какой ключ принимается, — нельзя
+      expect(TrustCore.canAccept(currentKey: 'K2', shownKey: null, outdated: false), isFalse);
       expect(TrustCore.canAccept(currentKey: 'KEVE', shownKey: 'K2', outdated: false), isFalse);
     });
     test('не принимается, пока список ключей не загружен', () {

@@ -235,6 +235,13 @@ void main() {
     await Trust.instance.checkNow(); // первая встреча — ключ K1 запомнен
   });
 
+  test('SEC-01: отправка в неизвестный чат не проходит (fail-closed)', () async {
+    requests.clear();
+    await expectLater(
+        app.client.sendMessage('!unknown:test', 'm.room.message', 'u${_ev++}', {'msgtype': 'm.text', 'body': 'x'}), throwsA(isA<MatrixException>()));
+    expect(sends, isEmpty);
+  });
+
   test('обычная отправка проходит', () async {
     expect(Trust.instance.changedNow, isEmpty);
     await expectSent('ключ не менялся');
@@ -294,7 +301,8 @@ void main() {
       expect(Trust.instance.allowedDevices(bobDevices, EventTypes.RoomKey, roomKey(groupId)), isEmpty);
       expect(Trust.instance.allowedDevices(bobDevices, 'm.forwarded_room_key', roomKey(roomId)), isEmpty);
       expect(Trust.instance.allowedDevices(bobDevices, 'm.call.invite', {}), isEmpty);
-      expect(Trust.instance.allowedDevices(bobDevices, 'm.key.verification.start', {}), hasLength(1));
+      // события проверки идут в личном чате; личным сообщениям устройствам исключение не нужно
+      expect(Trust.instance.allowedDevices(bobDevices, 'm.key.verification.start', {}), isEmpty);
       // интерфейс по-прежнему не даёт писать
       expect(() => ensureCanSend(room), throwsA(isA<SendBlocked>()));
     });

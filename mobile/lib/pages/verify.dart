@@ -402,7 +402,9 @@ Future<void> showIncomingVerification(BuildContext context, KeyVerification req)
 
 /// На время сравнения эмодзи сообщения проверки в личном чате доходят и до устройств собеседника
 /// со сменившимся ключом (иначе подтвердить его было бы невозможно); см. Trust.whileVerifying.
-Future<void> showVerificationDialog(BuildContext context, KeyVerification req) async {
+Future<void> showVerificationDialog(BuildContext context, KeyVerification req, {String? startedKey}) async {
+  // ключ личности собеседника — фиксируем ДО сравнения: принять потом можно только его
+  final startKey = startedKey ?? Trust.instance.currentKey(req.userId);
   await Trust.instance.whileVerifying(
     req.userId,
     () => showDialog<void>(
@@ -414,8 +416,8 @@ Future<void> showVerificationDialog(BuildContext context, KeyVerification req) a
   // собеседник подтверждён сравнением эмодзи (и по нашему запросу, и по его) — принимаем именно
   // подтверждённый ключ, отправка снова разрешена
   final uid = req.userId;
-  if (uid != client.userID && req.state == KeyVerificationState.done && Trust.instance.userVerified(uid)) {
-    await Trust.instance.acceptChange(uid, shownKey: Trust.instance.currentKey(uid));
+  if (uid != client.userID && req.state == KeyVerificationState.done) {
+    await Trust.instance.acceptVerified(uid, startKey);
   }
 }
 
@@ -567,15 +569,13 @@ Future<void> verifyUser(BuildContext context, String userId) async {
     await client.updateUserDeviceKeys(additionalUsers: {userId});
     final list = client.userDeviceKeys[userId];
     if (list == null) throw StateError('no keys');
+    // ключ, который подтверждаем, фиксируется до начала проверки; принятие — в showVerificationDialog
+    final startKey = Trust.instance.currentKey(userId);
     await Trust.instance.whileVerifying(userId, () async {
       final req = await list.startVerification();
       if (!context.mounted) return;
-      await showVerificationDialog(context, req);
+      await showVerificationDialog(context, req, startedKey: startKey);
     });
-    // подтверждён сравнением эмодзи — принимаем именно подтверждённый ключ
-    if (Trust.instance.userVerified(userId)) {
-      await Trust.instance.acceptChange(userId, shownKey: Trust.instance.currentKey(userId));
-    }
   } catch (_) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось начать подтверждение — собеседник должен быть в сети')));

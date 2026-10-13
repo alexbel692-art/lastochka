@@ -301,6 +301,7 @@ void main() {
   // расшифрованные Бобом сообщения и полученные им ключи сеансов (из каких чатов)
   final bobSaw = <String>[];
   final bobGotKeysFor = <String>[];
+  String? startedKey;
 
   Room myRoom(String id) => my.getRoomById(id)!;
   int mySends(String rid) => server.roomSendsBy[me]!.where((s) => s.$1 == rid).length;
@@ -375,6 +376,9 @@ void main() {
     await waitFor(() => bobC.userDeviceKeys[bob]?.masterKey?.publicKey == newMaster, 'Боб видит свой новый ключ');
     await bobC.userDeviceKeys[bob]!.masterKey!.setVerified(true, false);
 
+    // ключ, который подтверждаем, фиксируется ДО начала проверки (SEC-02)
+    startedKey = Trust.instance.currentKey(bob);
+    expect(startedKey, newMaster);
     final groupBefore = mySends(group);
     final verified = Completer<void>();
     // Боб принимает запрос и подтверждает эмодзи
@@ -412,7 +416,10 @@ void main() {
   });
 
   test('после подтверждения: принимаем подтверждённый ключ — переписка снова идёт и расшифровывается', () async {
-    expect(await Trust.instance.acceptChange(bob, shownKey: Trust.instance.currentKey(bob)), isTrue);
+    // принять можно только ключ, зафиксированный до проверки и подтверждённый ею
+    expect(await Trust.instance.acceptVerified(bob, 'чужой-ключ'), isFalse);
+    expect(await Trust.instance.acceptVerified(bob, null), isFalse);
+    expect(await Trust.instance.acceptVerified(bob, startedKey), isTrue);
     await myRoom(dm).sendTextEvent('снова пишем');
     await waitFor(() => bobSaw.contains('снова пишем'), 'Боб расшифровал сообщение после подтверждения');
   });

@@ -74,9 +74,10 @@ class TrustCore {
     return TrustResult(p, pv, ch, ownReset: ownReset, dirty: dirty);
   }
 
-  /// Можно ли принять смену ключа: только когда новый ключ уже есть и он тот же, что видел человек.
+  /// Можно ли принять смену ключа: только когда новый ключ уже есть и это ровно тот ключ, который видел
+  /// человек (или который был подтверждён сравнением эмодзи). Без указания ключа — нельзя.
   static bool canAccept({required String? currentKey, required String? shownKey, required bool outdated}) =>
-      currentKey != null && !outdated && (shownKey == null || shownKey == currentKey);
+      currentKey != null && shownKey != null && !outdated && shownKey == currentKey;
 
   /// Отправка в чат запрещена: он защищённый, а у кого-то из участников ключ сменился и не принят.
   static bool sendBlocked({required bool encrypted, required Iterable<String> members, required Map<String, bool> changed}) =>
