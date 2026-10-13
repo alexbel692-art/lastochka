@@ -151,6 +151,12 @@ Future<void> main(List<String> args) async {
   };
   Updater.instance.start();
   unawaited(Updater.instance.checkDowngrade());
+  // прошлое обновление на Windows не встало — сказать человеку и записать причину в отчёт
+  unawaited(Updater.instance.checkFailedInstall().then((msg) {
+    if (msg == null) return;
+    Future.delayed(const Duration(seconds: 3), () => messengerKey.currentState?.showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 12))));
+  }));
   await Drafts.instance.init();
   unawaited(Scheduler.instance.init());
   // заставка показывается хотя бы до конца анимации влёта

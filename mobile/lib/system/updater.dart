@@ -187,6 +187,39 @@ class Updater {
     }
   }
 
+  /// Прошлая установка обновления на Windows не удалась (версия не сменилась) — причину из журнала
+  /// установщика — в отчёт и сообщение человеку. Вызывается при запуске.
+  Future<String?> checkFailedInstall() async {
+    if (!Platform.isWindows || appVersion == '0.0.0') return null;
+    final prefs = await SharedPreferences.getInstance();
+    final want = prefs.getString('update.pendingVer');
+    final log = prefs.getString('update.pendingLog');
+    if (want == null || want.isEmpty) return null;
+    await prefs.remove('update.pendingVer');
+    if (cmpVer(appVersion, want) >= 0) return null; // обновилось
+    var why = 'установщик не завершил работу';
+    try {
+      if (log != null && await File(log).exists()) {
+        final lines = await File(log).readAsLines();
+        final bad = lines
+            .where((l) => RegExp(r'error|failed|abort|cannot|denied|in use|занят|ошибк|Exception|code \d+', caseSensitive: false).hasMatch(l))
+            .toList();
+        Diag.add('Журнал установщика ($want): ${(bad.isEmpty ? lines.reversed.take(15).toList().reversed : bad.take(15)).join(' | ')}');
+        if (lines.any((l) => l.contains('Need to restart Windows') || l.contains('in use'))) {
+          why = 'файлы Ласточки заняты (возможно, она открыта у других пользователей этого компьютера)';
+        } else if (lines.any((l) => l.contains('elevat') || l.contains('privileges'))) {
+          why = 'Windows не дала прав администратора';
+        } else if (bad.isNotEmpty) {
+          why = bad.last.length > 160 ? bad.last.substring(bad.last.length - 160) : bad.last;
+        }
+      } else {
+        why = 'установщик не запустился — вероятно, Windows не дала прав администратора';
+      }
+    } catch (_) {}
+    Diag.add('Обновление до $want не установилось: $why');
+    return 'Обновление до $want не установилось: $why. Нажмите «Обновить» ещё раз — появится окно установщика.';
+  }
+
   /// Защита от отката: если на устройстве вдруг оказалась версия старее, чем уже стояла
   /// (её могли поставить, чтобы вернуть исправленную уязвимость), — предупреждаем.
   Future<void> checkDowngrade() async {
@@ -381,12 +414,27 @@ class Updater {
       throw 'Файл обновления изменился — скачаем заново';
     }
     if (Platform.isWindows) {
-      // тихая установка поверх; после неё Ласточка запустится сама.
-      // Windows попросит права администратора (установка для всех пользователей)
-      Diag.add('Устанавливаем обновление ${ready.value}');
-      // Ласточку закрывает сам установщик — после того как Windows дала права. Если человек отказал
-      // в правах, установщик просто выходит, а Ласточка продолжает работать (раньше она закрывалась сама)
-      await Process.start(target.path, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', '/FORCECLOSEAPPLICATIONS'],
+      // установка поверх; после неё Ласточка запустится сама. Windows попросит права администратора
+      // (установка для всех пользователей). Ласточку закрывает сам установщик — после того как Windows
+      // дала права; если в правах отказали, установщик просто выходит, а Ласточка продолжает работать.
+      // По нажатию «Обновить» — с окном хода установки и сообщениями об ошибках (раньше всё шло невидимо,
+      // и при сбое казалось, что «ничего не происходит»); автоматически — без окон.
+      // Журнал установщика сохраняется: если обновление не встанет, причина попадёт в отчёт.
+      final log = p.join(Directory.systemTemp.path, 'lastochka-update.log');
+      Diag.add('Устанавливаем обновление ${ready.value}${interactive ? ' (с окном установщика)' : ''}');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('update.pendingVer', ready.value ?? '');
+      await prefs.setString('update.pendingLog', log);
+      await Process.start(
+          target.path,
+          [
+            interactive ? '/SILENT' : '/VERYSILENT',
+            if (!interactive) '/SUPPRESSMSGBOXES',
+            '/NORESTART',
+            '/CLOSEAPPLICATIONS',
+            '/FORCECLOSEAPPLICATIONS',
+            '/LOG=$log',
+          ],
           mode: ProcessStartMode.detached);
     } else if (Platform.isMacOS) {
       await Process.run('open', [target.path]); // откроется образ — перетащите Ласточку в «Программы»

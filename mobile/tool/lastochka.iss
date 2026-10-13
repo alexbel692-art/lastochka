@@ -103,8 +103,22 @@ begin
   end;
 end;
 
+// На сервере удалённых рабочих столов Ласточка может быть открыта у других пользователей: её файлы заняты,
+// и установщик не может их заменить (обновление молча не вставало). Перед заменой файлов закрываем все копии
+// Ласточки на этом компьютере — у всех пользователей. Права администратора у установщика уже есть.
+procedure CloseAllCopies();
+var
+  RC: Integer;
+begin
+  Log('Закрываем все копии Ласточки на компьютере');
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Lastochka.exe', '', SW_HIDE, ewWaitUntilTerminated, RC);
+  Log('taskkill: код ' + IntToStr(RC));
+  Sleep(1500);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  if CurStep = ssInstall then CloseAllCopies();
   if CurStep = ssPostInstall then
   begin
     RemoveOldFrom(HKLM64);
