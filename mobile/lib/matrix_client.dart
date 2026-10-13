@@ -265,9 +265,21 @@ class LastochkaClient extends Client {
     }
   }
 
+  /// Пока защита не подключена (запуск) — ключи только своим устройствам (fail-closed).
+  List<DeviceKeys> _allowed(List<DeviceKeys> devices) =>
+      filterKeyRecipients?.call(devices) ?? devices.where((d) => d.userId == userID).toList();
+
   @override
   Future<String> sendMessage(String roomId, String eventType, String txnId, Map<String, Object?> body) async {
-    beforeRoomSend?.call(roomId);
+    final guard = beforeRoomSend;
+    if (guard == null) {
+      // защита ещё не подключена (идёт запуск) — в защищённые чаты не отправляем (fail-closed)
+      if (getRoomById(roomId)?.encrypted ?? true) {
+        throw MatrixException.fromJson({'errcode': 'M_FORBIDDEN', 'error': 'Ласточка: проверка ключей ещё не готова'});
+      }
+    } else {
+      beforeRoomSend?.call(roomId);
+    }
     return super.sendMessage(roomId, eventType, txnId, body);
   }
 
@@ -279,14 +291,14 @@ class LastochkaClient extends Client {
     String? messageId,
     bool onlyVerified = false,
   }) {
-    final allowed = filterKeyRecipients?.call(deviceKeys) ?? deviceKeys;
+    final allowed = _allowed(deviceKeys);
     if (allowed.isEmpty) return Future.value();
     return super.sendToDeviceEncrypted(allowed, eventType, message, messageId: messageId, onlyVerified: onlyVerified);
   }
 
   @override
   Future<void> sendToDeviceEncryptedChunked(List<DeviceKeys> deviceKeys, String eventType, Map<String, dynamic> message) {
-    final allowed = filterKeyRecipients?.call(deviceKeys) ?? deviceKeys;
+    final allowed = _allowed(deviceKeys);
     if (allowed.isEmpty) return Future.value();
     return super.sendToDeviceEncryptedChunked(allowed, eventType, message);
   }
