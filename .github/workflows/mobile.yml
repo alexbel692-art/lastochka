@@ -187,11 +187,16 @@ jobs:
           # подпись — именно нашим ключом: полный отпечаток сертификата и ровно одна подпись
           FP=7994c098efa34a2dc89d31cfcbaf72e2b8585d4f0abc53668d5871784a057647
           for f in out/*.apk; do
-            info="$("$AS" verify --verbose --print-certs "$f")" || { echo "::error::$f — подпись не прошла проверку"; exit 1; }
-            grep -qx 'Number of signers: 1' <<<"$info" || { echo "::error::$f — подписей не одна"; exit 1; }
-            got="$(grep -iE '^Signer #1 certificate SHA-256 digest: ' <<<"$info" | awk '{print tolower($NF)}')"
-            [ "$got" = "$FP" ] || { echo "::error::$f подписан не тем ключом ($got)"; exit 1; }
-            grep -qx 'Verified using v2 scheme (APK Signature Scheme v2): true' <<<"$info" || { echo "::error::$f — нет подписи v2"; exit 1; }
+            info="$("$AS" verify --verbose --print-certs "$f" 2>&1)" || { echo "::error::$(basename "$f") — подпись не прошла проверку: $(tr '\n' ' ' <<<"$info" | cut -c1-600)"; exit 1; }
+            # «|| true»: строки может не быть — тогда проверка ниже скажет об этом понятно, а не молча упадёт
+            signers="$( (grep -iE '^Number of signers:' <<<"$info" || true) | awk '{print $NF}' | tr -d '\r')"
+            # отпечатки всех сертификатов подписи (у apksigner строки «Signer #1 …» и «Signer (minSdkVersion=…) …»)
+            fps="$( (grep -iE '^Signer .*certificate SHA-256 digest:' <<<"$info" || true) | awk '{print tolower($NF)}' | tr -d '\r' | sort -u)"
+            v2="$( (grep -iE '^Verified using v2 scheme' <<<"$info" || true) | awk '{print $NF}' | tr -d '\r')"
+            echo "$(basename "$f"): подписей=$signers v2=$v2 отпечатки=$(tr '\n' ' ' <<<"$fps")"
+            [ "$signers" = "1" ] || { echo "::error::$(basename "$f") — подписей: '$signers' (нужна одна)"; exit 1; }
+            [ "$fps" = "$FP" ] || { echo "::error::$(basename "$f") подписан не тем ключом ('$(tr '\n' ' ' <<<"$fps")')"; exit 1; }
+            [ "$v2" = "true" ] || { echo "::error::$(basename "$f") — нет подписи v2 ('$v2')"; exit 1; }
           done
           rm -f out/*.idsig
           ls -la out
