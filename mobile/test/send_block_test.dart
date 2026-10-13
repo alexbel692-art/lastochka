@@ -142,7 +142,7 @@ Future<void> expectAllBlocked(String why) async {
     } catch (_) {
       // отказ — это и ожидается
     }
-    expect(sends, isEmpty, reason: '$why: «$name» дошла до сервера');
+    if (sends.isNotEmpty) fail('ERROR: $why: «$name» дошла до сервера: ${sends.join(', ')}');
   }
   expect(() => ensureCanSend(room), throwsA(isA<SendBlocked>()), reason: why);
 }
@@ -156,6 +156,7 @@ Future<void> expectSent(String why) async {
 void main() {
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
+    Logs().level = Level.error; // меньше шума: отказы в отправке модуль Matrix пишет предупреждениями
     SharedPreferences.setMockInitialValues({});
     sqfliteFfiInit();
     final factory = createDatabaseFactoryFfi();
