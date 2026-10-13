@@ -76,7 +76,10 @@ class TestServer {
   void newBobIdentity({bool notify = true}) {
     bobMaster = vod.PkSigning();
     bobSsk = vod.PkSigning();
-    if (notify) listChanged[me]!.add(bob);
+    if (notify) {
+      listChanged[me]!.add(bob);
+      listChanged[bob]!.add(bob);
+    }
   }
 
   Map<String, Object?> _state(String rid, String type, String key, Map<String, Object?> content, String sender) => {
@@ -366,6 +369,12 @@ void main() {
   });
 
   test('сравнение эмодзи проходит целиком; обычные сообщения в это время не уходят; ключ группы — тоже', () async {
+    // Боб после сброса заново настроил свою подпись (как сделает любой клиент): его новый ключ личности
+    // подтверждён на его стороне — тогда он включает его в сверку, и мы подтверждаем именно ключ личности
+    final newMaster = server.bobMaster.publicKey.toBase64();
+    await waitFor(() => bobC.userDeviceKeys[bob]?.masterKey?.publicKey == newMaster, 'Боб видит свой новый ключ');
+    await bobC.userDeviceKeys[bob]!.masterKey!.setVerified(true, false);
+
     final groupBefore = mySends(group);
     final verified = Completer<void>();
     // Боб принимает запрос и подтверждает эмодзи
