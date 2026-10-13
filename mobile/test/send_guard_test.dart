@@ -1,8 +1,7 @@
-// Каждая отправка в чат (и звонок) должна проходить через ensureCanSend(...) — иначе при смене ключа
-// собеседника сообщение ушло бы его новому (возможно, чужому) устройству. Тест читает исходники и находит
-// обходы, в том числе вызовы, разбитые на несколько строк (`room\n    .sendTextEvent(`).
-// Сама логика запрета проверяется функционально в trust_core_test.dart; кроме того, устройства со сменившимся
-// ключом блокируются в модуле шифрования (Trust._enforce) — это второй, независимый от этого теста рубеж.
+// Дополнительная статическая проверка: каждая отправка из интерфейса идёт через ensureCanSend(...) — так
+// человек получает понятное сообщение. Главный рубеж — в самом клиенте Matrix (LastochkaClient.sendMessage
+// и отбор получателей ключей), он проверяется функционально в send_block_test.dart, а логика — в
+// trust_core_test.dart. Сканер ловит и вызовы, разбитые на несколько строк.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -38,6 +37,11 @@ List<String> scan(String path, String src) {
     if (m.group(1) == 'postReceipt') continue; // отметка о прочтении ключей не раздаёт
     // проверка — в той же строке или в 6 строках выше
     final before = lines.sublist(ln - 6 < 0 ? 0 : ln - 6, ln + 1).join('\n');
+    // сам рубеж в клиенте (LastochkaClient): вызов super.… сразу после проверки beforeRoomSend
+    if (src.substring(0, m.start()).endsWith('super')) {
+      if (!before.contains('beforeRoomSend?.call(')) problems.add('$path:${ln + 1}: рубеж клиента без проверки: ${lines[ln].trim()}');
+      continue;
+    }
     if (!before.contains('ensureCanSend(')) problems.add('$path:${ln + 1}: ${lines[ln].trim()}');
   }
   return problems;
@@ -49,6 +53,8 @@ void main() {
     expect(scan('x', 'void f() {\n  ensureCanSend(room);\n  room\n      .sendTextEvent(t);\n}'), isEmpty);
     expect(scan('x', 'void f() {\n  // room.sendTextEvent(t);\n}'), isEmpty);
     expect(scan('x', 'void f() => call.answer();'), hasLength(1));
+    expect(scan('x', 'f() {\n  beforeRoomSend?.call(id);\n  return super.sendMessage(a);\n}'), isEmpty);
+    expect(scan('x', 'f() {\n  return super.sendMessage(a);\n}'), hasLength(1));
   });
 
   test('все пути отправки и звонков проверяют смену ключа собеседника', () {
