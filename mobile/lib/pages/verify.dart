@@ -400,10 +400,15 @@ class _VerifyGateState extends State<VerifyGate> {
 Future<void> showIncomingVerification(BuildContext context, KeyVerification req) =>
     showVerificationDialog(context, req);
 
-Future<void> showVerificationDialog(BuildContext context, KeyVerification req) => showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _VerificationDialog(req),
+/// На время сравнения эмодзи сообщения проверки в личном чате доходят и до устройств собеседника
+/// со сменившимся ключом (иначе подтвердить его было бы невозможно); см. Trust.whileVerifying.
+Future<void> showVerificationDialog(BuildContext context, KeyVerification req) => Trust.instance.whileVerifying(
+      req.userId,
+      () => showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _VerificationDialog(req),
+      ),
     );
 
 class _VerificationDialog extends StatefulWidget {
@@ -554,10 +559,15 @@ Future<void> verifyUser(BuildContext context, String userId) async {
     await client.updateUserDeviceKeys(additionalUsers: {userId});
     final list = client.userDeviceKeys[userId];
     if (list == null) throw StateError('no keys');
-    final req = await list.startVerification();
-    if (!context.mounted) return;
-    await showVerificationDialog(context, req);
-    if (Trust.instance.userVerified(userId)) await Trust.instance.acceptChange(userId);
+    await Trust.instance.whileVerifying(userId, () async {
+      final req = await list.startVerification();
+      if (!context.mounted) return;
+      await showVerificationDialog(context, req);
+    });
+    // подтверждён сравнением эмодзи — принимаем именно подтверждённый ключ
+    if (Trust.instance.userVerified(userId)) {
+      await Trust.instance.acceptChange(userId, shownKey: Trust.instance.currentKey(userId));
+    }
   } catch (_) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось начать подтверждение — собеседник должен быть в сети')));

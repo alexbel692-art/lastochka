@@ -228,9 +228,19 @@ Future<void> wipeLocalStorage() async {
 /// Сюда подключается проверка смены ключей собеседников (Trust.checkNow).
 Future<void> Function()? afterDeviceKeysUpdate;
 
-/// Клиент Ласточки: после каждой загрузки ключей устройств — немедленная проверка доверия.
-/// Модуль шифрования шлёт ключи сообщений только после updateUserDeviceKeys, поэтому
-/// устройства с подменённым ключом блокируются раньше, чем им что-либо уйдёт.
+/// Последний рубеж перед отправкой любого сообщения в чат на сервер (Trust.guardRoomSend):
+/// бросает исключение, если отправлять нельзя.
+void Function(String roomId)? beforeRoomSend;
+
+/// Отбор устройств, которым можно отправить ключи шифрования (Trust.allowedDevices).
+List<DeviceKeys> Function(List<DeviceKeys> devices)? filterKeyRecipients;
+
+/// Клиент Ласточки. Защита при смене ключа собеседника встроена в сам клиент, а не только в экраны:
+/// • после каждой загрузки ключей устройств — немедленная проверка;
+/// • любое сообщение в чат (текст, файл, реакция, опрос, звонок, повтор — каким бы путём оно ни шло)
+///   проходит beforeRoomSend прямо перед запросом к серверу;
+/// • ключи шифрования (сообщений, звонков, ответы на запросы ключей) уходят только устройствам,
+///   прошедшим filterKeyRecipients. Проверка синхронная — гонки с обновлением ключей нет.
 class LastochkaClient extends Client {
   LastochkaClient(
     super.clientName, {
@@ -249,7 +259,36 @@ class LastochkaClient extends Client {
     await super.updateUserDeviceKeys(additionalUsers: additionalUsers);
     try {
       await afterDeviceKeysUpdate?.call();
-    } catch (_) {}
+    } catch (e, s) {
+      // проверка сама переходит в запрет при ошибке (Trust.checkFailed); здесь — только запись в журнал
+      Logs().e('[Ласточка] Проверка после загрузки ключей', e, s);
+    }
+  }
+
+  @override
+  Future<String> sendMessage(String roomId, String eventType, String txnId, Map<String, Object?> body) async {
+    beforeRoomSend?.call(roomId);
+    return super.sendMessage(roomId, eventType, txnId, body);
+  }
+
+  @override
+  Future<void> sendToDeviceEncrypted(
+    List<DeviceKeys> deviceKeys,
+    String eventType,
+    Map<String, dynamic> message, {
+    String? messageId,
+    bool onlyVerified = false,
+  }) {
+    final allowed = filterKeyRecipients?.call(deviceKeys) ?? deviceKeys;
+    if (allowed.isEmpty) return Future.value();
+    return super.sendToDeviceEncrypted(allowed, eventType, message, messageId: messageId, onlyVerified: onlyVerified);
+  }
+
+  @override
+  Future<void> sendToDeviceEncryptedChunked(List<DeviceKeys> deviceKeys, String eventType, Map<String, dynamic> message) {
+    final allowed = filterKeyRecipients?.call(deviceKeys) ?? deviceKeys;
+    if (allowed.isEmpty) return Future.value();
+    return super.sendToDeviceEncryptedChunked(allowed, eventType, message);
   }
 }
 

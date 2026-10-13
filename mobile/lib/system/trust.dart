@@ -14,26 +14,43 @@ import 'trust_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
-import '../matrix_client.dart' show afterDeviceKeysUpdate;
+import '../matrix_client.dart' show afterDeviceKeysUpdate, beforeRoomSend, filterKeyRecipients;
 
-/// Отправка запрещена: у собеседника сменился ключ, а вы его ещё не приняли.
+/// Отправка запрещена: у собеседника сменился ключ, а вы его ещё не приняли (или проверка ключей не удалась).
 class SendBlocked implements Exception {
+  final String message;
+  const SendBlocked([this.message = 'У собеседника сменился ключ — подтвердите его в чате, прежде чем отправлять']);
   @override
-  String toString() => 'У собеседника сменился ключ — подтвердите его в чате, прежде чем отправлять';
+  String toString() => message;
 }
 
-/// Единая проверка перед ЛЮБОЙ отправкой в чат (текст, файлы, голосовые, стикеры, реакции, опросы,
-/// пересылка, повтор). Тест send_guard_test следит, чтобы ни одна отправка не обходила её.
+/// Проверка перед отправкой в чат из интерфейса (текст, файлы, голосовые, стикеры, реакции, опросы,
+/// пересылка, повтор, звонки) — с понятным сообщением человеку. Настоящий рубеж — в самом клиенте
+/// Matrix (LastochkaClient.sendMessage и отбор получателей ключей): его не обойти ни одним путём.
 void ensureCanSend(Room room) {
-  if (Trust.instance.sendBlocked(room)) throw SendBlocked();
+  if (!Trust.instance.sendBlocked(room)) return;
+  if (Trust.instance.checkFailed) {
+    throw const SendBlocked('Не удалось проверить ключи собеседников — отправка в защищённые чаты приостановлена. Попробуйте через минуту');
+  }
+  throw const SendBlocked();
 }
 
 class Trust {
   Trust._();
   static final instance = Trust._();
 
-  /// Собеседники, у которых сменился ключ личности (userId → был ли он подтверждён вами).
+  /// Собеседники, у которых сменился ключ личности (userId → был ли он подтверждён вами) — для экрана.
+  /// Проверки читают _changed: он меняется сразу, а уведомление экрана идёт после текущего кадра
+  /// (проверка может случиться и во время построения экрана).
   final changed = ValueNotifier<Map<String, bool>>({});
+  Map<String, bool> _changed = {};
+
+  void _setChanged(Map<String, bool> m) {
+    _changed = m;
+    scheduleMicrotask(() {
+      if (!mapEquals(changed.value, _changed)) changed.value = Map.of(_changed);
+    });
+  }
 
   /// Новые входы в ваш аккаунт, которые вы ещё не подтвердили («Это я»).
   final newLogins = ValueNotifier<List<String>>([]);
@@ -43,7 +60,22 @@ class Trust {
 
   void Function(String deviceName)? onNewLogin;
   void Function()? onOwnIdentityReset;
+
+  /// Устройства, заблокированные версией 4.19.2 (её способ защиты). Теперь защита — в самом клиенте,
+  /// а эти блокировки снимаются; запись удаляется только после успешного снятия.
   final Set<String> _blockedByUs = {};
+
+  /// Идёт сравнение эмодзи с этим собеседником (userId → вложенность): его сообщениям проверки
+  /// в личном чате нужны ключи, иначе подтвердить новый ключ было бы невозможно.
+  final Map<String, int> _verifying = {};
+
+  /// Последняя проверка ключей завершилась ошибкой — до успешной проверки отправка в защищённые
+  /// чаты запрещена, а ключи шифрования получают только ваши устройства (fail-closed).
+  bool _checkFailed = false;
+  bool get checkFailed => _checkFailed;
+
+  /// Текущие смены ключей (для проверок и тестов).
+  Map<String, bool> get changedNow => Map.unmodifiable(_changed);
 
   /// Ключи сбрасываем сами на этом устройстве («Забыли секретную фразу?») — не пугать уведомлением.
   /// Действует 10 минут: позже настоящий чужой сброс снова вызовет тревогу.
@@ -63,13 +95,18 @@ class Trust {
     _p = await SharedPreferences.getInstance();
     _pins = Map<String, String>.from(jsonDecode(_p!.getString('trust.pins') ?? '{}') as Map);
     _pinVerified = Map<String, bool>.from(jsonDecode(_p!.getString('trust.pinVerified') ?? '{}') as Map);
-    changed.value = Map<String, bool>.from(jsonDecode(_p!.getString('trust.changed') ?? '{}') as Map);
+    _changed = Map<String, bool>.from(jsonDecode(_p!.getString('trust.changed') ?? '{}') as Map);
+    changed.value = Map.of(_changed);
     final my = _p!.getStringList('trust.mySessions');
     _seeded = my != null;
     _mySessions = (my ?? []).toSet();
     newLogins.value = _p!.getStringList('trust.newLogins') ?? [];
     _blockedByUs.addAll(_p!.getStringList('trust.blockedDevs') ?? const []);
+    // рубежи в самом клиенте Matrix: проверка сразу после загрузки ключей, перед отправкой любого
+    // сообщения на сервер и перед отправкой ключей шифрования устройствам
     afterDeviceKeysUpdate = checkNow;
+    beforeRoomSend = guardRoomSend;
+    filterKeyRecipients = allowedDevices;
     client.onSync.stream.listen((s) {
       unawaited(checkNow());
       // список своих сеансов: при изменении своих устройств и раз в минуту
@@ -81,26 +118,42 @@ class Trust {
   Future<void> _save() async {
     await _p!.setString('trust.pins', jsonEncode(_pins));
     await _p!.setString('trust.pinVerified', jsonEncode(_pinVerified));
-    await _p!.setString('trust.changed', jsonEncode(changed.value));
+    await _p!.setString('trust.changed', jsonEncode(_changed));
     await _p!.setStringList('trust.mySessions', _mySessions.toList());
     await _p!.setStringList('trust.newLogins', newLogins.value);
   }
 
-  /// Проверить ключи сейчас. Вызывается после каждой синхронизации и — главное — сразу после того,
-  /// как модуль Matrix скачал новые ключи устройств (LastochkaClient.updateUserDeviceKeys), ещё до
-  /// любой отправки: окна, в котором ключ уже сменился, а проверка ещё не прошла, больше нет.
-  Future<void> checkNow() async {
-    _check();
-    await _enforce();
+  /// Проверить ключи сейчас — синхронно, без ожиданий. Вызывается перед каждой отправкой и раздачей
+  /// ключей шифрования, поэтому окна «ключ уже сменился, а проверка ещё не прошла» нет.
+  /// Ошибка проверки не скрывается: до следующей успешной проверки действует запрет (fail-closed).
+  void refresh() {
+    if (_p == null || !client.isLogged()) return;
+    try {
+      _check();
+      _checkFailed = false;
+    } catch (e, s) {
+      _checkFailed = true;
+      Logs().e('[Ласточка] Проверка ключей собеседников не удалась — отправка приостановлена', e, s);
+    }
   }
 
+  /// После каждой синхронизации и сразу после загрузки ключей устройств (LastochkaClient).
+  Future<void> checkNow() async {
+    refresh();
+    await _releaseOldBlocks();
+  }
+
+  /// Только для тестов: смоделировать сбой проверки ключей.
+  @visibleForTesting
+  bool debugFailChecks = false;
+
   void _check() {
-    if (_p == null || !client.isLogged() || client.prevBatch == null) return;
+    if (debugFailChecks) throw StateError('проверка ключей: тестовый сбой');
     final keys = <String, KeySnapshot>{
       for (final MapEntry(key: uid, value: list) in client.userDeviceKeys.entries)
         uid: KeySnapshot(list.masterKey?.publicKey, verified: list.masterKey?.verified ?? false, outdated: list.outdated),
     };
-    final r = TrustCore.evaluate(pins: _pins, pinVerified: _pinVerified, changed: changed.value, keys: keys, myId: client.userID ?? '');
+    final r = TrustCore.evaluate(pins: _pins, pinVerified: _pinVerified, changed: _changed, keys: keys, myId: client.userID ?? '');
     if (!r.dirty) return;
     _pins = r.pins;
     _pinVerified = r.pinVerified;
@@ -111,42 +164,113 @@ class Trust {
         onOwnIdentityReset?.call();
       }
     }
-    changed.value = r.changed;
+    if (!mapEquals(r.changed, _changed)) _setChanged(r.changed);
     unawaited(_save());
   }
 
-  /// Устройства собеседника со сменившимся (не принятым) ключом блокируются в самом модуле шифрования:
-  /// ключи сообщений и звонков им не отправляются НИ ОДНИМ путём, даже если какая-то отправка обошла проверку.
-  Future<void> _enforce() async {
-    final ch = changed.value;
-    var dirty = false;
-    for (final uid in ch.keys) {
-      final list = client.userDeviceKeys[uid];
-      if (list == null) continue;
-      for (final d in list.deviceKeys.values) {
-        if (d.blocked) continue;
-        try {
-          await d.setBlocked(true);
-          _blockedByUs.add('$uid|${d.deviceId}');
-          dirty = true;
-        } catch (_) {}
-      }
+  /// Кому можно отправить ключи шифрования (ключи сообщений, звонков, ответы на запросы ключей).
+  /// Устройства собеседника со сменившимся непринятым ключом исключаются — кроме идущего сравнения
+  /// эмодзи с ним. Проверка не удалась — ключи получают только ваши устройства.
+  List<DeviceKeys> allowedDevices(List<DeviceKeys> devices) {
+    refresh();
+    final me = client.userID;
+    if (_checkFailed) return devices.where((d) => d.userId == me).toList();
+    final c = _changed;
+    if (c.isEmpty) return devices;
+    final out = devices.where((d) => !c.containsKey(d.userId) || _verifying.containsKey(d.userId)).toList();
+    if (out.length != devices.length) {
+      Logs().w('[Ласточка] Ключи не отправлены ${devices.length - out.length} устройствам собеседников со сменившимся ключом');
     }
-    if (dirty) await _p?.setStringList('trust.blockedDevs', _blockedByUs.toList());
+    return out;
   }
 
-  /// Снять блокировку, которую ставили мы (после «Понятно» или подтверждения собеседника).
-  Future<void> _unblock(String uid) async {
-    final list = client.userDeviceKeys[uid];
-    final mine = _blockedByUs.where((k) => k.startsWith('$uid|')).toList();
-    for (final k in mine) {
-      final dev = k.substring(uid.length + 1);
-      try {
-        await list?.deviceKeys[dev]?.setBlocked(false);
-      } catch (_) {}
-      _blockedByUs.remove(k);
+  /// Последний рубеж перед отправкой ЛЮБОГО сообщения в чат на сервер (вызывает LastochkaClient.sendMessage).
+  /// Ошибка M_FORBIDDEN: модуль Matrix не повторяет отправку и помечает сообщение неотправленным.
+  void guardRoomSend(String roomId) {
+    final room = client.getRoomById(roomId);
+    if (room == null || !sendBlocked(room)) return;
+    if (_verifyingRoom(room)) return;
+    throw MatrixException.fromJson({
+      'errcode': 'M_FORBIDDEN',
+      'error': _checkFailed ? 'Ласточка: проверка ключей не удалась' : 'Ласточка: у собеседника сменился ключ',
+    });
+  }
+
+  /// Личный чат с собеседником, с которым сейчас идёт сравнение эмодзи (там идут сообщения проверки).
+  bool _verifyingRoom(Room room) {
+    if (_verifying.isEmpty || _checkFailed) return false;
+    final dm = room.directChatMatrixID;
+    if (dm == null || !_verifying.containsKey(dm)) return false;
+    final me = client.userID;
+    return room.getParticipants([Membership.join, Membership.invite]).every((u) => u.id == me || u.id == dm);
+  }
+
+  /// Сравнение эмодзи с собеседником: на это время его устройства получают ключи личного чата.
+  /// Если он так и не подтверждён — сеансы шифрования с ним заменяются новыми, чтобы устройства,
+  /// получившие ключи во время проверки, не прочли дальнейшую переписку.
+  Future<T> whileVerifying<T>(String userId, Future<T> Function() run) async {
+    if (userId == client.userID) return run();
+    _verifying.update(userId, (n) => n + 1, ifAbsent: () => 1);
+    try {
+      return await run();
+    } finally {
+      final n = (_verifying[userId] ?? 1) - 1;
+      if (n > 0) {
+        _verifying[userId] = n;
+      } else {
+        _verifying.remove(userId);
+        if (_changed.containsKey(userId)) await _rotateWith(userId);
+      }
     }
-    await _p?.setStringList('trust.blockedDevs', _blockedByUs.toList());
+  }
+
+  /// Заменить исходящие сеансы шифрования во всех защищённых чатах с этим собеседником.
+  Future<void> _rotateWith(String userId) async {
+    final enc = client.encryption;
+    if (enc == null) return;
+    for (final r in client.rooms) {
+      if (!r.encrypted) continue;
+      final has = r.directChatMatrixID == userId ||
+          r.getParticipants([Membership.join, Membership.invite]).any((u) => u.id == userId);
+      if (!has) continue;
+      try {
+        await enc.keyManager.clearOrUseOutboundGroupSession(r.id, wipe: true);
+      } catch (e, s) {
+        Logs().e('[Ласточка] Не удалось заменить сеанс шифрования', e, s);
+      }
+    }
+  }
+
+  /// Снять блокировки устройств, поставленные версией 4.19.2. Запись удаляется только когда
+  /// блокировка точно снята или устройства больше нет; иначе — повтор после следующей загрузки ключей.
+  Future<void> _releaseOldBlocks() async {
+    if (_blockedByUs.isEmpty) return;
+    var dirty = false;
+    for (final k in _blockedByUs.toList()) {
+      final i = k.indexOf('|');
+      if (i <= 0) {
+        _blockedByUs.remove(k);
+        dirty = true;
+        continue;
+      }
+      final uid = k.substring(0, i), dev = k.substring(i + 1);
+      final list = client.userDeviceKeys[uid];
+      if (list == null || list.outdated) continue; // ключи ещё не загружены — позже
+      final d = list.deviceKeys[dev];
+      if (d != null && d.blocked) {
+        try {
+          d.blocked = false;
+          await client.database.setBlockedUserDeviceKey(false, uid, dev);
+        } catch (e, s) {
+          d.blocked = true;
+          Logs().w('[Ласточка] Не удалось снять блокировку устройства — повторим позже', e, s);
+          continue;
+        }
+      }
+      _blockedByUs.remove(k);
+      dirty = true;
+    }
+    if (dirty) await _p?.setStringList('trust.blockedDevs', _blockedByUs.toList());
   }
 
   /// Новые входы в аккаунт — по списку сеансов сервера (видны и входы без шифрования).
@@ -201,9 +325,10 @@ class Trust {
     if (!TrustCore.canAccept(currentKey: mk?.publicKey, shownKey: shownKey, outdated: list?.outdated ?? true)) return false;
     _pins[userId] = mk!.publicKey!;
     _pinVerified[userId] = mk.verified;
-    changed.value = Map.of(changed.value)..remove(userId);
+    _setChanged(Map.of(_changed)..remove(userId));
     await _save();
-    await _unblock(userId);
+    // новые устройства собеседника пока не получали ключей — начинаем с ними новые сеансы шифрования
+    await _rotateWith(userId);
     return true;
   }
 
@@ -216,16 +341,19 @@ class Trust {
   /// В чате есть собеседник со сменившимся ключом, которого вы ещё не приняли, — отправлять туда нельзя
   /// ни одним способом (ветка, пересылка, отложенные, повтор неотправленных).
   bool sendBlocked(Room room) {
-    final c = changed.value;
-    if (c.isEmpty || !room.encrypted) return false;
-    // и загруженные участники, и все, чьи ключи известны модулю шифрования для этого чата
+    if (!room.encrypted) return false;
+    refresh();
+    if (_checkFailed) return true;
+    final c = _changed;
+    if (c.isEmpty) return false;
+    // и загруженные участники, и все, кого сервер называет участниками в сводке чата
     final members = room.getParticipants([Membership.join, Membership.invite]).map((u) => u.id).toSet();
     return TrustCore.sendBlocked(encrypted: room.encrypted, members: members, changed: c) ||
-        (c.keys.any((u) => room.summary.mHeroes?.contains(u) == true));
+        (c.keys.any((u) => room.summary.mHeroes?.contains(u) == true || room.directChatMatrixID == u));
   }
 
   List<String> changedIn(Room room) {
-    final c = changed.value;
+    final c = _changed;
     if (c.isEmpty) return const [];
     return room.getParticipants([Membership.join, Membership.invite]).map((u) => u.id).where(c.containsKey).toList();
   }

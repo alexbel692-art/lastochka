@@ -1,0 +1,41 @@
+name: Проверка кода (анализ и тесты)
+
+# быстрая проверка без сборок и без секретов: flutter analyze + flutter test на той же версии Flutter,
+# что и выпуск; запускается вручную и при изменениях в mobile/
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['mobile/**', '.github/workflows/check.yml']
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: mobile
+    shell: bash
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+      - name: Зависимости (строго по pubspec.lock)
+        run: |
+          tool/annotate.sh "pub get" flutter pub get
+          if ! git diff --quiet -- pubspec.lock; then
+            echo "::error::pubspec.lock изменился: $(git diff -- pubspec.lock | grep '^[-+] ' | head -20 | tr '\n' ' ')"
+            exit 1
+          fi
+      - name: Анализ кода
+        run: tool/annotate.sh "analyze" flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Тесты
+        run: tool/annotate.sh "tests" flutter test
