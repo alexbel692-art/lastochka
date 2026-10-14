@@ -1,6 +1,6 @@
 // Имя файла в чате нельзя «перевернуть» невидимыми символами (подмена расширения).
 import 'package:flutter_test/flutter_test.dart';
-import 'package:lastochka/pages/chat_bubble.dart';
+import 'package:lastochka/pages/chat.dart';
 
 void main() {
   test('символы смены направления текста убираются', () {
