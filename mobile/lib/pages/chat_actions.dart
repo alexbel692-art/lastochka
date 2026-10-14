@@ -79,7 +79,7 @@ extension _ChatActions on _ChatPageState {
   Future<void> _sendCaptionText(String caption) async {
     if (caption.isEmpty) return;
     ensureCanSend(room);
-    await room.sendTextEvent(caption, extraContent: ttlExtra(room));
+    await room.sendEvent({'msgtype': MessageTypes.Text, 'body': caption, ...ttlExtra(room)});
   }
 
   Future<void> _sendPaths(List<String> paths) async {
