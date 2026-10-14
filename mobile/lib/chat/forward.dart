@@ -10,20 +10,37 @@ import 'saved.dart';
 
 const forwardedKey = 'ru.lastochka.forwarded';
 
-/// Имя того, от кого переслано (если сообщение пересланное).
+/// Имя того, от кого переслано (если сообщение пересланное) — только отображаемое имя, без адреса сервера.
+/// Полный адрес показывает [forwardedAddress] (по нажатию на «Переслано от …»).
 String? forwardedFrom(Event e) {
   final f = e.content[forwardedKey];
   if (f is! Map) return null;
   final from = f['from'];
-  // имя берём из участников чата по адресу, а не из текста отправителя — его можно написать любым
+  final stored = f['name'];
+  final storedName = stored is String ? _clean(stored) : '';
   if (from is String && from.startsWith('@') && from.contains(':')) {
-    final u = e.room.unsafeGetUserFromMemoryOrFallback(from);
-    final name = u.calcDisplayname();
-    return '${name == from.localpart ? from : '$name ($from)'} · со слов отправителя';
+    // имя — из участников чата по адресу; если автора в этом чате нет, — то, что записал пересылающий
+    final name = _clean(e.room.unsafeGetUserFromMemoryOrFallback(from).calcDisplayname());
+    final local = from.localpart ?? from.substring(1, from.indexOf(':'));
+    if (name.isNotEmpty && name != local && name != from) return name;
+    return storedName.isNotEmpty ? storedName : local;
   }
-  final n = f['name'];
-  return n is String && n.isNotEmpty ? '«${n.characters.take(40)}» (не проверено)' : null;
+  return storedName.isNotEmpty ? storedName : null;
 }
+
+/// Адрес автора пересланного сообщения (для подробностей по нажатию).
+String? forwardedAddress(Event e) {
+  final f = e.content[forwardedKey];
+  final from = f is Map ? f['from'] : null;
+  return from is String && from.startsWith('@') && from.contains(':') ? from : null;
+}
+
+String _clean(String s) => s
+    .replaceAll(RegExp(r'[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]'), '')
+    .trim()
+    .characters
+    .take(40)
+    .toString();
 
 bool canForward(Event e) => !e.redacted && (e.type == EventTypes.Message || e.type == EventTypes.Sticker);
 

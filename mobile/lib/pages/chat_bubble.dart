@@ -320,7 +320,15 @@ class _Bubble extends StatelessWidget {
         if (fwd != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 2),
-            child: Text('Переслано от $fwd', style: TextStyle(fontSize: 13, color: accent, fontStyle: FontStyle.italic)),
+            child: GestureDetector(
+              // адрес сервера в пузыре не показываем; по нажатию — откуда пересланное, со слов отправителя
+              onTap: () {
+                final addr = forwardedAddress(e);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(addr == null ? 'Автор указан пересылающим и не проверен' : 'Автор: $addr — со слов того, кто переслал')));
+              },
+              child: Text('Переслано от $fwd', style: TextStyle(fontSize: 13, color: accent, fontStyle: FontStyle.italic)),
+            ),
           ),
         if (replyId != null) _ReplyPreview(room: room, timeline: timeline, eventId: replyId, onTap: onReplyTap),
         if (isText)
