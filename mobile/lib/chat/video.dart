@@ -25,6 +25,22 @@ import 'voice.dart' show fmtDur;
 import '../system/diag.dart';
 
 const roundKey = 'ru.lastochka.round';
+
+/// Подпись к фото, видео или файлу (как в Element и Telegram, MSC2530): если в сообщении есть имя файла
+/// (filename), а текст (body) с ним не совпадает — текст и есть подпись. Голосовые и «кружки» — без подписи.
+String? captionOf(Event e) {
+  final t = e.messageType;
+  if (t != MessageTypes.Image && t != MessageTypes.Video && t != MessageTypes.File) return null;
+  if (e.content[roundKey] == true) return null;
+  final fn = e.content.tryGet<String>('filename');
+  final b = e.body.trim();
+  if (fn == null || b.isEmpty || b == fn) return null;
+  return b;
+}
+
+/// Поля сообщения для подписи к вложению: имя файла остаётся в filename, подпись — в body.
+Map<String, Object?> captionContent(String caption, String fileName) =>
+    caption.trim().isEmpty ? const {} : {'body': caption.trim(), 'filename': fileName};
 // Windows — через Media Foundation (video_player_win); если система не умеет (например, Windows Server без
 // компонента «Media Foundation»), видео откроется в проигрывателе системы
 final bool videoSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isWindows;
@@ -106,11 +122,13 @@ Future<String?> recordRound(Room room, {Event? inReplyTo}) async {
 }
 
 /// Выбрать видео из галереи и отправить (без места съёмки и прочих сведений).
-Future<String?> pickAndSendVideo(Room room, {Event? inReplyTo}) async {
+Future<String?> pickAndSendVideo(Room room, {Event? inReplyTo, Future<String?> Function(String name)? askCaption}) async {
   final x = await ImagePicker().pickVideo(source: ImageSource.gallery);
   if (x == null) return null;
   try {
-    return await sendVideoFile(room, x.path, x.name, inReplyTo: inReplyTo);
+    final caption = askCaption == null ? '' : await askCaption(x.name);
+    if (caption == null) return null; // передумали отправлять
+    return await sendVideoFile(room, x.path, x.name, inReplyTo: inReplyTo, caption: caption);
   } finally {
     // копия видео, которую сделал выбор файла, не должна оставаться в кэше
     if (Platform.isAndroid || Platform.isIOS) {
@@ -163,7 +181,7 @@ Future<String?> compressVideo(String src, {bool round = false}) async {
 
 /// Отправить видео с диска: при необходимости сжать, убрать скрытые сведения, приложить превью.
 /// Исходный файл не трогается. Возвращает текст ошибки или null.
-Future<String?> sendVideoFile(Room room, String path, String name, {Event? inReplyTo, bool round = false, Map<String, Object?> extra = const {}}) async {
+Future<String?> sendVideoFile(Room room, String path, String name, {Event? inReplyTo, bool round = false, Map<String, Object?> extra = const {}, String caption = ''}) async {
   var size = await File(path).length();
   if (size > (compressSupported ? 4096 : 100) * 1024 * 1024) return 'Видео слишком большое — отправьте его файлом';
   String? tmp;
@@ -193,10 +211,11 @@ Future<String?> sendVideoFile(Room room, String path, String name, {Event? inRep
     // превью-кадр, чтобы у собеседника видео выглядело как в Telegram, а не как файл
     final frame = await videoFrame(path);
     ensureCanSend(room);
+    final fileName = round ? 'Видеосообщение.mp4' : '$base.${mov ? 'mov' : 'mp4'}';
     await room.sendFileEvent(
       MatrixVideoFile(
         bytes: clean,
-        name: round ? 'Видеосообщение.mp4' : '$base.${mov ? 'mov' : 'mp4'}',
+        name: fileName,
         mimeType: mov ? 'video/quicktime' : 'video/mp4',
         width: frame != null && frame.videoW > 0 ? frame.videoW : null,
         height: frame != null && frame.videoH > 0 ? frame.videoH : null,
@@ -204,7 +223,7 @@ Future<String?> sendVideoFile(Room room, String path, String name, {Event? inRep
       ),
       thumbnail: frame == null ? null : MatrixImageFile(bytes: frame.jpeg, name: 'thumbnail.jpg', mimeType: 'image/jpeg', width: frame.w, height: frame.h),
       inReplyTo: inReplyTo,
-      extraContent: {if (round) 'body': 'Видеосообщение', if (round) roundKey: true, ...extra, ...ttlExtra(room)},
+      extraContent: {if (round) 'body': 'Видеосообщение', if (round) roundKey: true, ...extra, if (!round) ...captionContent(caption, fileName), ...ttlExtra(room)},
     );
     return null;
   } finally {

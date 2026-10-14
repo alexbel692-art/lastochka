@@ -157,7 +157,8 @@ void _handle(String action, String payload) {
     // без верной метки — не наше уведомление: ничего не делаем со звонком
     if (i < 0 || rest.substring(i + 1) != _callNonce) return;
     onCallAction?.call(action.isEmpty ? 'open' : action, rest.substring(0, i));
-    if (action != 'decline') showMainWindow();
+    // ответ и отбой из окна на экране блокировки — без открытия Ласточки
+    if (action != 'decline' && action != 'answer_locked' && action != 'hangup') showMainWindow();
     return;
   }
   if (payload.isEmpty) return;
@@ -255,6 +256,16 @@ const _callId = 7777;
 Future<void> showCallNotification(CallSession call) async {
   final name = call.remoteUser?.calcDisplayname() ?? call.room.getLocalizedDisplayname();
   final video = call.type == CallType.kVideo;
+  if (Platform.isAndroid) {
+    // Android: своё уведомление и отдельное окно поверх блокировки (CallScreen.kt) — главное окно
+    // Ласточки свои настройки не меняет, поэтому после звонка нечему «застывать»
+    try {
+      await _system.invokeMethod('showCall', {'callId': call.callId, 'name': name, 'video': video, 'payload': 'call:${call.callId}:$_callNonce'});
+    } catch (e) {
+      Logs().w('[Ласточка] уведомление о звонке не показано', e);
+    }
+    return;
+  }
   try {
     await _fln.show(
       id: _callId,
@@ -298,7 +309,16 @@ Future<void> clearAllNotifications() async {
 
 Future<void> clearCallNotification() async {
   try {
+    if (Platform.isAndroid) await _system.invokeMethod('cancelCall');
     await _fln.cancel(id: _callId);
+  } catch (_) {}
+}
+
+/// Android: состояние звонка для окна поверх блокировки (active — соединились, ended — закончен).
+Future<void> callScreenState(String callId, String state) async {
+  if (!Platform.isAndroid) return;
+  try {
+    await _system.invokeMethod('callUi', {'callId': callId, 'state': state});
   } catch (_) {}
 }
 

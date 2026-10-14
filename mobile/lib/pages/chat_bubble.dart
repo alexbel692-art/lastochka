@@ -231,6 +231,24 @@ class _Bubble extends StatelessWidget {
       );
     }
 
+    // подпись к фото, видео или файлу — под вложением, как в Telegram
+    final caption = event.redacted || (album != null && album!.length > 1) ? null : captionOf(e);
+    if (caption != null) {
+      content = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        content,
+        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: RichMessage(
+            event: e,
+            highlight: highlight,
+            style: TextStyle(fontSize: 16, height: 1.3, color: mine ? Bubbles.outText(context) : Theme.of(context).textTheme.bodyLarge?.color),
+            linkColor: mine ? Bubbles.outText(context) : accent,
+          ),
+        ),
+      ]);
+    }
+
     // любое предупреждение о подлинности (неподтверждённое или неизвестное устройство, чужой ключ, ключ
     // переслан не автором) — содержимое скрыто, пока вы сами не нажмёте «Показать»; так же поступает Element
     final untrustedDevice = warn != null;
@@ -261,7 +279,7 @@ class _Bubble extends StatelessWidget {
     final bareMedia = isSticker || (isRound(e) && !event.redacted); // стикер и «кружок» без пузыря, как в Telegram
     final isText = !isImage && !isSticker && !isPollStart(e) && e.messageType != MessageTypes.Audio && e.messageType != MessageTypes.File && e.messageType != MessageTypes.Video;
     final fwd = event.redacted ? null : forwardedFrom(e);
-    final mediaOnly = !event.redacted && (isImage || e.messageType == MessageTypes.Video || (album != null && album!.length > 1)) && !isRound(e);
+    final mediaOnly = !event.redacted && (isImage || e.messageType == MessageTypes.Video || (album != null && album!.length > 1)) && !isRound(e) && caption == null;
 
     final reactRow = reactions.isEmpty
         ? null

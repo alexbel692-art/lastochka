@@ -121,6 +121,14 @@ class MainApplication : Application() {
             try { channel?.invokeMethod("redraw", null) } catch (_: Throwable) {}
         }
 
+        /** Действие из окна звонка или уведомления — в Dart (как нажатие на уведомление). */
+        fun sendTap(action: String, payload: String) {
+            val tap = mapOf("action" to action, "payload" to payload)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (dartReady) channel?.invokeMethod("notificationTap", tap) else pendingTaps.add(tap)
+            }
+        }
+
         /** Нажатие на уведомление: передать в Dart (если Ласточка ещё запускается — после готовности). */
         fun forwardTap(intent: Intent?) {
             val a = intent?.action ?: return
@@ -168,6 +176,17 @@ class MainApplication : Application() {
                     "hideRecents" -> {
                         MainActivity.hideRecents = call.arguments == true
                         MainActivity.current?.applySecure()
+                        result.success(true)
+                    }
+                    // входящий звонок: уведомление и окно поверх блокировки — отдельное (CallScreen.kt)
+                    "showCall" -> {
+                        CallScreen.show(ctx, call.argument<String>("callId") ?: "", call.argument<String>("name") ?: "",
+                            call.argument<Boolean>("video") == true, call.argument<String>("payload") ?: "")
+                        result.success(true)
+                    }
+                    "cancelCall" -> { CallScreen.cancel(ctx); result.success(true) }
+                    "callUi" -> {
+                        CallScreen.update(ctx, call.argument<String>("callId") ?: "", call.argument<String>("state") ?: "")
                         result.success(true)
                     }
                     "callMode" -> {

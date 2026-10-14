@@ -16,33 +16,80 @@ extension _ChatActions on _ChatPageState {
       final text = await Clipboard.getData(Clipboard.kTextPlain);
       if ((text?.text ?? '').isNotEmpty) return;
       if (!mounted) return;
-      if (!await _confirmSend('Отправить картинку из буфера обмена?')) return;
+      final caption = await _askCaption('Отправить картинку из буфера обмена?');
+      if (caption == null) return;
       final clean = await cleanPhoto(img, 'Картинка.png');
       ensureCanSend(room);
-      await room.sendFileEvent(MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height), extraContent: ttlExtra(room));
+      await room.sendFileEvent(MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height),
+          extraContent: {...captionContent(caption, clean.name), ...ttlExtra(room)});
       _toBottom();
     } catch (_) {}
   }
 
-  Future<bool> _confirmSend(String title, [List<String> names = const []]) async =>
-      await showDialog<bool>(
-        context: context,
-        builder: (d) => AlertDialog(
+  /// Окно перед отправкой вложений: что уходит и подпись к нему (как в Telegram). null — отмена.
+  /// Если в поле ввода уже набран текст — он становится подписью и из поля убирается.
+  Future<String?> _askCaption(String title, [List<String> names = const []]) async {
+    final draft = _text.text.trim();
+    final ctl = TextEditingController(text: draft);
+    final r = await showDialog<String>(
+      context: context,
+      builder: (d) {
+        void send() => Navigator.pop(d, ctl.text);
+        return AlertDialog(
           title: Text(title),
-          content: names.isEmpty ? null : Text(names.take(8).join('\n') + (names.length > 8 ? '\n… и ещё ${names.length - 8}' : '')),
+          content: SizedBox(
+            width: 420,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if (names.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(names.take(8).join('\n') + (names.length > 8 ? '\n… и ещё ${names.length - 8}' : ''),
+                      style: TextStyle(color: Theme.of(d).hintColor)),
+                ),
+              TextField(
+                controller: ctl,
+                autofocus: isDesktop,
+                minLines: 1,
+                maxLines: 5,
+                textCapitalization: TextCapitalization.sentences,
+                textInputAction: isDesktop ? TextInputAction.send : TextInputAction.newline,
+                onSubmitted: isDesktop ? (_) => send() : null,
+                decoration: const InputDecoration(hintText: 'Добавить подпись…'),
+              ),
+            ]),
+          ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
-            FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Отправить')),
+            TextButton(onPressed: () => Navigator.pop(d), child: const Text('Отмена')),
+            FilledButton(onPressed: send, child: const Text('Отправить')),
           ],
-        ),
-      ) ==
-      true;
+        );
+      },
+    );
+    ctl.dispose();
+    if (r == null) return null;
+    // набранный текст ушёл подписью — из поля ввода его убираем
+    if (draft.isNotEmpty) {
+      _text.clear();
+      Drafts.instance.set(room.id, '');
+    }
+    return r.trim();
+  }
+
+  /// Подпись к нескольким вложениям — отдельным сообщением после них (у альбома одна подпись).
+  Future<void> _sendCaptionText(String caption) async {
+    if (caption.isEmpty) return;
+    ensureCanSend(room);
+    await room.sendTextEvent(caption, extraContent: ttlExtra(room));
+  }
 
   Future<void> _sendPaths(List<String> paths) async {
     final files = paths.map(File.new).where((f) => f.existsSync()).toList();
     if (files.isEmpty || !mounted) return;
     final names = files.map((f) => p.basename(f.path)).toList();
-    if (!await _confirmSend(files.length == 1 ? 'Отправить файл?' : 'Отправить файлы (${files.length})?', names)) return;
+    final caption = await _askCaption(files.length == 1 ? 'Отправить файл?' : 'Отправить файлы (${files.length})?', names);
+    if (caption == null) return;
+    // одно вложение — подпись к нему; несколько — подпись отдельным сообщением после них
+    final single = files.length == 1 ? caption : '';
     final reply = _replyTo;
     _set(() => _replyTo = null);
     var failed = 0;
@@ -54,20 +101,26 @@ extension _ChatActions on _ChatPageState {
         if (RegExp(r'\.(jpe?g|png|webp)$').hasMatch(lower)) {
           final clean = await cleanPhoto(bytes, name);
           ensureCanSend(room);
-          await room.sendFileEvent(MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height), inReplyTo: reply, extraContent: ttlExtra(room));
+          await room.sendFileEvent(MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height),
+              inReplyTo: reply, extraContent: {...captionContent(single, clean.name), ...ttlExtra(room)});
         } else if (RegExp(r'\.(mp4|mov|m4v)$').hasMatch(lower)) {
           // видео — без места съёмки; не получилось очистить — не отправляем
           final clean = await cleanVideo(bytes);
           if (clean == null) throw StateError('video');
           ensureCanSend(room);
-          await room.sendFileEvent(MatrixFile.fromMimeType(bytes: clean, name: name), inReplyTo: reply, extraContent: ttlExtra(room));
+          await room.sendFileEvent(MatrixFile.fromMimeType(bytes: clean, name: name), inReplyTo: reply, extraContent: {...captionContent(single, name), ...ttlExtra(room)});
         } else {
           ensureCanSend(room);
-          await room.sendFileEvent(MatrixFile.fromMimeType(bytes: bytes, name: name), inReplyTo: reply, extraContent: ttlExtra(room));
+          await room.sendFileEvent(MatrixFile.fromMimeType(bytes: bytes, name: name), inReplyTo: reply, extraContent: {...captionContent(single, name), ...ttlExtra(room)});
         }
       } catch (_) {
         failed++;
       }
+    }
+    if (files.length > 1 && failed < files.length) {
+      try {
+        await _sendCaptionText(caption);
+      } catch (_) {}
     }
     if (failed > 0) _toast('Не отправлено файлов: $failed');
     _toBottom();
@@ -280,6 +333,24 @@ extension _ChatActions on _ChatPageState {
   /// Отправить фото и видео; если их несколько — одним альбомом. Ответ цепляется к последнему.
   Future<void> _sendMedia(List<_Media> items) async {
     if (items.isEmpty) return;
+    final videos = items.where((m) => m.video).length;
+    final what = items.length == 1
+        ? (videos == 1 ? 'Отправить видео?' : 'Отправить фото?')
+        : 'Отправить ${videos == items.length ? 'видео' : videos == 0 ? 'фото' : 'фото и видео'} (${items.length})?';
+    final caption = await _askCaption(what);
+    if (caption == null) {
+      // передумали — временные копии не оставляем
+      for (final m in items) {
+        final del = m.temp ? null : m.tempPath;
+        if (del != null) {
+          try {
+            await File(del).delete();
+          } catch (_) {}
+        }
+      }
+      return;
+    }
+    final single = items.length == 1 ? caption : '';
     final reply = _replyTo;
     _set(() => _replyTo = null);
     final album = items.length > 1 ? <String, Object?>{albumKey: newAlbumId()} : const <String, Object?>{};
@@ -295,7 +366,7 @@ extension _ChatActions on _ChatPageState {
             failed++;
             continue;
           }
-          final err = await sendVideoFile(room, path, m.name, inReplyTo: r, extra: album);
+          final err = await sendVideoFile(room, path, m.name, inReplyTo: r, extra: album, caption: single);
           if (err != null) {
             _toast(err);
             failed++;
@@ -319,7 +390,7 @@ extension _ChatActions on _ChatPageState {
           await room.sendFileEvent(
             MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height),
             inReplyTo: r,
-            extraContent: {...album, ...ttlExtra(room)},
+            extraContent: {...album, ...captionContent(single, clean.name), ...ttlExtra(room)},
           );
         }
       } catch (e, st) {
@@ -335,6 +406,11 @@ extension _ChatActions on _ChatPageState {
           } catch (_) {}
         }
       }
+    }
+    if (items.length > 1 && failed < items.length) {
+      try {
+        await _sendCaptionText(caption);
+      } catch (_) {}
     }
     if (failed > 0 && items.length > 1) _toast('Не отправлено: $failed из ${items.length}');
     _toBottom();
@@ -388,7 +464,7 @@ extension _ChatActions on _ChatPageState {
         if (x == null) return;
         await _sendMedia([_Media(x.name, bytes: () => x.readAsBytes())]);
       } else if (a == 'video') {
-        final err = await pickAndSendVideo(room, inReplyTo: reply);
+        final err = await pickAndSendVideo(room, inReplyTo: reply, askCaption: (name) => _askCaption('Отправить видео?', [name]));
         if (err != null) _toast(err);
         _set(() => _replyTo = null);
       } else if (a == 'round') {
@@ -400,10 +476,13 @@ extension _ChatActions on _ChatPageState {
       } else if (a == 'file') {
         final f = await FilePicker.pickFile();
         if (f == null) return;
+        final caption = await _askCaption('Отправить файл?', [f.name]);
+        if (caption == null) return;
         final bytes = await f.readAsBytes();
         _set(() => _replyTo = null);
         ensureCanSend(room);
-        await room.sendFileEvent(MatrixFile.fromMimeType(bytes: bytes, name: f.name), inReplyTo: reply, extraContent: ttlExtra(room));
+        await room.sendFileEvent(MatrixFile.fromMimeType(bytes: bytes, name: f.name),
+            inReplyTo: reply, extraContent: {...captionContent(caption, f.name), ...ttlExtra(room)});
       }
       _toBottom();
     } catch (e, st) {

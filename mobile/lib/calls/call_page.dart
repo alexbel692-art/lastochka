@@ -169,8 +169,8 @@ class _CallPageState extends State<CallPage> {
     if (_closing) return;
     _closing = true;
     if (mounted) setState(() {});
-    // короткая пауза, чтобы было видно «Звонок завершён»; сигнал отбоя играет модуль звонков
-    await Future.delayed(const Duration(milliseconds: 900));
+    // короткая пауза, чтобы было видно «Звонок завершён» (как в Telegram и WhatsApp — меньше полсекунды)
+    await Future.delayed(const Duration(milliseconds: 400));
     if (!mounted) return;
     Diag.mark('звонок: закрываем экран');
     final route = ModalRoute.of(context);

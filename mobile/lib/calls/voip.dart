@@ -81,7 +81,8 @@ class LastochkaVoip implements WebRTCDelegate {
     ringing = session;
     callActive.value = true;
     currentCall.value = session;
-    await setCallMode(true);
+    // главное окно «поверх блокировки» больше не переключаем: на заблокированном Android-телефоне звонок
+    // показывает отдельное окно (CallScreen.kt), как в Telegram и WhatsApp
     navKey.currentState?.push(MaterialPageRoute(builder: (_) => CallPage(session: session)));
     // приложение свёрнуто или закрыто — полноэкранное уведомление; на компьютере — показать окно
     if (isDesktopOS) {
@@ -93,6 +94,8 @@ class LastochkaVoip implements WebRTCDelegate {
         clearCallNotification();
         if (ringing == session) ringing = null;
       }
+      if (s == CallState.kConnected) callScreenState(session.callId, 'active');
+      if (s == CallState.kEnded) callScreenState(session.callId, 'ended');
     });
   }
 
@@ -114,18 +117,10 @@ class LastochkaVoip implements WebRTCDelegate {
     callActive.value = voip.currentCID != null && voip.currentCID?.callId != session.callId;
     if (currentCall.value == session) currentCall.value = null;
     if (ringing == session) ringing = null;
-    // телефон заблокирован — сразу убираем Ласточку с экрана блокировки, не дожидаясь паузы ниже
-    if (await keyguardLocked() && (voip.currentCID == null || voip.currentCID?.callId == session.callId)) {
-      await setCallMode(false);
-    }
-    await Future.delayed(const Duration(milliseconds: 1400));
+    // окно на экране блокировки (если было) закрывается сразу; главное окно ничего не перестраивает
+    await callScreenState(session.callId, 'ended');
     await clearCallNotification();
     Diag.mark('звонок: уведомление убрано');
-    // «поверх блокировки» выключаем, только если не начался новый звонок
-    if (voip.currentCID == null || voip.currentCID?.callId == session.callId) {
-      await setCallMode(false);
-      Diag.mark('звонок: режим звонка выключен');
-    }
   }
 
   @override
@@ -172,8 +167,26 @@ void initVoip() {
   voip = VoIP(client, LastochkaVoip());
   // кнопки «Ответить» / «Отклонить» в уведомлении
   onCallAction = (action, callId) {
+    // отбой из окна на экране блокировки — для идущего звонка
+    if (action == 'hangup') {
+      final cur = currentCall.value;
+      if (cur != null && cur.callId == callId && !cur.callHasEnded) cur.hangup(reason: CallErrorCode.userHangup);
+      return;
+    }
     final c = ringing;
     if (c == null || c.callId != callId) return;
+    if (action == 'answer_locked') {
+      // ответ на заблокированном телефоне — только голосом, камера не включается
+      CallSounds.stop();
+      answerCall(c).then((_) async {
+        if (c.type == CallType.kVideo) {
+          try {
+            await c.setLocalVideoMuted(true);
+          } catch (_) {}
+        }
+      }, onError: (_) {});
+      return;
+    }
     if (action == 'answer') {
       CallSounds.stop();
       answerCall(c).then((_) async {

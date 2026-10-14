@@ -38,6 +38,11 @@ def manifest(s):
         </receiver>
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"/>
         <receiver android:exported="false" android:name=".InstallStatusReceiver"/>
+        <receiver android:exported="false" android:name=".CallActionReceiver"/>
+        <activity android:name=".CallLockActivity" android:exported="false"
+            android:showWhenLocked="true" android:turnScreenOn="true"
+            android:excludeFromRecents="true" android:taskAffinity="app.lastochka.call"
+            android:launchMode="singleTop" android:theme="@android:style/Theme.Material.NoActionBar"/>
 '''
     if '.SyncService' not in s:
         s = s.replace('</application>', comps + '    </application>', 1)
