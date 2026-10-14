@@ -211,7 +211,7 @@ class _Bubble extends StatelessWidget {
           const SizedBox(width: 10),
           Flexible(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(e.content.tryGet<String>('filename') ?? e.body, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w500)),
+              Text(shownFileName(e), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w500)),
               if (size != null) Text(_size(size), style: TextStyle(fontSize: 12.5, color: hint)),
             ]),
           ),
@@ -429,3 +429,14 @@ class _ReplyPreview extends StatelessWidget {
 }
 
 // не больше 60 картинок в памяти (уменьшенные копии лёгкие, но фото целиком — нет)
+
+/// Имя файла для показа: без невидимых символов и «переворота» текста — иначе «отчёт\u202Efdp.exe»
+/// выглядит как безобидный «…exe.pdf». Сохранение и открытие файла чистят имя так же.
+String shownFileName(Event e) => cleanShownName(e.content.tryGet<String>('filename') ?? e.body);
+
+String cleanShownName(String name) {
+  final n = name
+      .replaceAll(RegExp(r'[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]'), '')
+      .trim();
+  return n.isEmpty ? 'Файл' : n;
+}
