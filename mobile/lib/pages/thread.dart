@@ -8,6 +8,7 @@ import 'package:matrix/matrix.dart';
 
 import '../widgets/wallpaper.dart';
 import '../chat/formatting.dart';
+import '../chat/names.dart';
 import '../main.dart';
 import '../system/trust.dart';
 import '../system/diag.dart';
@@ -127,7 +128,7 @@ class _ThreadPageState extends State<ThreadPage> {
               borderRadius: BorderRadius.circular(16),
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              if (!mine) Text(u.calcDisplayname(), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5, color: t.colorScheme.primary)),
+              if (!mine) Text(memberName(e.room, e.senderId, name: u.calcDisplayname()), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5, color: t.colorScheme.primary)),
               e.type == EventTypes.Encrypted
                   ? Text('Сообщение ещё не расшифровано', style: TextStyle(fontStyle: FontStyle.italic, color: t.hintColor))
                   : RichMessage(event: e, style: TextStyle(fontSize: 15.5, height: 1.3, color: mine && !root ? Bubbles.outText(context) : t.textTheme.bodyLarge?.color)),

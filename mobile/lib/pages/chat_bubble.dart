@@ -58,7 +58,8 @@ class _Bubble extends StatelessWidget {
     final metaColor = mine ? (Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF4FAE4E)) : hint;
     final time = DateFormat.Hm('ru').format(event.originServerTs);
     final sender = event.senderFromMemoryOrFallback;
-    final name = sender.calcDisplayname();
+    // у тёзок в группе — с логином, чтобы под чужое имя нельзя было замаскироваться
+    final name = memberName(room, event.senderId, name: sender.calcDisplayname());
     final isSticker = e.type == EventTypes.Sticker && !event.redacted;
     final isImage = e.messageType == MessageTypes.Image && !event.redacted;
     final edited = !event.redacted && (e.eventId != event.eventId || event.aggregatedEvents(timeline, RelationshipTypes.edit).any((x) => x.senderId == event.senderId));
@@ -426,7 +427,7 @@ class _ReplyPreview extends StatelessWidget {
               border: Border(left: BorderSide(color: c, width: 3)),
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-              Text(e?.senderFromMemoryOrFallback.calcDisplayname() ?? '…', maxLines: 1, style: TextStyle(color: c, fontWeight: FontWeight.w600, fontSize: 13)),
+              Text(e == null ? '…' : memberName(room, e.senderId, name: e.senderFromMemoryOrFallback.calcDisplayname()), maxLines: 1, style: TextStyle(color: c, fontWeight: FontWeight.w600, fontSize: 13)),
               Text(e == null ? '' : eventPreview(e, timeline), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
             ]),
           ),

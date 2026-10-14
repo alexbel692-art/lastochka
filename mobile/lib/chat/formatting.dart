@@ -8,6 +8,7 @@ import 'package:html/parser.dart' as html;
 import 'package:matrix/matrix.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../system/link_safety.dart';
+import 'names.dart';
 import '../system/diag.dart';
 
 String _esc(String s) => s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
@@ -305,8 +306,21 @@ class _RichMessageState extends State<RichMessage> {
     return out;
   }
 
+  int _depth = 0;
+
   List<InlineSpan> _element(dom.Element el, TextStyle st, Color accent) {
-    List<InlineSpan> kids(TextStyle s) => _nodes(el.nodes, s, accent);
+    // слишком глубокая вложенность (тысячи <b><b><b>…) — показываем просто текст: такое сообщение
+    // не должно «ронять» чат у всех участников
+    if (_depth > 48) return _linkify(el.text, st, accent);
+    List<InlineSpan> kids(TextStyle s) {
+      _depth++;
+      try {
+        return _nodes(el.nodes, s, accent);
+      } finally {
+        _depth--;
+      }
+    }
+
     switch (el.localName) {
       case 'mx-reply':
         return const [];
@@ -354,8 +368,14 @@ class _RichMessageState extends State<RichMessage> {
         final href = el.attributes['href'] ?? '';
         final user = RegExp(r'^https://matrix\.to/#/(@[^/?]+)').firstMatch(href)?.group(1);
         if (user != null) {
-          // упоминание участника
-          return [TextSpan(text: el.text.startsWith('@') ? el.text : '@${el.text}', style: st.copyWith(color: accent, fontWeight: FontWeight.w600))];
+          // упоминание участника: имя — настоящее, из чата, а не текст ссылки (его отправитель пишет какой угодно)
+          String id;
+          try {
+            id = Uri.decodeComponent(user);
+          } catch (_) {
+            id = user;
+          }
+          return [TextSpan(text: '@${memberName(widget.event.room, id)}', style: st.copyWith(color: accent, fontWeight: FontWeight.w600))];
         }
         final shown = el.text.isEmpty || el.text == href || _urlRe.hasMatch(el.text) && el.text.trim() == _urlRe.firstMatch(el.text)?[0] ? prettyUrl(el.text.isEmpty ? href : el.text) : el.text;
         return [
