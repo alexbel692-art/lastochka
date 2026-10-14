@@ -367,6 +367,11 @@ void main() {
     expect(mySends(group), groupBefore);
     expect(bobGotKeysFor.length, keysBefore, reason: 'новые ключи сеансов Бобу не раздаются');
     expect(bobSaw, isNot(contains('не должно уйти')));
+    // то же сообщение с тем же номером отправки (как повтор неотправленного) — тоже не уходит
+    try {
+      await myRoom(dm).sendTextEvent('повтор', txid: 'retry-1');
+    } catch (_) {}
+    expect(bobSaw, isNot(contains('повтор')));
   });
 
   test('SEC-04: замена сеанса шифрования не удалась — сравнение не начинается, чат ждёт замены', () async {
@@ -440,5 +445,15 @@ void main() {
     expect(await Trust.instance.acceptVerified(bob, startedKey), AcceptResult.done);
     await myRoom(dm).sendTextEvent('снова пишем');
     await waitFor(() => bobSaw.contains('снова пишем'), 'Боб расшифровал сообщение после подтверждения');
+    // повторная отправка с тем же номером, что был заблокирован, — теперь проходит
+    await myRoom(dm).sendTextEvent('повтор', txid: 'retry-1');
+    await waitFor(() => bobSaw.contains('повтор'), 'повторная отправка дошла');
+    // параллельные отправки настоящим потоком модуля Matrix
+    await Future.wait([
+      myRoom(dm).sendTextEvent('параллельно 1'),
+      myRoom(dm).sendTextEvent('параллельно 2'),
+      myRoom(dm).sendTextEvent('параллельно 3'),
+    ]);
+    await waitFor(() => ['параллельно 1', 'параллельно 2', 'параллельно 3'].every(bobSaw.contains), 'параллельные дошли');
   });
 }

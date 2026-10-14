@@ -248,7 +248,7 @@ Future<void> Function(String roomId, RoomSendInfo what)? beforeRoomSend;
 
 /// Отбор устройств, которым можно отправить зашифрованное личное сообщение (ключи сеансов,
 /// события проверки и т. п.) — с учётом того, ЧТО отправляется (Trust.allowedDevices).
-List<DeviceKeys> Function(List<DeviceKeys> devices, String eventType, Map<String, dynamic> message)? filterKeyRecipients;
+Future<List<DeviceKeys>> Function(List<DeviceKeys> devices, String eventType, Map<String, dynamic> message)? filterKeyRecipients;
 
 /// Клиент Ласточки. Защита при смене ключа собеседника встроена в сам клиент, а не только в экраны:
 /// • после каждой загрузки ключей устройств — немедленная проверка;
@@ -307,8 +307,11 @@ class LastochkaClient extends Client {
   }
 
   /// Пока защита не подключена (запуск) — ключи только своим устройствам (fail-closed).
-  List<DeviceKeys> _allowed(List<DeviceKeys> devices, String eventType, Map<String, dynamic> message) =>
-      filterKeyRecipients?.call(devices, eventType, message) ?? devices.where((d) => d.userId == userID).toList();
+  Future<List<DeviceKeys>> _allowed(List<DeviceKeys> devices, String eventType, Map<String, dynamic> message) async {
+    final f = filterKeyRecipients;
+    if (f == null) return devices.where((d) => d.userId == userID).toList();
+    return f(devices, eventType, message);
+  }
 
   @override
   Future<String> sendMessage(String roomId, String eventType, String txnId, Map<String, Object?> body) async {
@@ -335,16 +338,16 @@ class LastochkaClient extends Client {
     Map<String, dynamic> message, {
     String? messageId,
     bool onlyVerified = false,
-  }) {
-    final allowed = _allowed(deviceKeys, eventType, message);
-    if (allowed.isEmpty) return Future.value();
+  }) async {
+    final allowed = await _allowed(deviceKeys, eventType, message);
+    if (allowed.isEmpty) return;
     return super.sendToDeviceEncrypted(allowed, eventType, message, messageId: messageId, onlyVerified: onlyVerified);
   }
 
   @override
-  Future<void> sendToDeviceEncryptedChunked(List<DeviceKeys> deviceKeys, String eventType, Map<String, dynamic> message) {
-    final allowed = _allowed(deviceKeys, eventType, message);
-    if (allowed.isEmpty) return Future.value();
+  Future<void> sendToDeviceEncryptedChunked(List<DeviceKeys> deviceKeys, String eventType, Map<String, dynamic> message) async {
+    final allowed = await _allowed(deviceKeys, eventType, message);
+    if (allowed.isEmpty) return;
     return super.sendToDeviceEncryptedChunked(allowed, eventType, message);
   }
 }

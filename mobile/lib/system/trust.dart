@@ -32,7 +32,7 @@ void ensureCanSend(Room room) {
   if (Trust.instance.checkFailed) {
     throw const SendBlocked('Не удалось проверить ключи собеседников — отправка в защищённые чаты приостановлена. Попробуйте через минуту');
   }
-  if (!client.encryptionEnabled && !Trust.instance.debugAllowNoEncryption) {
+  if (!client.encryptionEnabled && Trust.instance.encryptionRequired) {
     throw const SendBlocked('Шифрование на этом устройстве не работает — отправка в защищённые чаты запрещена. Перезапустите Ласточку');
   }
   if (Trust.instance.rotationPending.contains(room.id)) {
@@ -107,23 +107,108 @@ class Trust {
   DateTime _lastSessionsCheck = DateTime(2000);
   bool _sessionsBusy = false;
 
+  /// Всё состояние доверия хранится ОДНОЙ записью (одна запись в хранилище атомарна: она либо целиком
+  /// старая, либо целиком новая) и после записи проверяется обратным чтением.
+  static const _stateKey = 'trust.state.v2';
+  static const _legacyKeys = [
+    'trust.pins', 'trust.pinVerified', 'trust.changed', 'trust.mySessions', 'trust.newLogins', 'trust.blockedDevs', 'trust.rotatePending',
+  ];
+
+  // изменений в памяти — и сколько из них уже точно на диске
+  int _mutations = 0, _savedMutations = 0;
+  Future<bool>? _flushing;
+
+  /// Есть изменения, ещё не записанные на диск.
+  bool get unsaved => _mutations != _savedMutations;
+
+  void _touch() => _mutations++;
+
+  /// Копия состояния (не ссылки на живые таблицы — ею же откатываемся при неудачной записи).
+  Map<String, Object?> _snapshot() => {
+        'pins': Map.of(_pins),
+        'pinVerified': Map.of(_pinVerified),
+        'changed': Map.of(_changed),
+        'rotatePending': _rotatePending.toList(),
+        'blockedDevs': _blockedByUs.toList(),
+        'mySessions': _seeded ? _mySessions.toList() : null,
+        'newLogins': List.of(newLogins.value),
+      };
+
+  void _load(Map<String, Object?> st) {
+    _pins = Map<String, String>.from((st['pins'] as Map?) ?? const {});
+    _pinVerified = Map<String, bool>.from((st['pinVerified'] as Map?) ?? const {});
+    _changed = Map<String, bool>.from((st['changed'] as Map?) ?? const {});
+    changed.value = Map.of(_changed);
+    _rotatePending
+      ..clear()
+      ..addAll(((st['rotatePending'] as List?) ?? const []).cast<String>());
+    _blockedByUs
+      ..clear()
+      ..addAll(((st['blockedDevs'] as List?) ?? const []).cast<String>());
+    final my = (st['mySessions'] as List?)?.cast<String>();
+    _seeded = my != null;
+    _mySessions = (my ?? const <String>[]).toSet();
+    newLogins.value = ((st['newLogins'] as List?) ?? const []).cast<String>();
+  }
+
+  /// Записать состояние на диск и убедиться, что записалось (обратное чтение). true — на диске ровно то,
+  /// что в памяти на момент записи. Пока записи не подтверждены, отправка и раздача ключей ждут.
+  Future<bool> flush() async {
+    while (_flushing != null) {
+      await _flushing;
+    }
+    if (!unsaved) return true;
+    final c = Completer<bool>();
+    _flushing = c.future;
+    var ok = false;
+    try {
+      final p = _p;
+      final m = _mutations;
+      final data = jsonEncode(_snapshot());
+      if (p != null && !_fail(debugFailStorage)) {
+        ok = await p.setString(_stateKey, data) && p.getString(_stateKey) == data;
+      }
+      if (ok) _savedMutations = m;
+      if (!ok) Logs().e('[Ласточка] Состояние доверия не записалось — отправка в защищённые чаты приостановлена');
+    } catch (e, s) {
+      Logs().e('[Ласточка] Состояние доверия не записалось', e, s);
+      ok = false;
+    } finally {
+      _flushing = null;
+      c.complete(ok);
+    }
+    return ok;
+  }
+
   Future<void> init() async {
     _p = await SharedPreferences.getInstance();
-    _pins = Map<String, String>.from(jsonDecode(_p!.getString('trust.pins') ?? '{}') as Map);
-    _pinVerified = Map<String, bool>.from(jsonDecode(_p!.getString('trust.pinVerified') ?? '{}') as Map);
-    _changed = Map<String, bool>.from(jsonDecode(_p!.getString('trust.changed') ?? '{}') as Map);
-    changed.value = Map.of(_changed);
-    final my = _p!.getStringList('trust.mySessions');
-    _seeded = my != null;
-    _mySessions = (my ?? []).toSet();
-    newLogins.value = _p!.getStringList('trust.newLogins') ?? [];
-    _blockedByUs.addAll(_p!.getStringList('trust.blockedDevs') ?? const []);
-    _rotatePending.addAll(_p!.getStringList('trust.rotatePending') ?? const []);
+    final raw = _p!.getString(_stateKey);
+    if (raw != null) {
+      _load((jsonDecode(raw) as Map).cast<String, Object?>());
+    } else {
+      // переход со старого хранения (отдельные записи) на одну запись
+      Map<String, Object?> legacy(String k) => (jsonDecode(_p!.getString(k) ?? '{}') as Map).cast<String, Object?>();
+      _load({
+        'pins': legacy('trust.pins'),
+        'pinVerified': legacy('trust.pinVerified'),
+        'changed': legacy('trust.changed'),
+        'rotatePending': _p!.getStringList('trust.rotatePending'),
+        'blockedDevs': _p!.getStringList('trust.blockedDevs'),
+        'mySessions': _p!.getStringList('trust.mySessions'),
+        'newLogins': _p!.getStringList('trust.newLogins'),
+      });
+      _touch();
+      if (await flush()) {
+        for (final k in _legacyKeys) {
+          await _p!.remove(k);
+        }
+      }
+    }
     // рубежи в самом клиенте Matrix: проверка сразу после загрузки ключей, перед отправкой любого
     // сообщения на сервер и перед отправкой ключей шифрования устройствам
     afterDeviceKeysUpdate = checkNow;
     beforeRoomSend = guardRoomSend;
-    filterKeyRecipients = allowedDevices;
+    filterKeyRecipients = allowedDevicesChecked;
     client.onSync.stream.listen((s) {
       unawaited(checkNow());
       // список своих сеансов: при изменении своих устройств и раз в минуту
@@ -132,18 +217,15 @@ class Trust {
     });
   }
 
-  /// Записать состояние доверия. Проверяется результат КАЖДОЙ записи (хранилище может вернуть false
-  /// без исключения) — не записалось хоть что-то, значит не записалось ничего.
-  Future<void> _save() async {
-    final p = _p!;
-    final ok = [
-      await p.setString('trust.pins', jsonEncode(_pins)),
-      await p.setString('trust.pinVerified', jsonEncode(_pinVerified)),
-      await p.setString('trust.changed', jsonEncode(_changed)),
-      await p.setStringList('trust.mySessions', _mySessions.toList()),
-      await p.setStringList('trust.newLogins', newLogins.value),
-    ];
-    if (ok.contains(false)) throw StateError('хранилище не подтвердило запись');
+  @visibleForTesting
+  String? debugPinOf(String userId) => _pins[userId];
+
+  /// Только для тестов: перечитать состояние с диска, как после перезапуска приложения.
+  @visibleForTesting
+  Future<void> debugReloadFromDisk() async {
+    final raw = _p!.getString(_stateKey);
+    _load(raw == null ? const {} : (jsonDecode(raw) as Map).cast<String, Object?>());
+    _mutations = _savedMutations = 0;
   }
 
   /// Проверить ключи сейчас — синхронно, без ожиданий. Вызывается перед каждой отправкой и раздачей
@@ -173,7 +255,7 @@ class Trust {
   bool debugFailChecks = false;
 
   void _check() {
-    if (debugFailChecks) throw StateError('проверка ключей: тестовый сбой');
+    if (_fail(debugFailChecks)) throw StateError('проверка ключей: тестовый сбой');
     final keys = <String, KeySnapshot>{
       for (final MapEntry(key: uid, value: list) in client.userDeviceKeys.entries)
         uid: KeySnapshot(list.masterKey?.publicKey, verified: list.masterKey?.verified ?? false, outdated: list.outdated),
@@ -190,7 +272,9 @@ class Trust {
       }
     }
     if (!mapEquals(r.changed, _changed)) _setChanged(r.changed);
-    unawaited(_save());
+    // запись — сразу; а отправка и раздача ключей дождутся её подтверждения (flush в рубежах)
+    _touch();
+    unawaited(flush());
   }
 
   /// События протокола сравнения эмодзи (в личном чате запрос идёт как m.room.message с msgtype
@@ -243,6 +327,13 @@ class Trust {
     return out;
   }
 
+  /// То же, что [allowedDevices], но сначала дожидается записи состояния доверия на диск; не записалось —
+  /// сообщения получают только ваши устройства (так подключено к клиенту Matrix).
+  Future<List<DeviceKeys>> allowedDevicesChecked(List<DeviceKeys> devices, String eventType, Map<String, dynamic> message) async {
+    if (!await flush()) return devices.where((d) => d.userId == client.userID).toList();
+    return allowedDevices(devices, eventType, message);
+  }
+
   /// Последний рубеж перед отправкой ЛЮБОГО сообщения в чат на сервер (вызывает LastochkaClient.sendMessage).
   /// Во время сравнения эмодзи в личном чате пропускаются только события проверки — не сообщения.
   /// Ошибка M_FORBIDDEN: модуль Matrix не повторяет отправку и помечает сообщение неотправленным.
@@ -252,7 +343,11 @@ class Trust {
       // чат неизвестен — не можем проверить ни шифрование, ни участников: не отправляем (fail-closed)
       throw MatrixException.fromJson({'errcode': 'M_FORBIDDEN', 'error': 'Ласточка: неизвестный чат — отправка не проверена'});
     }
-    if (room.encrypted && !client.encryptionEnabled && !debugAllowNoEncryption) {
+    // состояние доверия (запомненные ключи, запреты, отметки о замене) должно быть записано на диск
+    if (!await flush()) {
+      throw MatrixException.fromJson({'errcode': 'M_FORBIDDEN', 'error': 'Ласточка: состояние доверия не записано'});
+    }
+    if (room.encrypted && !client.encryptionEnabled && !_noEncryptionAllowed) {
       // без работающего модуля шифрования модуль Matrix отправил бы сообщение в защищённый чат ОТКРЫТЫМ текстом
       throw MatrixException.fromJson({'errcode': 'M_FORBIDDEN', 'error': 'Ласточка: шифрование не работает — отправка в защищённый чат запрещена'});
     }
@@ -337,20 +432,17 @@ class Trust {
   final Set<String> _rotatePending = {};
   Set<String> get rotationPending => Set.unmodifiable(_rotatePending);
 
-  /// Отметка о незавершённых заменах точно лежит на диске. Пока нет — ни одна замена не начинается
-  /// (чаты при этом заблокированы в памяти), запись повторяется перед каждой попыткой.
-  bool _pendingSaved = true;
-
-  /// Только для тестов: разрешить работу без модуля шифрования (в обычных тестах его нет).
-  /// В приложении без шифрования отправка в защищённые чаты запрещена, а замена сеанса не «успешна».
+  /// Сбои для тестов. В выпускаемой сборке (kReleaseMode — константа компилятора) ни один из этих
+  /// переключателей не действует: проверки ниже вырезаются компилятором, путь «включить» отсутствует.
   @visibleForTesting
   bool debugAllowNoEncryption = false;
-
-  /// Только для тестов: смоделировать сбой замены сеанса шифрования / записи на диск.
   @visibleForTesting
   bool debugFailRotation = false;
   @visibleForTesting
   bool debugFailStorage = false;
+  bool _fail(bool flag) => !kReleaseMode && flag;
+  bool get _noEncryptionAllowed => !kReleaseMode && debugAllowNoEncryption;
+  bool get encryptionRequired => !_noEncryptionAllowed;
 
   /// Все, кого считаем участниками чата, — ОДИН способ и для запрета отправки, и для замены сеансов:
   /// загруженные участники (вошедшие и приглашённые), «герои» из сводки сервера и собеседник личного чата.
@@ -364,31 +456,22 @@ class Trust {
   List<String> _roomsWith(String userId) =>
       [for (final r in client.rooms) if (r.encrypted && _membersOf(r).contains(userId)) r.id];
 
-  Future<bool> _persistPending() async {
-    try {
-      if (debugFailStorage) throw StateError('хранилище: тестовый сбой');
-      final p = _p;
-      if (p == null) return _pendingSaved = false;
-      return _pendingSaved = await p.setStringList('trust.rotatePending', _rotatePending.toList());
-    } catch (e, s) {
-      Logs().e('[Ласточка] Не удалось сохранить отметку о замене сеансов шифрования', e, s);
-      return _pendingSaved = false;
-    }
-  }
-
-  /// Заменить исходящие сеансы в этих чатах. Сначала чаты помечаются (на диске) как ждущие замены — и
-  /// этим блокируются; отметка снимается с каждого чата только после подтверждённой замены.
-  /// null — отметку записать не удалось (ничего не начато; с [keepIfNotSaved] блокировка остаётся в памяти),
-  /// true — все сеансы заменены, false — часть ещё ждёт (повтор после синхронизации).
+  /// Заменить исходящие сеансы в этих чатах. Сначала чаты помечаются как ждущие замены и это ЗАПИСЫВАЕТСЯ
+  /// (с проверкой) — только потом начинается замена; отметка снимается с чата после подтверждённой замены
+  /// и тоже только когда снятие записано.
+  /// null — отметку записать не удалось: замена не начата (с [keepIfNotSaved] чаты остаются заблокированными
+  /// в памяти до успешной записи), true — все сеансы заменены, false — часть ещё ждёт (повтор после синхронизации).
   Future<bool?> _rotateRooms(Iterable<String> roomIds, {bool keepIfNotSaved = false}) async {
     final ids = roomIds.toList();
     final add = ids.where((r) => !_rotatePending.contains(r)).toList();
     if (add.isNotEmpty) {
       _rotatePending.addAll(add);
-      if (!await _persistPending()) {
-        // защитное состояние не записано — замену НЕ начинаем; с keepIfNotSaved чаты остаются
-        // заблокированными в памяти, запись и замена повторятся после следующей синхронизации
-        if (!keepIfNotSaved) _rotatePending.removeAll(add);
+      _touch();
+      if (!await flush()) {
+        if (!keepIfNotSaved) {
+          _rotatePending.removeAll(add);
+          _touch();
+        }
         return null;
       }
     }
@@ -402,12 +485,12 @@ class Trust {
   Future<bool> _rotateRoom(String roomId) async {
     final enc = client.encryption;
     try {
-      if (debugFailRotation) throw StateError('замена сеанса: тестовый сбой');
-      // отметка о замене должна лежать на диске до начала замены
-      if (!_pendingSaved && !await _persistPending()) throw StateError('отметка о замене не записана');
+      if (_fail(debugFailRotation)) throw StateError('замена сеанса: тестовый сбой');
+      // отметка о замене (и всё прочее состояние) должна лежать на диске до начала замены
+      if (!await flush()) throw StateError('отметка о замене не записана');
       if (enc == null || !client.encryptionEnabled) {
         // модуль шифрования не работает — подтвердить замену нечем: это не успех
-        if (!debugAllowNoEncryption) throw StateError('модуль шифрования недоступен');
+        if (!_noEncryptionAllowed) throw StateError('модуль шифрования недоступен');
       } else {
         await enc.keyManager.clearOrUseOutboundGroupSession(roomId, wipe: true);
         // проверяем результат, а не только отсутствие ошибки
@@ -415,8 +498,15 @@ class Trust {
           throw StateError('старый сеанс шифрования остался');
         }
       }
-      // снять отметку; не записалось — чат останется помеченным и после перезапуска замена просто повторится
-      if (_rotatePending.remove(roomId)) await _persistPending();
+      // снять отметку — только если снятие записалось; иначе чат остаётся заблокированным (память = диск)
+      if (_rotatePending.remove(roomId)) {
+        _touch();
+        if (!await flush()) {
+          _rotatePending.add(roomId);
+          _touch();
+          return false;
+        }
+      }
       return true;
     } catch (e, s) {
       Logs().e('[Ласточка] Не удалось заменить сеанс шифрования — отправка в чат приостановлена', e, s);
@@ -462,7 +552,10 @@ class Trust {
       _blockedByUs.remove(k);
       dirty = true;
     }
-    if (dirty) await _p?.setStringList('trust.blockedDevs', _blockedByUs.toList());
+    if (dirty) {
+      _touch();
+      await flush();
+    }
   }
 
   /// Новые входы в аккаунт — по списку сеансов сервера (видны и входы без шифрования).
@@ -473,24 +566,34 @@ class Trust {
     try {
       final devices = await client.getDevices() ?? [];
       final ids = devices.map((d) => d.deviceId).toSet();
+      // сначала новое состояние записывается (с проверкой), и только потом — уведомление: иначе после
+      // перезапуска о том же входе сообщили бы снова, или наоборот — запись потерялась бы
+      final oldSessions = Set.of(_mySessions), oldSeeded = _seeded, oldLogins = newLogins.value;
+      var fresh = <String>[];
       if (!_seeded) {
         _mySessions = ids; // первый запуск — все текущие считаем своими
         _seeded = true;
       } else {
-        final fresh = ids.difference(_mySessions).where((id) => id != client.deviceID).toList();
+        fresh = ids.difference(_mySessions).where((id) => id != client.deviceID).toList();
         _mySessions.addAll(fresh);
-        if (fresh.isNotEmpty) {
-          newLogins.value = [...newLogins.value, ...fresh];
-          for (final id in fresh) {
-            final d = devices.firstWhere((x) => x.deviceId == id);
-            onNewLogin?.call(d.displayName ?? id);
-          }
-        }
-        final still = newLogins.value.where(ids.contains).toList();
-        if (still.length != newLogins.value.length) newLogins.value = still;
+        final logins = [...newLogins.value, ...fresh].where(ids.contains).toList();
+        if (!listEquals(logins, newLogins.value)) newLogins.value = logins;
       }
-      await _save();
-    } catch (_) {
+      _touch();
+      if (!await flush()) {
+        // не записалось — откатываем и сообщим при следующей проверке (через минуту)
+        _mySessions = oldSessions;
+        _seeded = oldSeeded;
+        newLogins.value = oldLogins;
+        _touch();
+        return;
+      }
+      for (final id in fresh) {
+        final d = devices.firstWhere((x) => x.deviceId == id);
+        onNewLogin?.call(d.displayName ?? id);
+      }
+    } catch (e, s) {
+      Logs().w('[Ласточка] Проверка своих сеансов', e, s);
     } finally {
       _sessionsBusy = false;
     }
@@ -501,8 +604,8 @@ class Trust {
     _mySessions = {};
     _seeded = false;
     newLogins.value = [];
-    await _p?.remove('trust.mySessions');
-    await _p?.remove('trust.newLogins');
+    _touch();
+    await flush();
   }
 
   /// Ключ личности собеседника сейчас (для показа и для подтверждения «Понятно» именно этого ключа).
@@ -517,51 +620,28 @@ class Trust {
     if (!TrustCore.canAccept(currentKey: mk?.publicKey, shownKey: shownKey, outdated: list?.outdated ?? true)) {
       return AcceptResult.refused;
     }
-    // 1. Чаты с ним — сначала на диск как «ждущие замены сеанса»: так они остаются заблокированными,
-    //    даже если приложение закроется на любом следующем шаге.
+    // Принятие ключа и отметка «чаты с ним ждут замены сеанса» записываются ОДНОЙ записью (атомарно, с
+    // проверкой обратным чтением): после любого сбоя или аварийного завершения на диске либо прежнее
+    // состояние (ключ не принят, запрет), либо новое (ключ принят, чаты заблокированы до замены сеансов).
     final rooms = _roomsWith(userId);
-    final add = rooms.where((r) => !_rotatePending.contains(r)).toList();
-    _rotatePending.addAll(add);
-    if (!await _persistPending()) {
-      _rotatePending.removeAll(add);
-      return AcceptResult.refused;
-    }
-    // 2. Принять ключ (тоже на диск). Не записалось — откатываем: запрет остаётся.
-    final oldPin = _pins[userId], oldPv = _pinVerified[userId], oldChanged = Map.of(_changed);
+    final before = _snapshot();
+    _rotatePending.addAll(rooms);
     _pins[userId] = mk!.publicKey!;
     _pinVerified[userId] = mk.verified;
     _setChanged(Map.of(_changed)..remove(userId));
-    if (!await _saveSafe()) {
-      if (oldPin == null) {
-        _pins.remove(userId);
-      } else {
-        _pins[userId] = oldPin;
-      }
-      if (oldPv == null) {
-        _pinVerified.remove(userId);
-      } else {
-        _pinVerified[userId] = oldPv;
-      }
-      _setChanged(oldChanged);
+    _touch();
+    if (!await flush()) {
+      // не записалось — возвращаем память к прежнему состоянию (запрет остаётся)
+      _load(before);
+      _touch();
       return AcceptResult.refused;
     }
-    // 3. Новые сеансы шифрования; чат разблокируется только после подтверждённой замены.
+    // новые сеансы шифрования; чат разблокируется только после подтверждённой (и записанной) замены
     var ok = true;
     for (final r in rooms) {
       if (!await _rotateRoom(r)) ok = false;
     }
     return ok ? AcceptResult.done : AcceptResult.rotating;
-  }
-
-  Future<bool> _saveSafe() async {
-    try {
-      if (debugFailStorage) throw StateError('хранилище: тестовый сбой');
-      await _save();
-      return true;
-    } catch (e, s) {
-      Logs().e('[Ласточка] Не удалось сохранить состояние доверия', e, s);
-      return false;
-    }
   }
 
   /// Принять ключ, подтверждённый сравнением эмодзи. [startedKey] — ключ личности собеседника,
@@ -575,7 +655,8 @@ class Trust {
 
   Future<void> confirmLogin(String deviceId) async {
     newLogins.value = newLogins.value.where((d) => d != deviceId).toList();
-    await _save();
+    _touch();
+    await flush();
   }
 
   /// Кто в этом чате сменил ключ личности.
@@ -583,7 +664,7 @@ class Trust {
   /// ни одним способом (ветка, пересылка, отложенные, повтор неотправленных).
   bool sendBlocked(Room room) {
     if (!room.encrypted) return false;
-    if (!client.encryptionEnabled && !debugAllowNoEncryption) return true;
+    if (!client.encryptionEnabled && !_noEncryptionAllowed) return true;
     refresh();
     if (_checkFailed || _rotatePending.contains(room.id)) return true;
     final c = _changed;

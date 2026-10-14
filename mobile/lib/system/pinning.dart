@@ -43,13 +43,19 @@ class CertPinning {
     return c.issuer.replaceAll(RegExp(r'/?CN=[^/,]+'), '').trim();
   }
 
-  void _check(String host, X509Certificate? cert) {
+  Future<void> _check(String host, X509Certificate? cert) async {
     if (cert == null) throw const TlsException('Сервер не предъявил сертификат');
     final got = issuerOf(cert);
     final pinned = _pins[host];
     if (pinned == null) {
-      _pins[host] = got; // первое подключение — запоминаем
-      unawaited(_p?.setString('tls.pins', jsonEncode(_pins)));
+      // первое подключение — запоминаем издателя и УБЕЖДАЕМСЯ, что это записалось: иначе после перезапуска
+      // проверка смены издателя молча пропала бы. Не записалось — соединение не продолжаем.
+      final next = {..._pins, host: got};
+      final data = jsonEncode(next);
+      final p = _p;
+      final ok = p != null && await p.setString('tls.pins', data) && p.getString('tls.pins') == data;
+      if (!ok) throw const TlsException('Не удалось сохранить сведения о сертификате сервера — попробуйте ещё раз');
+      _pins = next;
       return;
     }
     if (pinned != got) {
@@ -114,9 +120,9 @@ class CertPinning {
         return Socket.startConnect(uri.host, port);
       }
       final t = await SecureSocket.startConnect(uri.host, port, context: _ctx);
-      final checked = t.socket.then((s) {
+      final checked = t.socket.then((s) async {
         try {
-          _check(uri.host, s.peerCertificate);
+          await _check(uri.host, s.peerCertificate);
         } catch (_) {
           s.destroy();
           rethrow;

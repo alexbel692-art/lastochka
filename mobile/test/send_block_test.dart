@@ -255,6 +255,28 @@ void main() {
     await expectSent('ключ не менялся');
   });
 
+  test('новый ключ (первая встреча) не записался — отправка ждёт записи, после записи проходит', () async {
+    const carol = '@carol:test';
+    Trust.instance.debugFailStorage = true;
+    try {
+      app.client.userDeviceKeys[carol] = keysOf(carol, 'C1');
+      Trust.instance.refresh(); // ключ Кэрол запомнен в памяти, запись не удалась
+      expect(Trust.instance.unsaved, isTrue);
+      requests.clear();
+      try {
+        await room.sendTextEvent('пока не записано').timeout(const Duration(seconds: 10));
+      } catch (_) {}
+      expect(sends, isEmpty, reason: 'отправка не прошла, пока состояние доверия не записано');
+    } finally {
+      Trust.instance.debugFailStorage = false;
+    }
+    await expectSent('состояние записано');
+    expect(Trust.instance.unsaved, isFalse);
+    await Trust.instance.debugReloadFromDisk();
+    expect(Trust.instance.debugPinOf(carol), 'C1', reason: 'ключ первой встречи записан на диск');
+    app.client.userDeviceKeys.remove(carol);
+  });
+
   test('гонка: ключ сменился, проверка после синхронизации ещё не прошла — всё равно ничего не уходит', () async {
     setBobKey('K2'); // checkNow не вызываем — как будто отправка опередила обработку синхронизации
     await expectAllBlocked('ключ сменился');
@@ -342,6 +364,9 @@ void main() {
     expect(Trust.instance.changedNow.containsKey(bob), isTrue);
     expect(Trust.instance.rotationPending, isEmpty, reason: 'ничего не начато');
     await expectAllBlocked('состояние не сохранилось');
+    // «перезапуск»: на диске — прежнее состояние, ключ не принят
+    await Trust.instance.debugReloadFromDisk();
+    expect(Trust.instance.changedNow.containsKey(bob), isTrue);
   });
 
   test('ключ принят, но замена сеансов не удалась — чаты заблокированы, отметка на диске, после восстановления — работает', () async {
@@ -353,9 +378,10 @@ void main() {
       expect(await Trust.instance.acceptChange(bob, shownKey: shown), AcceptResult.rotating);
       expect(Trust.instance.changedNow, isEmpty, reason: 'ключ принят');
       expect(Trust.instance.rotationPending, containsAll([roomId, groupId]));
-      // отметка уже на диске — после аварийного перезапуска чаты останутся заблокированными
-      final saved = (await SharedPreferences.getInstance()).getStringList('trust.rotatePending') ?? [];
-      expect(saved, containsAll([roomId, groupId]));
+      // «аварийный перезапуск»: на диске одной записью — ключ принят И чаты ждут замены сеансов
+      await Trust.instance.debugReloadFromDisk();
+      expect(Trust.instance.changedNow, isEmpty);
+      expect(Trust.instance.rotationPending, containsAll([roomId, groupId]));
       await expectAllBlocked('сеанс шифрования ещё не заменён');
       expect(Trust.instance.allowedDevices(allDevices, EventTypes.RoomKey, roomKey(roomId)).map((d) => d.userId), [me]);
       await Trust.instance.checkNow(); // повтор при синхронизации — снова неудачно
@@ -366,7 +392,8 @@ void main() {
     // шифрование снова работает — замена повторяется при синхронизации
     await Trust.instance.checkNow();
     expect(Trust.instance.rotationPending, isEmpty);
-    expect((await SharedPreferences.getInstance()).getStringList('trust.rotatePending') ?? [], isEmpty);
+    await Trust.instance.debugReloadFromDisk();
+    expect(Trust.instance.rotationPending, isEmpty, reason: 'снятие отметки тоже записано');
     await expectSent('ключ принят, сеансы заменены');
   });
 
