@@ -13,6 +13,8 @@ import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'device_guard.dart';
+
 import '../main.dart';
 import 'notify.dart';
 
@@ -210,18 +212,21 @@ class AppLock {
     await _p!.setString('lock.hash', await _kdf(pin, salt));
     await _p!.setString('lock.kdf', _p2);
     await _p!.setInt('lock.len', pin.length);
+    await _rememberBioState();
     await _p!.remove('lock.duress'); // код экстренного удаления привязан к прежней «соли» — задаётся заново
     unawaited(_syncRecents());
+    unawaited(syncSwitcherCover());
   }
 
   Future<void> disable() async {
-    for (final k in ['lock.hash', 'lock.salt', 'lock.kdf', 'lock.duress', 'lock.duressKdf', 'lock.fails', 'lock.blockedUntil', 'lock.wipe']) {
+    for (final k in ['lock.hash', 'lock.salt', 'lock.kdf', 'lock.duress', 'lock.duressKdf', 'lock.fails', 'lock.blockedUntil', 'lock.wipe', 'lock.bioState']) {
       await _p!.remove(k);
     }
     _blockBase = 0;
     await _saveBlock();
     locked.value = false;
     unawaited(_syncRecents());
+    unawaited(syncSwitcherCover());
   }
 
   /// Код для экстренного удаления: при его вводе Ласточка тихо стирает все данные на устройстве.
@@ -264,6 +269,7 @@ class AppLock {
       await _p!.remove('lock.fails');
       _blockBase = 0;
       await _saveBlock();
+      await _rememberBioState(); // код верный — текущий набор лиц/пальцев снова считается своим
       return true;
     }
     final n = fails + 1;
@@ -299,11 +305,35 @@ class AppLock {
     }
   }
 
+  /// На устройстве добавили или удалили лицо/палец с прошлого ввода кода Ласточки (iPhone и Mac):
+  /// по биометрии Ласточка не открывается, пока не введён её код.
+  final bioChanged = ValueNotifier<bool>(false);
+
+  Future<void> _rememberBioState() async {
+    bioChanged.value = false;
+    final st = await biometricState();
+    if (st != null) {
+      await _p?.setString('lock.bioState', st);
+    } else {
+      await _p?.remove('lock.bioState');
+    }
+  }
+
   Future<bool> tryBiometric() async {
     if (!biometric || !await biometricAvailable()) return false;
+    // кто-то подсмотрел код телефона и добавил своё лицо — его Face ID Ласточку не откроет
+    final now = await biometricState();
+    final saved = _p?.getString('lock.bioState');
+    if (now != null && saved != null && now != saved) {
+      bioChanged.value = true;
+      return false;
+    }
     try {
       // только отпечаток/лицо: код телефона не должен открывать Ласточку в обход её кода
-      return await _auth.authenticate(localizedReason: 'Разблокировать Ласточку', options: const AuthenticationOptions(biometricOnly: true));
+      final ok = await _auth.authenticate(localizedReason: 'Разблокировать Ласточку', options: const AuthenticationOptions(biometricOnly: true));
+      // первая проверка после обновления: запоминаем набор лиц/пальцев, с которым Ласточка открылась
+      if (ok && saved == null && now != null) await _p?.setString('lock.bioState', now);
+      return ok;
     } catch (_) {
       return false;
     }
@@ -345,7 +375,13 @@ class _PinPadState extends State<PinPad> with SingleTickerProviderStateMixin {
   }
 
   Future<void> _bio() async {
-    if (await AppLock.instance.tryBiometric()) AppLock.instance.unlock();
+    if (await AppLock.instance.tryBiometric()) {
+      AppLock.instance.unlock();
+    } else if (AppLock.instance.bioChanged.value && mounted) {
+      setState(() => _error = Platform.isIOS
+          ? 'Face ID / Touch ID на устройстве изменились — введите код Ласточки'
+          : 'Отпечатки на устройстве изменились — введите код Ласточки');
+    }
   }
 
   Future<void> _tap(String d) async {

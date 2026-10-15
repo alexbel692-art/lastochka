@@ -17,13 +17,34 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'system/device_guard.dart';
 import 'system/pinning.dart';
 
 const _secure = FlutterSecureStorage(
   // на macOS без платной подписи Apple «новая» связка ключей недоступна — используем обычную
   mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+  // iPhone: ключ базы — только на этом устройстве (не попадает в резервные копии iCloud/компьютера
+  // и не переезжает на новый телефон) и доступен после первой разблокировки (звонок при погасшем экране)
+  iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock_this_device),
 );
 const _dbKeyName = 'lastochka.db_key';
+// iPhone: ключ «только на этом устройстве» хранится под новым именем — прежний (попадавший в копии)
+// удаляется лишь после того, как новый записан и прочитан обратно
+const _dbKeyNameIos = 'lastochka.db_key.device';
+String get _keyName => Platform.isIOS ? _dbKeyNameIos : _dbKeyName;
+
+/// iPhone: перенести ключ базы из прежней записи связки ключей в запись «только на этом устройстве».
+Future<String?> _migrateIosKey() async {
+  final old = await _secure.read(key: _dbKeyName);
+  if (old == null || old.isEmpty) return null;
+  await _secure.write(key: _dbKeyNameIos, value: old);
+  if (await _secure.read(key: _dbKeyNameIos) != old) {
+    Logs().w('[Ласточка] ключ базы не перенесён в хранилище «только на этом устройстве» — попробуем при следующем запуске');
+    return old;
+  }
+  await _secure.delete(key: _dbKeyName);
+  return old;
+}
 const clientName = 'lastochka';
 
 /// Секрет устройства (ключ базы) — из него выводится ключ для черновиков и отложенных сообщений.
@@ -43,7 +64,8 @@ Future<String> _databaseKey(bool dbExists) async {
   Object? readError;
   for (var i = 0; i < 3 && key == null; i++) {
     try {
-      key = await _secure.read(key: _dbKeyName);
+      key = await _secure.read(key: _keyName);
+      if (key == null && Platform.isIOS) key = await _migrateIosKey();
       readError = null;
       break;
     } catch (e) {
@@ -57,8 +79,8 @@ Future<String> _databaseKey(bool dbExists) async {
     if (key.isNotEmpty) {
       var moved = false;
       try {
-        await _secure.write(key: _dbKeyName, value: key);
-        if (await _secure.read(key: _dbKeyName) == key) {
+        await _secure.write(key: _keyName, value: key);
+        if (await _secure.read(key: _keyName) == key) {
           await fallback.delete();
           moved = true;
         }
@@ -88,8 +110,8 @@ Future<String> _databaseKey(bool dbExists) async {
   Object? writeError;
   for (var i = 0; i < 3; i++) {
     try {
-      await _secure.write(key: _dbKeyName, value: key);
-      if (await _secure.read(key: _dbKeyName) == key) return key;
+      await _secure.write(key: _keyName, value: key);
+      if (await _secure.read(key: _keyName) == key) return key;
     } catch (e) {
       writeError = e;
     }
@@ -97,6 +119,19 @@ Future<String> _databaseKey(bool dbExists) async {
   }
   throw StateError('Не удалось сохранить ключ базы в защищённом хранилище системы${writeError == null ? '' : ' ($writeError)'}. '
       'Перезапустите Ласточку; если не поможет — перезагрузите устройство.');
+}
+
+/// iPhone: база, её журналы, настройки и журнал диагностики — не в резервные копии iCloud/компьютера
+/// (отметка ставится и на папки, чтобы её получали и файлы, созданные позже).
+Future<void> _excludeFromBackups(String dbPath) async {
+  final lib = (await _dataDir()).path;
+  final support = (await getApplicationSupportDirectory()).path;
+  await excludeFromBackup([
+    lib,
+    support,
+    p.join(lib, 'Preferences'),
+    for (final f in [dbPath, '$dbPath-wal', '$dbPath-shm', '$dbPath-journal', '$dbPath.v2']) f,
+  ]);
 }
 
 Future<DatabaseApi> _openDatabase() async {
@@ -130,6 +165,7 @@ Future<DatabaseApi> _openDatabase() async {
   try {
     final db = await init();
     if (!await marker.exists()) await marker.writeAsString('1');
+    if (Platform.isIOS) unawaited(_excludeFromBackups(path));
     return db;
   } catch (e) {
     if (await marker.exists()) rethrow; // своя база не открылась — не удаляем, чтобы не потерять ключи
@@ -224,9 +260,11 @@ Future<void> wipeLocalStorage() async {
       if (await file.exists()) await file.delete();
     } catch (_) {}
   }
-  try {
-    await _secure.delete(key: _dbKeyName);
-  } catch (_) {}
+  for (final k in [_dbKeyName, _dbKeyNameIos]) {
+    try {
+      await _secure.delete(key: k);
+    } catch (_) {}
+  }
   try {
     final cache = Directory(p.join((await getTemporaryDirectory()).path, '${clientName}_files'));
     if (await cache.exists()) await cache.delete(recursive: true);

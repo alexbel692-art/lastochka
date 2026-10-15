@@ -1,0 +1,22 @@
+name: device_guard
+description: Системные защиты iPhone и Mac для Ласточки (резервные копии, буфер обмена, запись экрана, смена Face ID).
+version: 1.0.0
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+  flutter: '>=3.22.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        pluginClass: DeviceGuardPlugin
+        sharedDarwinSource: true
+      macos:
+        pluginClass: DeviceGuardPlugin
+        sharedDarwinSource: true

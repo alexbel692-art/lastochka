@@ -24,6 +24,7 @@ import 'system/privacy.dart';
 import 'system/trust.dart';
 import 'system/updater.dart';
 import 'system/desktop.dart';
+import 'system/device_guard.dart';
 import 'system/notify.dart';
 import 'matrix_client.dart';
 import 'pages/home.dart';
@@ -129,6 +130,8 @@ Future<void> main(List<String> args) async {
   await AppLock.instance.init();
   AppLock.instance.onWipe = wipeDevice;
   await initPrivacy();
+  switcherCoverWanted = () => screenProtect.value || AppLock.instance.enabled;
+  await initDeviceGuard();
   await Trust.instance.init();
   Trust.instance.onOwnIdentityReset = () => showSecurityNotification('Ключи вашего аккаунта сброшены', 'Если вы этого не делали — срочно смените пароль и проверьте «Мои сеансы». Устройства нужно будет подтвердить заново.');
   Trust.instance.onNewLogin = (name) => showSecurityNotification('Новый вход в ваш аккаунт', '$name. Если это не вы — завершите сеанс в «Настройки → Мои сеансы» и смените пароль.');
@@ -282,7 +285,7 @@ class _LastochkaAppState extends State<LastochkaApp> {
         data: MediaQuery.of(context).copyWith(
             textScaler: TextScaler.linear(MediaQuery.textScalerOf(context).scale(1) * Appearance.instance.textScale.value), disableAnimations: remoteSession || MediaQuery.of(context).disableAnimations),
         child: ListenableBuilder(
-        listenable: Listenable.merge([AppLock.instance.locked, callActive, currentCall, screenProtect, _switcherCover, CertPinning.instance.alert]),
+        listenable: Listenable.merge([AppLock.instance.locked, callActive, currentCall, screenProtect, _switcherCover, screenCaptured, CertPinning.instance.alert]),
         builder: (context, _) {
           // звонок блокировку не снимает (иначе позвонивший получал доступ ко всем чатам);
           // ответить, отклонить и завершить можно с панели поверх экрана блокировки
@@ -294,8 +297,8 @@ class _LastochkaAppState extends State<LastochkaApp> {
               excluding: locked,
               child: ExcludeFocus(excluding: locked, child: TickerMode(enabled: !locked, child: child ?? const SizedBox.shrink())),
             ),
-            // iPhone: в переключателе приложений вместо переписки — заставка
-            if (_switcherCover.value && (screenProtect.value || AppLock.instance.enabled) && !locked)
+            // iPhone: в переключателе приложений и во время записи экрана / AirPlay вместо переписки — заставка
+            if ((_switcherCover.value && (screenProtect.value || AppLock.instance.enabled) || screenCaptured.value && screenProtect.value) && !locked)
               Positioned.fill(child: ColoredBox(color: Theme.of(context).scaffoldBackgroundColor, child: Center(child: Image.asset('assets/icon.png', width: 96)))),
             if (CertPinning.instance.alert.value != null && !locked) Positioned.fill(child: KeyedSubtree(key: ValueKey('${CertPinning.instance.alert.value!.host}|${CertPinning.instance.alert.value!.got}'), child: _CertAlertScreen(CertPinning.instance.alert.value!))),
             if (locked)

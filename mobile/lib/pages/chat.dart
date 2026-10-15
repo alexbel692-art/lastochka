@@ -188,7 +188,8 @@ class _ChatPageState extends State<ChatPage> {
     if (!appVisible) return;
     final last = _tl?.events.firstOrNull;
     if (last == null || room.notificationCount == 0 && room.fullyRead == last.eventId) return;
-    room.setReadMarker(last.eventId, mRead: last.eventId).catchError((_) {});
+    // без отметок о прочтении для собеседников — только личная (видна лишь своим устройствам)
+    room.setReadMarker(last.eventId, mRead: last.eventId, public: sendReadReceipts).catchError((_) {});
   }
 
   void _onText() {
@@ -198,7 +199,7 @@ class _ChatPageState extends State<ChatPage> {
     if (_text.text.isNotEmpty && DateTime.now().difference(_typingSent).inSeconds > 4) {
       _typingSent = DateTime.now();
       // «печатает…» тоже раздаёт ключ шифрования участникам — при смене ключа собеседника не шлём
-      if (!Trust.instance.sendBlocked(room)) room.setTyping(true, timeout: 6000).catchError((_) {});
+      if (sendTyping && !Trust.instance.sendBlocked(room)) room.setTyping(true, timeout: 6000).catchError((_) {});
     }
   }
 

@@ -1,9 +1,12 @@
 // Копирование текста из переписки: через минуту буфер обмена очищается сам,
-// на Android 13+ текст ещё и помечается секретным (не виден в подсказках клавиатуры и превью).
+// на Android 13+ текст ещё и помечается секретным (не виден в подсказках клавиатуры и превью),
+// на iPhone — копируется только на этот телефон (не уходит на Mac и iPad) и удаляется системой.
 import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+
+import 'device_guard.dart';
 
 const _system = MethodChannel('lastochka/system');
 Timer? _clearTimer;
@@ -17,6 +20,7 @@ Future<void> copySensitive(String text, {Duration clearAfter = const Duration(se
       return;
     } catch (_) {}
   }
+  if (Platform.isIOS && await copySecretIos(text, clearAfter)) return;
   await Clipboard.setData(ClipboardData(text: text));
   // iPhone показывает «Ласточка вставила из…» при чтении буфера — там только копируем
   if (Platform.isIOS) return;

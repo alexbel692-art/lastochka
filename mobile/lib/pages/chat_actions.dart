@@ -146,7 +146,7 @@ extension _ChatActions on _ChatPageState {
       _editing = null;
       _mentionHits = [];
     });
-    room.setTyping(false).catchError((_) {});
+    if (sendTyping) room.setTyping(false).catchError((_) {});
     try {
       final content = textContent(t, mentions: mentions);
       if (edit != null) {

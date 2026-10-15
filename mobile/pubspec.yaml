@@ -1,7 +1,7 @@
 name: lastochka
 description: Ласточка — защищённый мессенджер на Matrix (Android, iOS).
 publish_to: 'none'
-version: 4.19.15+1
+version: 4.19.16+1
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -48,6 +48,8 @@ dependencies:
   photo_manager: ^3.6.0
   video_frame:
     path: packages/video_frame
+  device_guard:
+    path: packages/device_guard
 
 dev_dependencies:
   flutter_test:

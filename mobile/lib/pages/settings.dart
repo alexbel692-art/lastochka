@@ -375,6 +375,14 @@ class _SettingsPageState extends State<SettingsPage> {
           await MediaPolicy.set(inviteAvatars: v);
           if (mounted) setState(() {});
         }),
+        _switch(Icons.done_all_rounded, 'Отметки о прочтении', 'Собеседники видят, что вы прочитали сообщение (две галочки)', sendReadReceipts, (v) async {
+          await setSendReadReceipts(v);
+          if (mounted) setState(() {});
+        }),
+        _switch(Icons.keyboard_outlined, '«Печатает…»', 'Собеседники видят, что вы набираете сообщение', sendTyping, (v) async {
+          await setSendTyping(v);
+          if (mounted) setState(() {});
+        }),
         _row(Icons.block, 'Заблокированные', sub: client.ignoredUsers.isEmpty ? 'Никого' : '${client.ignoredUsers.length}', onTap: _blocked),
         _switch(Icons.how_to_reg_outlined, 'Принимать личные чаты автоматически', 'От коллег с вашего сервера — без нажатия «Вступить»', _pref('invites.autoAccept'), (v) => _set('invites.autoAccept', v)),
         _row(Icons.data_usage, 'Хранилище', sub: 'Сколько места занято, очистка кэша', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StoragePage()))),

@@ -15,14 +15,34 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'device_guard.dart';
+
 const _android = MethodChannel('lastochka/system');
 const _mac = MethodChannel('lastochka/window');
 
 final screenProtect = ValueNotifier<bool>(false);
 
+/// Отправлять собеседникам отметки о прочтении (две галочки) и «печатает…».
+/// Без отметок о прочтении Ласточка шлёт только личную отметку (MSC2285): она видна лишь вашим
+/// устройствам — счётчик непрочитанного совпадает везде, а собеседник прочтения не видит.
+bool sendReadReceipts = true;
+bool sendTyping = true;
+
+Future<void> setSendReadReceipts(bool on) async {
+  sendReadReceipts = on;
+  await (await SharedPreferences.getInstance()).setBool('privacy.readReceipts', on);
+}
+
+Future<void> setSendTyping(bool on) async {
+  sendTyping = on;
+  await (await SharedPreferences.getInstance()).setBool('privacy.typing', on);
+}
+
 Future<void> initPrivacy() async {
   final prefs = await SharedPreferences.getInstance();
   screenProtect.value = prefs.getBool('privacy.screen') ?? false;
+  sendReadReceipts = prefs.getBool('privacy.readReceipts') ?? true;
+  sendTyping = prefs.getBool('privacy.typing') ?? true;
   await _apply(screenProtect.value);
   await purgeDecryptedFiles();
 }
@@ -32,6 +52,7 @@ Future<void> setScreenProtect(bool on) async {
   await prefs.setBool('privacy.screen', on);
   screenProtect.value = on;
   await _apply(on);
+  await syncSwitcherCover();
 }
 
 Future<void> _apply(bool on) async {

@@ -18,6 +18,7 @@ import '../chat/formatting.dart';
 import '../chat/polls.dart';
 import '../system/media_policy.dart';
 import '../system/perf.dart';
+import '../system/privacy.dart' show sendReadReceipts;
 import '../widgets/avatar.dart';
 import '../widgets/login_banner.dart';
 import '../widgets/clock_banner.dart';
@@ -490,7 +491,7 @@ class _ChatsPageState extends State<ChatsPage> {
           if (was && _folder == 'archive' && client.rooms.where(isArchived).length <= 1) _folder = 'all';
         case 'read':
           final id = room.lastEvent?.eventId;
-          if (id != null) await room.setReadMarker(id, mRead: id);
+          if (id != null) await room.setReadMarker(id, mRead: id, public: sendReadReceipts);
         case 'leave':
           await room.leave();
           if (_selected?.id == room.id) _selected = null;
