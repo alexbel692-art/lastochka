@@ -144,6 +144,8 @@ class _CallPageState extends State<CallPage> {
     }
     if (s == CallState.kInviteSent && call.isOutgoing) CallSounds.outgoing();
     if (s == CallState.kConnecting || s == CallState.kConnected) CallSounds.stop();
+    // «завершается» — экран не перерисовываем: через миг придёт «завершён» и экран закроется
+    if (s == CallState.kEnding) return;
     if (s == CallState.kEnded) {
       // сначала убираем с экрана окна видео (одним лёгким кадром), потом закрываем экран;
       // всё системное (звук, флаги окна, уведомление) модуль звонков делает позже и не на этом кадре
@@ -206,9 +208,9 @@ class _CallPageState extends State<CallPage> {
   Future<void> _finish() async {
     if (_closing) return;
     _closing = true;
-    if (mounted) setState(() {});
-    // короткая пауза, чтобы было видно «Звонок завершён» (как в Telegram и WhatsApp — меньше полсекунды)
-    await Future.delayed(const Duration(milliseconds: 300));
+    // экран закрывается СРАЗУ, без промежуточного кадра «Звонок завершён»: в момент отбоя телефон
+    // освобождает звук и графику, и на части Android этот кадр рисовался с полосой на пол-экрана.
+    // О завершении и так говорит сигнал отбоя.
     if (!mounted) return;
     Diag.mark('звонок: закрываем экран');
     final route = ModalRoute.of(context);

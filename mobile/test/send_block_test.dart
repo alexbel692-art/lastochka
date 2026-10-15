@@ -425,4 +425,25 @@ void main() {
     setBobKey('K3');
     await expectAllBlocked('ещё одна смена ключа');
   });
+
+  test('своё приглашение в звонок с другого устройства не становится входящим звонком', () async {
+    final c = app.client;
+    final room = c.getRoomById(roomId)!;
+    Event invite(String sender, String id) => Event(
+          type: EventTypes.CallInvite,
+          content: {'call_id': 'c-$id', 'lifetime': 60000, 'version': 1},
+          senderId: sender,
+          eventId: '\$inv-$id',
+          originServerTs: DateTime.now(),
+          room: room,
+        );
+    final got = <List<BasicEventWithSender>>[];
+    final sub = c.onCallEvents.stream.listen(got.add);
+    c.onCallEvents.add([invite(me, '1')]);
+    c.onCallEvents.add([invite(bob, '2'), invite(me, '3')]);
+    await Future<void>.delayed(Duration.zero);
+    await sub.cancel();
+    expect(got, hasLength(1));
+    expect(got.single.map((e) => e.senderId), [bob]);
+  });
 }

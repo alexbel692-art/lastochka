@@ -12,6 +12,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_vodozemac/flutter_vodozemac.dart' as vod;
 import 'package:matrix/encryption/utils/key_verification.dart';
 import 'package:matrix/matrix.dart';
+// CachedStreamController модуль Matrix не экспортирует, а заменить поток событий звонков нужно его же классом
+// ignore: implementation_imports
+import 'package:matrix/src/utils/cached_stream_controller.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -307,6 +310,13 @@ class LastochkaClient extends Client {
     super.shareKeysWith,
   });
 
+  /// События звонков из синхронизации — без СВОИХ приглашений, отправленных с другого устройства.
+  /// Модуль Matrix отличает свои события только по номеру устройства, а у событий в чате его нет:
+  /// звонок с телефона показывался как входящий на всех ваших компьютерах. Element такие приглашения
+  /// тоже не считает входящими. Ответ, отбой и прочие свои события модуль и так пропускает.
+  @override
+  late final CachedStreamController<List<BasicEventWithSender>> onCallEvents = _OwnInviteFilter(this);
+
   /// Исходные типы отправляемых событий по номеру отправки (txnId). Модуль Matrix сначала показывает
   /// неотправленное событие (через handleSync), потом шифрует его и вызывает sendMessage уже с типом
   /// m.room.encrypted — по этой записи рубеж знает, что на самом деле уходит.
@@ -425,4 +435,17 @@ String deviceLabel() {
                   ? 'Windows'
                   : 'Linux';
   return 'Ласточка ($os)';
+}
+
+class _OwnInviteFilter extends CachedStreamController<List<BasicEventWithSender>> {
+  final Client client;
+  _OwnInviteFilter(this.client);
+
+  @override
+  void add(List<BasicEventWithSender> value) {
+    final me = client.userID;
+    final kept = value.where((e) => !(e is Event && e.type == EventTypes.CallInvite && me != null && e.senderId == me)).toList();
+    if (kept.isEmpty) return;
+    super.add(kept);
+  }
 }
