@@ -97,7 +97,13 @@ class MainApplication : Application() {
                 channel = null
                 dartReady = false
             }
-            val e = FlutterEngine(app)
+            // «Совместимая графика» (настройка в Ласточке): рисовать через OpenGL, а не Vulkan. На части
+            // телефонов после звонка (видео/звук освобождают графику) Vulkan оставлял на экране недорисованную,
+            // наполовину чёрную картинку. Действует с следующего запуска.
+            val gles = try {
+                app.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE).getBoolean("flutter.gfx.gles", false)
+            } catch (_: Throwable) { false }
+            val e = if (gles) FlutterEngine(app, arrayOf("--impeller-backend=opengles")) else FlutterEngine(app)
             channel(app, e)
             e.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
             FlutterEngineCache.getInstance().put(ID, e)
@@ -185,6 +191,17 @@ class MainApplication : Application() {
                         result.success(true)
                     }
                     "cancelCall" -> { CallScreen.cancel(ctx); result.success(true) }
+                    // перезапуск Ласточки (смена способа отрисовки действует только с нового запуска движка):
+                    // окно открывается заново, процесс завершается — его не держит даже фоновая служба
+                    "restartApp" -> {
+                        result.success(true)
+                        val i = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+                        if (i != null) {
+                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                            ctx.startActivity(i)
+                        }
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ Runtime.getRuntime().exit(0) }, 300)
+                    }
                     "callUi" -> {
                         CallScreen.update(ctx, call.argument<String>("callId") ?: "", call.argument<String>("state") ?: "")
                         result.success(true)

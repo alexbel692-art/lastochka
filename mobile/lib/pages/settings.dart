@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -404,6 +405,15 @@ class _SettingsPageState extends State<SettingsPage> {
               if (mounted) setState(() => _battery = v);
             }),
           _row(Icons.notifications_active_outlined, 'Разрешения для уведомлений и звонков', sub: 'Если уведомления не приходят', onTap: requestNotificationPermission),
+          _switch(Icons.auto_fix_high_outlined, 'Совместимая графика', 'Если после звонка экран застывает или темнеет. Включится после перезапуска Ласточки', _pref('gfx.gles', false), (v) async {
+            await _set('gfx.gles', v);
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: const Text('Заработает после перезапуска Ласточки'),
+              duration: const Duration(seconds: 8),
+              action: SnackBarAction(label: 'Перезапустить', onPressed: () => const MethodChannel('lastochka/system').invokeMethod('restartApp').catchError((_) => null)),
+            ));
+          }),
         ],
         if (Platform.isWindows)
           _switch(Icons.power_settings_new, 'Запускать вместе с Windows', 'Ласточка тихо запускается в трее и принимает звонки', _autostart, (v) async {
