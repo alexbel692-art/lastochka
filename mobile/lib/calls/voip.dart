@@ -83,7 +83,7 @@ class LastochkaVoip implements WebRTCDelegate {
     currentCall.value = session;
     // главное окно «поверх блокировки» больше не переключаем: на заблокированном Android-телефоне звонок
     // показывает отдельное окно (CallScreen.kt), как в Telegram и WhatsApp
-    navKey.currentState?.push(MaterialPageRoute(builder: (_) => CallPage(session: session)));
+    navKey.currentState?.push(callRoute(session));
     // приложение свёрнуто или закрыто — полноэкранное уведомление; на компьютере — показать окно
     if (isDesktopOS) {
       await showMainWindow();
@@ -216,7 +216,7 @@ Future<void> startCall(BuildContext context, Room room, {required bool video}) a
     callActive.value = true;
     currentCall.value = session;
     if (!context.mounted) return;
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => CallPage(session: session)));
+    Navigator.of(context).push(callRoute(session));
   } catch (e) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(

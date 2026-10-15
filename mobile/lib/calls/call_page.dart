@@ -24,6 +24,17 @@ const _reasons = {
   CallErrorCode.answeredElsewhere: 'Ответили на другом устройстве',
 };
 
+/// Экран звонка открывается коротким проявлением, а закрывается мгновенно, без анимации — как в Telegram
+/// и WhatsApp. В момент отбоя Android занят освобождением камеры, микрофона и звука; анимация
+/// «уменьшения» обрывалась на полпути, и экран застывал наполовину тёмным.
+Route<void> callRoute(CallSession session) => PageRouteBuilder<void>(
+      opaque: true,
+      transitionDuration: const Duration(milliseconds: 150),
+      reverseTransitionDuration: Duration.zero,
+      pageBuilder: (_, __, ___) => CallPage(session: session),
+      transitionsBuilder: (_, a, __, child) => FadeTransition(opacity: a, child: child),
+    );
+
 class CallPage extends StatefulWidget {
   final CallSession session;
   const CallPage({super.key, required this.session});
@@ -197,7 +208,7 @@ class _CallPageState extends State<CallPage> {
     _closing = true;
     if (mounted) setState(() {});
     // короткая пауза, чтобы было видно «Звонок завершён» (как в Telegram и WhatsApp — меньше полсекунды)
-    await Future.delayed(const Duration(milliseconds: 400));
+    await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
     Diag.mark('звонок: закрываем экран');
     final route = ModalRoute.of(context);
@@ -210,6 +221,11 @@ class _CallPageState extends State<CallPage> {
     } else if (route.isActive) {
       nav.removeRoute(route);
     }
+    // экран под звонком перерисовываем сразу и ещё раз чуть позже: если система в эту секунду
+    // перестраивала окно (звук, камера), первый кадр мог не дойти до экрана
+    WidgetsBinding.instance.scheduleForcedFrame();
+    Future.delayed(const Duration(milliseconds: 300), () => WidgetsBinding.instance.scheduleForcedFrame());
+    Future.delayed(const Duration(milliseconds: 1000), () => WidgetsBinding.instance.scheduleForcedFrame());
   }
 
   @override
