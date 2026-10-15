@@ -308,10 +308,10 @@ packages:
     dependency: transitive
     description:
       name: file_picker_web
-      sha256: "32af8262aca907b02b8970b32328b0312db0b42ba6f930be6d27fde179d59b7d"
+      sha256: a2288008280aabe371aff029466b3405e60838e0a1d714767488c59b926c8b8c
       url: "https://pub.dev"
     source: hosted
-    version: "4.1.0"
+    version: "4.2.0"
   file_selector_linux:
     dependency: transitive
     description:
