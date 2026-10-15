@@ -41,37 +41,37 @@ void _watchNetwork() {
   };
 }
 
-/// Исходящий звонок: данные для соединения (ICE-кандидаты) уходят ОДНОЙ порцией, а не по мере нахождения.
-/// Каждая порция — отдельное зашифрованное событие в чате, и Element на iPhone показывает на каждое своё
-/// уведомление («несколько пропущенных на один звонок»). Кандидаты придерживаются, пока телефон не соберёт
-/// их все (или не пройдёт 3 с после приглашения), и только после отправки приглашения; как только собеседник
-/// ответил — сразу отпускаются, чтобы не задерживать соединение. Дальше всё идёт как обычно.
+/// Исходящий звонок: данные для соединения (ICE-кандидаты) отправляются только ПОСЛЕ ответа собеседника,
+/// одной порцией. До ответа они ему не нужны, а каждое событие звонка в зашифрованном чате — это отдельное
+/// уведомление на iPhone с Element (сервер не видит, что внутри, и шлёт уведомление на каждое). Так на
+/// пропущенный звонок приходит два события — приглашение и отбой — вместо трёх-четырёх.
+/// Состояние сбора кандидатов модулю Matrix тоже передаётся только после ответа: иначе его таймеры
+/// отправили бы кандидатов раньше или с лишней задержкой. После ответа всё идёт как обычно.
 void _batchCandidates(CallSession s) {
   final pc = s.pc;
   final origCandidate = pc?.onIceCandidate;
   if (pc == null || origCandidate == null) return;
   final origState = pc.onIceGatheringState;
   final held = <RTCIceCandidate>[];
-  var complete = false, timedOut = false, released = false;
-  Timer? timer;
+  RTCIceGatheringState? gathering;
+  var released = false;
   StreamSubscription? sub;
-  bool inviteSent() => const {CallState.kInviteSent, CallState.kConnecting, CallState.kConnected}.contains(s.state);
   bool answered() => s.state == CallState.kConnecting || s.state == CallState.kConnected;
 
   void release() {
-    if (released || s.callHasEnded) return;
-    if (!inviteSent() || !(complete || timedOut || answered())) return;
+    if (released || s.callHasEnded || !answered()) return;
     released = true;
-    timer?.cancel();
     sub?.cancel();
     pc.onIceCandidate = origCandidate;
     pc.onIceGatheringState = origState;
-    Diag.mark('звонок: данные для соединения — одной порцией (${held.length})');
+    Diag.mark('звонок: собеседник ответил — данные для соединения одной порцией (${held.length})');
     for (final c in held) {
       origCandidate(c);
     }
     held.clear();
-    if (complete) origState?.call(RTCIceGatheringState.RTCIceGatheringStateComplete);
+    // сбор закончен — модуль отправит всё сразу; ещё идёт — дальше он работает как обычно
+    final g = gathering;
+    if (g != null) origState?.call(g);
   }
 
   pc.onIceCandidate = (c) {
@@ -80,33 +80,15 @@ void _batchCandidates(CallSession s) {
   };
   pc.onIceGatheringState = (st) {
     if (released) return origState?.call(st);
-    if (st == RTCIceGatheringState.RTCIceGatheringStateComplete) {
-      complete = true;
-      release();
-    } else {
-      origState?.call(st);
-    }
+    gathering = st;
   };
   sub = s.onCallStateChanged.stream.listen((st) {
     if (st == CallState.kEnded) {
-      timer?.cancel();
       sub?.cancel();
       return;
     }
-    if (st == CallState.kInviteSent && timer == null) {
-      timer = Timer(const Duration(seconds: 3), () {
-        timedOut = true;
-        release();
-      });
-    }
     release();
   });
-  if (inviteSent()) {
-    timer = Timer(const Duration(seconds: 3), () {
-      timedOut = true;
-      release();
-    });
-  }
 }
 
 class LastochkaVoip implements WebRTCDelegate {
