@@ -7,6 +7,9 @@ void main() {
     expect(isDangerousFile('счёт.exe. .'), isTrue);
     expect(isDangerousFile('справка.chm'), isTrue);
     expect(isDangerousFile('отчёт.pdf'), isFalse);
+    // iPhone/Mac: профиль конфигурации (корневой сертификат, VPN), быстрая команда
+    expect(isDangerousFile('wifi.mobileconfig'), isTrue);
+    expect(isDangerousFile('Помощь.shortcut'), isTrue);
     expect(safeFileName('счёт.exe. '), 'счёт.exe');
     expect(safeFileName('CON.txt'), '_CON.txt');
   });

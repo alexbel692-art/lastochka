@@ -41,7 +41,7 @@ Future<void> openAttachment(Event e, void Function(String) toast, {BuildContext?
           builder: (d) => AlertDialog(
             icon: const Icon(Icons.gpp_maybe_rounded, color: Colors.redAccent, size: 40),
             title: const Text('Это программа или скрипт'),
-            content: Text('«${p.basename(path)}» может навредить компьютеру, поэтому Ласточка его не открыла. '
+            content: Text('«${p.basename(path)}» может навредить ${isDesktop ? 'компьютеру' : 'телефону'}, поэтому Ласточка его не открыла. '
                 '${downloads != null ? 'Файл сохранён в «Загрузки». ' : ''}Запускайте только если точно знаете, что это, и доверяете отправителю — '
                 'мошенники часто присылают вирусы от имени знакомых.'),
             actions: [

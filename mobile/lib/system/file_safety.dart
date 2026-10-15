@@ -21,6 +21,9 @@ const _dangerousMac = {
 };
 const _dangerousLinux = {'desktop', 'appimage', 'run', 'deb', 'rpm', 'sh'};
 const _dangerousAndroid = {'apk', 'apks', 'xapk', 'aab'};
+// iPhone и Mac: профиль конфигурации ставит корневой сертификат (перехват защищённых соединений),
+// VPN или управление устройством; быстрые команды запускают действия; профили и пакеты приложений
+const _dangerousApple = {'mobileconfig', 'mobileprovision', 'provisionprofile', 'shortcut', 'wflow', 'ipa', 'configprofile'};
 
 /// Расширение файла. Точки и пробелы в конце не считаются: Windows их отбрасывает,
 /// и «счёт.exe.» превратился бы в «счёт.exe», проскочив проверку.
@@ -41,7 +44,7 @@ String safeFileName(String name) {
 /// Программа, скрипт, ярлык или образ диска — открывать одним нажатием опасно.
 bool isDangerousFile(String name) {
   final e = fileExt(name);
-  return _dangerousWin.contains(e) || _dangerousMac.contains(e) || _dangerousAndroid.contains(e) || _dangerousLinux.contains(e);
+  return _dangerousWin.contains(e) || _dangerousMac.contains(e) || _dangerousAndroid.contains(e) || _dangerousLinux.contains(e) || _dangerousApple.contains(e);
 }
 
 /// Пометить файл «загружен из интернета». false — система не дала пометить (результат проверяется,
