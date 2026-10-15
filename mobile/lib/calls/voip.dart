@@ -41,6 +41,74 @@ void _watchNetwork() {
   };
 }
 
+/// Исходящий звонок: данные для соединения (ICE-кандидаты) уходят ОДНОЙ порцией, а не по мере нахождения.
+/// Каждая порция — отдельное зашифрованное событие в чате, и Element на iPhone показывает на каждое своё
+/// уведомление («несколько пропущенных на один звонок»). Кандидаты придерживаются, пока телефон не соберёт
+/// их все (или не пройдёт 3 с после приглашения), и только после отправки приглашения; как только собеседник
+/// ответил — сразу отпускаются, чтобы не задерживать соединение. Дальше всё идёт как обычно.
+void _batchCandidates(CallSession s) {
+  final pc = s.pc;
+  final origCandidate = pc?.onIceCandidate;
+  if (pc == null || origCandidate == null) return;
+  final origState = pc.onIceGatheringState;
+  final held = <RTCIceCandidate>[];
+  var complete = false, timedOut = false, released = false;
+  Timer? timer;
+  StreamSubscription? sub;
+  bool inviteSent() => const {CallState.kInviteSent, CallState.kConnecting, CallState.kConnected}.contains(s.state);
+  bool answered() => s.state == CallState.kConnecting || s.state == CallState.kConnected;
+
+  void release() {
+    if (released || s.callHasEnded) return;
+    if (!inviteSent() || !(complete || timedOut || answered())) return;
+    released = true;
+    timer?.cancel();
+    sub?.cancel();
+    pc.onIceCandidate = origCandidate;
+    pc.onIceGatheringState = origState;
+    Diag.mark('звонок: данные для соединения — одной порцией (${held.length})');
+    for (final c in held) {
+      origCandidate(c);
+    }
+    held.clear();
+    if (complete) origState?.call(RTCIceGatheringState.RTCIceGatheringStateComplete);
+  }
+
+  pc.onIceCandidate = (c) {
+    if (released) return origCandidate(c);
+    held.add(c);
+  };
+  pc.onIceGatheringState = (st) {
+    if (released) return origState?.call(st);
+    if (st == RTCIceGatheringState.RTCIceGatheringStateComplete) {
+      complete = true;
+      release();
+    } else {
+      origState?.call(st);
+    }
+  };
+  sub = s.onCallStateChanged.stream.listen((st) {
+    if (st == CallState.kEnded) {
+      timer?.cancel();
+      sub?.cancel();
+      return;
+    }
+    if (st == CallState.kInviteSent && timer == null) {
+      timer = Timer(const Duration(seconds: 3), () {
+        timedOut = true;
+        release();
+      });
+    }
+    release();
+  });
+  if (inviteSent()) {
+    timer = Timer(const Duration(seconds: 3), () {
+      timedOut = true;
+      release();
+    });
+  }
+}
+
 class LastochkaVoip implements WebRTCDelegate {
   @override
   MediaDevices get mediaDevices => _Media(rtc.navigator.mediaDevices);
@@ -74,6 +142,7 @@ class LastochkaVoip implements WebRTCDelegate {
     // звонка не открываем, «поверх блокировки» и уведомление о входящем не включаем (раньше на Android
     // открывалось два экрана звонка и окно лишний раз перестраивалось — после звонка экран застывал)
     if (session.isOutgoing) {
+      _batchCandidates(session);
       callActive.value = true;
       currentCall.value = session;
       return;
