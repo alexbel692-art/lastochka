@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 import 'package:matrix/matrix.dart';
 
+import '../chat/names.dart' show cleanName;
 import '../widgets/avatar.dart';
 import '../system/diag.dart';
 import 'sounds.dart';
@@ -41,6 +42,8 @@ class _CallPageState extends State<CallPage> {
   bool _closing = false;
   bool _renderers = false; // видео можно подключать только после initialize()
   bool _keyguard = false; // телефон заблокирован: «Назад» не открывает чаты поверх экрана блокировки
+  String? _unreachable; // исходящий: сеансы собеседника, которым ключи не уходят (звонок там не зазвонит)
+  final _started = Stopwatch()..start();
 
   @override
   void initState() {
@@ -51,6 +54,7 @@ class _CallPageState extends State<CallPage> {
     // а на голосовом — как только кто-то включит камеру (в том числе собеседник из Element).
     // Лишние окна на аудиозвонке не нужны: их освобождение на старых Android подвешивало приложение
     if (call.type == CallType.kVideo) _ensureRenderers();
+    if (call.isOutgoing) _unreachable = _unreachableNote();
     _subs.add(call.onCallStateChanged.stream.listen(_onState));
     _subs.add(call.onCallStreamsChanged.stream.listen((_) => _bindStreams()));
     _subs.add(call.onStreamAdd.stream.listen((_) => _bindStreams()));
@@ -98,8 +102,31 @@ class _CallPageState extends State<CallPage> {
     setState(() {});
   }
 
+  /// Ласточка отдаёт ключи шифрования только сеансам, которые собеседник сам подтвердил (кросс-подпись).
+  /// Неподтверждённый сеанс (например, Element, где пропустили подтверждение входа) получит приглашение
+  /// в звонок, но не сможет его расшифровать — и не зазвонит. Говорим об этом сразу, а не молча.
+  String? _unreachableNote() {
+    final uid = call.remoteUser?.id ?? call.room.directChatMatrixID;
+    if (uid == null) return null;
+    final devices = call.room.client.userDeviceKeys[uid]?.deviceKeys.values.where((d) => !d.blocked).toList() ?? const [];
+    final skipped = devices.where((d) => !d.encryptToDevice).toList();
+    if (skipped.isEmpty) return null;
+    String label(DeviceKeys d) {
+      final n = cleanName(d.deviceDisplayName ?? '');
+      return n.isEmpty ? (d.deviceId ?? '?') : (n.length > 30 ? '${n.substring(0, 30)}…' : n);
+    }
+
+    final names = skipped.map(label).take(3).join(', ');
+    Diag.add('Звонок: ${skipped.length} из ${devices.length} сеансов собеседника не подтверждены — ключи им не отправлены');
+    return skipped.length == devices.length
+        ? 'Звонок не дойдёт: ни один сеанс собеседника не подтверждён ($names). Пусть он подтвердит вход в Element или Ласточке.'
+        : 'На неподтверждённых сеансах собеседника ($names) звонок не зазвонит. Пусть он подтвердит их со своего основного устройства.';
+  }
+
   void _onState(CallState s) {
     if (!mounted) return;
+    // ход звонка с отметкой времени — в отчёте видно, на каком шаге он остановился
+    Diag.mark('звонок: ${s.name} (${_started.elapsedMilliseconds} мс)');
     if (s == CallState.kConnected && _connectedAt == null) {
       _connectedAt = DateTime.now();
       if (Platform.isAndroid || Platform.isIOS) rtc.Helper.setSpeakerphoneOn(_speaker).catchError((_) {});
@@ -277,6 +304,19 @@ class _CallPageState extends State<CallPage> {
               Text(name, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               Text(_status, style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 16)),
+              if (_unreachable != null && _connectedAt == null && !ended)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(color: const Color(0xCCB26A00), borderRadius: BorderRadius.circular(12)),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Icon(Icons.gpp_maybe_rounded, color: Colors.white, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(_unreachable!, style: const TextStyle(color: Colors.white, fontSize: 13.5, height: 1.3))),
+                    ]),
+                  ),
+                ),
               const Spacer(),
               if (ringing)
                 Padding(
