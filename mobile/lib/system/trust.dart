@@ -755,6 +755,10 @@ class Trust {
     return _judgeDevice(senderId, list, dk);
   }
 
+  /// Самое частое и наименее опасное предупреждение: собеседник не подтвердил своё же устройство
+  /// (вошёл и пропустил подтверждение). Такое сообщение показывается с пометкой, а не прячется.
+  static const unverifiedDeviceWarning = 'Отправлено с устройства, которое владелец не подтвердил';
+
   String? _judgeDevice(String senderId, DeviceKeysList list, DeviceKeys dk) {
     if (senderId == client.userID && dk.deviceId == client.deviceID) return null;
     if (list.masterKey == null) {
@@ -762,7 +766,7 @@ class Trust {
       return _pins.containsKey(senderId) ? 'Ключ личности отправителя пропал — подлинность не подтверждена' : null;
     }
     if (!dk.hasValidSignatureChain(verifiedByTheirMasterKey: true)) {
-      return 'Отправлено с устройства, которое владелец не подтвердил';
+      return unverifiedDeviceWarning;
     }
     return null;
   }

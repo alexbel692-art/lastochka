@@ -2,7 +2,9 @@
 // • Windows/macOS — закрытие окна прячет Ласточку в трей (строку меню), автозапуск с Windows;
 // • Android — фоновая служба держит связь с сервером, исключение из экономии батареи.
 import 'dart:io';
+import 'dart:ui' show Rect;
 
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -120,6 +122,29 @@ Future<void> showMainWindow() async {
     await windowManager.focus();
     appVisible = true;
   } catch (_) {}
+}
+
+/// Windows: после запуска (в том числе установщиком после обновления, на RDP-сервере) окно иногда
+/// оставалось белым, пока его не «будили» щелчком по значку в трее. Делаем то же самое сами: показываем
+/// окно так же, как щелчок по трею, слегка меняем размер (система заново создаёт поверхность для рисования)
+/// и несколько раз просим нарисовать кадр.
+Future<void> wakeWindowOnStart() async {
+  if (!Platform.isWindows) return;
+  for (final ms in const [400, 1500, 4000]) {
+    await Future.delayed(Duration(milliseconds: ms));
+    try {
+      if (!await windowManager.isVisible()) continue;
+      if (ms == 400) {
+        await showMainWindow();
+        if (!await windowManager.isMaximized() && !await windowManager.isFullScreen()) {
+          final b = await windowManager.getBounds();
+          await windowManager.setBounds(Rect.fromLTWH(b.left, b.top, b.width + 1, b.height));
+          await windowManager.setBounds(b);
+        }
+      }
+      SchedulerBinding.instance.scheduleForcedFrame();
+    } catch (_) {}
+  }
 }
 
 Future<void> hideMainWindow() async {

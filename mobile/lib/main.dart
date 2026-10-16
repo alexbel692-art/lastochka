@@ -175,6 +175,7 @@ Future<void> main(List<String> args) async {
   if (!isDesktopOS) appVisible = WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
   // автозапуск с Windows — сразу в трей, без окна
   if (hidden) appVisible = false;
+  if (!hidden) unawaited(wakeWindowOnStart());
 }
 
 class LastochkaApp extends StatefulWidget {

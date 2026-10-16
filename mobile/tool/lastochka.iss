@@ -43,7 +43,7 @@ Name: "{commondesktop}\Ласточка"; Filename: "{app}\Lastochka.exe"; Tasks
 
 [Run]
 ; обычная установка — галочка «Запустить»; тихое автообновление — запускаем сами
-Filename: "{app}\Lastochka.exe"; Description: "{cm:LaunchProgram,Ласточка}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Lastochka.exe"; Description: "{cm:LaunchProgram,Ласточка}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 Filename: "{app}\Lastochka.exe"; Flags: nowait runasoriginaluser skipifnotsilent
 
 [Code]

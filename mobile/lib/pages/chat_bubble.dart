@@ -250,9 +250,23 @@ class _Bubble extends StatelessWidget {
       ]);
     }
 
-    // любое предупреждение о подлинности (неподтверждённое или неизвестное устройство, чужой ключ, ключ
-    // переслан не автором) — содержимое скрыто, пока вы сами не нажмёте «Показать»; так же поступает Element
-    final untrustedDevice = warn != null;
+    // устройство, которое собеседник сам не подтвердил, — сообщение видно сразу, с красной пометкой (как в Element);
+    // опасные случаи (чужой ключ, неизвестное устройство, ключ переслан не автором) — скрыто до «Показать»
+    if (warn == Trust.unverifiedDeviceWarning) {
+      final shown = content;
+      content = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.gpp_maybe_outlined, color: Colors.redAccent, size: 15),
+            const SizedBox(width: 4),
+            Flexible(child: Text('С неподтверждённого устройства', style: TextStyle(color: Colors.redAccent.shade200, fontSize: 12.5))),
+          ]),
+        ),
+        shown,
+      ]);
+    }
+    final untrustedDevice = warn != null && warn != Trust.unverifiedDeviceWarning;
     if (untrustedDevice) {
       final shown = content;
       content = ValueListenableBuilder<Set<String>>(
