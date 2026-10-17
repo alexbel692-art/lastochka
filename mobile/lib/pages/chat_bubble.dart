@@ -28,7 +28,9 @@ class _Bubble extends StatelessWidget {
   final String? highlight; // подсветка при поиске в чате
   final int threadCount; // ответов в ветке
   final VoidCallback? onThread;
+  final VoidCallback? onMenu; // меню сообщения (правая кнопка мыши по невыделенному тексту)
   const _Bubble({
+    this.onMenu,
     this.threadCount = 0,
     this.onThread,
     this.album,
@@ -43,6 +45,39 @@ class _Bubble extends StatelessWidget {
     required this.onReact,
     required this.onReplyTap,
   });
+
+  /// Компьютер: текст сообщения можно выделить мышью и скопировать (Ctrl+C / ⌘C или правой кнопкой).
+  /// Правая кнопка по невыделенному тексту, как и раньше, открывает меню сообщения.
+  Widget _selectable(Widget child) {
+    if (!isDesktop || onMenu == null) return child;
+    return SelectionArea(
+      contextMenuBuilder: (context, st) {
+        final items = st.contextMenuButtonItems;
+        if (!items.any((b) => b.type == ContextMenuButtonType.copy)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            st.hideToolbar();
+            onMenu?.call();
+          });
+          return const SizedBox.shrink();
+        }
+        return AdaptiveTextSelectionToolbar.buttonItems(
+          anchors: st.contextMenuAnchors,
+          buttonItems: [
+            for (final b in items)
+              if (b.type == ContextMenuButtonType.copy || b.type == ContextMenuButtonType.selectAll) b,
+            ContextMenuButtonItem(
+              label: 'Действия с сообщением',
+              onPressed: () {
+                st.hideToolbar();
+                onMenu?.call();
+              },
+            ),
+          ],
+        );
+      },
+      child: child,
+    );
+  }
 
   bool _readByOthers() {
     final ts = event.originServerTs.millisecondsSinceEpoch;
@@ -219,7 +254,7 @@ class _Bubble extends StatelessWidget {
         ]),
       );
     } else {
-      content = RichMessage(
+      content = _selectable(RichMessage(
         event: e,
         highlight: highlight,
         style: TextStyle(fontSize: 16, height: 1.3, color: mine ? Bubbles.outText(context) : Theme.of(context).textTheme.bodyLarge?.color),
@@ -229,7 +264,7 @@ class _Bubble extends StatelessWidget {
             : Theme.of(context).brightness == Brightness.dark
                 ? Color.lerp(accent, Colors.white, 0.35)
                 : accent,
-      );
+      ));
     }
 
     // подпись к фото, видео или файлу — под вложением, как в Telegram
@@ -240,12 +275,12 @@ class _Bubble extends StatelessWidget {
         const SizedBox(height: 6),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 2),
-          child: RichMessage(
+          child: _selectable(RichMessage(
             event: e,
             highlight: highlight,
             style: TextStyle(fontSize: 16, height: 1.3, color: mine ? Bubbles.outText(context) : Theme.of(context).textTheme.bodyLarge?.color),
             linkColor: mine ? Bubbles.outText(context) : accent,
-          ),
+          )),
         ),
       ]);
     }

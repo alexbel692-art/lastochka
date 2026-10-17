@@ -64,6 +64,7 @@ extension _ChatCompose on _ChatPageState {
               child: AbsorbPointer(
                 absorbing: _sel != null,
                 child: _Bubble(
+                onMenu: () => _actions(e),
                 event: e,
                 timeline: tl,
                 room: room,
