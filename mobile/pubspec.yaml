@@ -51,6 +51,12 @@ dependencies:
   device_guard:
     path: packages/device_guard
 
+
+# shared_preferences_android 2.5.0 падает в выпускной (сжатой) сборке при первом чтении настроек
+# (NoSuchMethodError SharedPreferencesApiRegistrar.getAll) — поймано проверкой на эмуляторе. Держим 2.4.28.
+dependency_overrides:
+  shared_preferences_android: 2.4.28
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
