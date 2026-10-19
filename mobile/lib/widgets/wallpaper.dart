@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../system/appearance.dart';
+import '../system/perf.dart' show remoteSession;
 
 class ChatWallpaper extends StatelessWidget {
   final Widget? child;
@@ -18,6 +19,15 @@ class ChatWallpaper extends StatelessWidget {
           final w = wallpapers[i];
           final dark = Theme.of(context).brightness == Brightness.dark;
           final colors = dark ? w.dark : w.light;
+          // удалённый рабочий стол: ровный цвет без градиента и узора. Под прокручиваемой перепиской фон
+          // перерисовывается и передаётся по сети целиком; ровный цвет сервер рисует быстрее, а RDP сжимает
+          // во много раз лучше узора — прокрутка заметно плавнее, сеть и процессор сервера свободнее
+          if (remoteSession) {
+            return DecoratedBox(
+              decoration: BoxDecoration(borderRadius: radius, color: Color.lerp(colors.first, colors.last, 0.5)),
+              child: child ?? const SizedBox.expand(),
+            );
+          }
           return DecoratedBox(
             decoration: BoxDecoration(
               borderRadius: radius,

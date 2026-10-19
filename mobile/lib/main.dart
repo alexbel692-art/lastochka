@@ -44,8 +44,9 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   Diag.init();
   unawaited(Diag.initTrail());
-  // кэш картинок Flutter — не больше 80 МБ (по умолчанию 100), для слабых телефонов
-  PaintingBinding.instance.imageCache.maximumSizeBytes = 80 << 20;
+  // кэш картинок Flutter — не больше 80 МБ (по умолчанию 100), для слабых телефонов; на RDP-сервере
+  // Ласточка запущена у каждого пользователя — там 32 МБ, чтобы 15 копий не съедали память сервера
+  PaintingBinding.instance.imageCache.maximumSizeBytes = (remoteSession ? 32 : 80) << 20;
   // Вместо серого экрана при ошибке — понятное сообщение и кнопка «Назад».
   ErrorWidget.builder = (details) => Material(
         child: SafeArea(
@@ -165,7 +166,8 @@ Future<void> main(List<String> args) async {
   // заставка показывается хотя бы до конца анимации влёта
   final left = const Duration(milliseconds: 1100) - DateTime.now().difference(started);
   final onScreen = !hidden && (isDesktopOS || WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed);
-  if (onScreen && left > Duration.zero) await Future.delayed(left);
+  // на RDP-сервере заставку не задерживаем: каждый её кадр рисует процессор сервера
+  if (onScreen && !remoteSession && left > Duration.zero) await Future.delayed(left);
   appReady.value = const LastochkaApp();
   // запуск в фоне (после перезагрузки, из трея): кадры не рисуются — дорисовываем принудительно,
   // иначе приложение (фоновая служба, подписки) не запустится, пока не откроют окно

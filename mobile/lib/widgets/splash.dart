@@ -4,6 +4,8 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../system/perf.dart' show remoteSession;
+
 const splashBlue = Color(0xFF2F7FE8);
 
 /// Корень приложения: пока [app] пусто — заставка, потом плавный переход.
@@ -36,8 +38,12 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMixin {
   // влёт и появление — один раз; лёгкое «парение» и точки загрузки — по кругу
-  late final AnimationController _in = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..forward();
-  late final AnimationController _loop = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))..repeat();
+  // на RDP-сервере — сразу конечная картинка, без анимации (её кадры рисует процессор сервера)
+  late final AnimationController _in = AnimationController(vsync: this, duration: const Duration(milliseconds: 900), value: remoteSession ? 1 : 0)
+    ..forward();
+  late final AnimationController _loop = remoteSession
+      ? AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))
+      : (AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))..repeat());
 
   @override
   void dispose() {
