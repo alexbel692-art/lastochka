@@ -281,7 +281,7 @@ extension _ChatMessages on _ChatPageState {
   Future<void> _showReaders(Event e) async {
     final ts = e.originServerTs.millisecondsSinceEpoch;
     final readers = <(User, DateTime)>[];
-    for (final MapEntry(key: uid, value: r) in room.receiptState.global.otherUsers.entries) {
+    for (final MapEntry(key: uid, value: r) in otherReadReceipts(room).entries) {
       if (uid == client.userID || r.ts < ts) continue;
       readers.add((room.unsafeGetUserFromMemoryOrFallback(uid), DateTime.fromMillisecondsSinceEpoch(r.ts)));
     }

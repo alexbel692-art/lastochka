@@ -32,6 +32,7 @@ import '../chat/drafts.dart';
 import '../chat/formatting.dart';
 import '../chat/forward.dart';
 import '../chat/names.dart';
+import '../chat/receipts.dart';
 import '../chat/polls.dart';
 import '../chat/video.dart';
 import '../system/clipboard.dart';

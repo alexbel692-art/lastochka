@@ -16,6 +16,7 @@ import 'people.dart';
 import 'qr.dart';
 import '../chat/formatting.dart';
 import '../chat/polls.dart';
+import '../chat/receipts.dart';
 import '../system/media_policy.dart';
 import '../system/perf.dart';
 import '../system/privacy.dart' show sendReadReceipts;
@@ -726,7 +727,7 @@ class _ChatsPageState extends State<ChatsPage> {
                     final ts = r.lastEvent?.originServerTs;
                     final last = r.lastEvent;
                     final mineLast = last != null && last.senderId == client.userID && last.type == EventTypes.Message;
-                    final readLast = mineLast && r.receiptState.global.otherUsers.values.any((x) => x.ts >= last.originServerTs.millisecondsSinceEpoch);
+                    final readLast = mineLast && readByOthersSince(r, last.originServerTs.millisecondsSinceEpoch);
                     final typing = r.typingUsers.where((u) => u.id != client.userID).toList();
                     // выбранный чат на компьютере — залит цветом, как в Telegram Desktop
                     final sel = _wide && _selected?.id == r.id;

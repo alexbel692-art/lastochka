@@ -81,7 +81,7 @@ class _Bubble extends StatelessWidget {
 
   bool _readByOthers() {
     final ts = event.originServerTs.millisecondsSinceEpoch;
-    return room.receiptState.global.otherUsers.values.any((r) => r.ts >= ts);
+    return readByOthersSince(room, ts);
   }
 
   @override
