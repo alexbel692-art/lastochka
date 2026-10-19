@@ -19,11 +19,6 @@ class ChatWallpaper extends StatelessWidget {
           final dark = Theme.of(context).brightness == Brightness.dark;
           final colors = dark ? w.dark : w.light;
           return DecoratedBox(
-              decoration: BoxDecoration(borderRadius: radius, color: Color.lerp(colors.first, colors.last, 0.5)),
-              child: child ?? const SizedBox.expand(),
-            );
-          }
-          return DecoratedBox(
             decoration: BoxDecoration(
               borderRadius: radius,
               gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: colors),
