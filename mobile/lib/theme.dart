@@ -1,6 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'system/appearance.dart';
+
+/// Шрифт интерфейса. Windows — системный Segoe UI: он подогнан под пиксели экрана (хинтинг), и на обычных
+/// мониторах и особенно в RDP текст чёткий. Inter без этой подгонки на Windows выглядел «замыленным».
+final String uiFont = Platform.isWindows ? 'Segoe UI' : 'Inter';
 
 // Цвета как в настольной Ласточке (стиль Telegram).
 const accentLight = Color(0xFF3390EC);
@@ -17,7 +23,7 @@ ThemeData _base(Brightness b) {
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
-    fontFamily: 'Inter',
+    fontFamily: uiFont,
     // эмодзи и редкие символы — системными шрифтами
     fontFamilyFallback: const ['Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', 'Segoe UI', 'Roboto'],
     // короткие уведомления («Сохранено», «Скопировано») — маленькой плашкой по центру, а не полосой во всю ширину
@@ -26,7 +32,7 @@ ThemeData _base(Brightness b) {
       width: 340,
       elevation: 3,
       backgroundColor: dark ? const Color(0xFF3A3A3C) : const Color(0xE6303035),
-      contentTextStyle: const TextStyle(color: Colors.white, fontSize: 14, fontFamily: 'Inter'),
+      contentTextStyle: TextStyle(color: Colors.white, fontSize: 14, fontFamily: uiFont),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
     ),
     drawerTheme: const DrawerThemeData(

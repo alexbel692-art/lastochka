@@ -33,6 +33,7 @@ import 'pages/verify.dart';
 import 'theme.dart';
 import 'widgets/splash.dart';
 import 'system/perf.dart';
+import 'chat/mpv_video.dart' show initMpv;
 import 'system/stale_sessions.dart';
 
 late Client client;
@@ -43,6 +44,7 @@ final messengerKey = GlobalKey<ScaffoldMessengerState>();
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   Diag.init();
+  initMpv(); // Windows Server / RDP: видео через mpv
   unawaited(Diag.initTrail());
   // кэш картинок Flutter — не больше 80 МБ (по умолчанию 100), для слабых телефонов; на RDP-сервере
   // Ласточка запущена у каждого пользователя — там 32 МБ, чтобы 15 копий не съедали память сервера

@@ -1,7 +1,7 @@
 name: lastochka
 description: Ласточка — защищённый мессенджер на Matrix (Android, iOS).
 publish_to: 'none'
-version: 4.19.28+1
+version: 4.19.29+1
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -48,6 +48,10 @@ dependencies:
   photo_manager: ^3.6.0
   video_frame:
     path: packages/video_frame
+  # видео на Windows Server / RDP — свой проигрыватель mpv + FFmpeg (как в Telegram Desktop), без Media Foundation
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+  media_kit_libs_windows_video: ^1.0.10
   device_guard:
     path: packages/device_guard
 

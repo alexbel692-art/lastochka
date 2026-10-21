@@ -19,9 +19,9 @@ import '../system/lru.dart';
 import '../system/media_clean.dart';
 import '../system/image_guard.dart';
 import '../system/media_policy.dart';
-import '../system/perf.dart' show windowsMediaSafe;
 import '../system/privacy.dart';
 import 'autodelete.dart';
+import 'mpv_video.dart';
 import 'voice.dart' show fmtDur;
 import '../system/diag.dart';
 
@@ -44,8 +44,8 @@ Map<String, Object?> captionContent(String caption, String fileName) =>
     caption.trim().isEmpty ? const {} : {'body': caption.trim(), 'filename': fileName};
 // Windows — через Media Foundation (video_player_win); если система не умеет (например, Windows Server без
 // компонента «Media Foundation»), видео откроется в проигрывателе системы
-// на Windows Server и в RDP-сеансе — только проигрыватель системы (Media Foundation там ронял Ласточку)
-final bool videoSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS || (Platform.isWindows && windowsMediaSafe);
+// на Windows Server и в RDP-сеансе — свой проигрыватель mpv (Media Foundation там ронял Ласточку), см. mpv_video.dart
+final bool videoSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isWindows;
 final bool canRecordRound = Platform.isAndroid || Platform.isIOS;
 
 const _system = MethodChannel('lastochka/system');
@@ -61,11 +61,15 @@ const _frames = MethodChannel('lastochka/video_frame');
 
 /// Где умеем доставать кадр из видео: Android — системой, iPhone и Mac — AVFoundation,
 /// Windows — Media Foundation (модуль packages/video_frame).
-final bool frameSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS || (Platform.isWindows && windowsMediaSafe);
+final bool frameSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isWindows;
 
 /// Первый кадр видеофайла (JPEG до 480 точек) и размеры самого видео.
 Future<VideoFrame?> videoFrame(String path) async {
   if (!frameSupported) return null;
+  if (useMpv) {
+    final r = await mpvFrame(path);
+    return r == null ? null : VideoFrame(r.jpeg, r.w, r.h, r.w, r.h, r.durationMs);
+  }
   try {
     final args = {'path': path, 'max': 480};
     final r = await (Platform.isAndroid ? _system.invokeMapMethod<String, Object?>('videoFrame', args) : _frames.invokeMapMethod<String, Object?>('frame', args))
@@ -98,7 +102,7 @@ Uint8List? _toJpeg((Uint8List, int, int, int) a) {
 bool isRound(Event e) => e.messageType == MessageTypes.Video && e.content[roundKey] == true;
 
 Future<int?> _durationOf(String path) async {
-  if (!videoSupported) return null;
+  if (!videoSupported || useMpv) return null;
   try {
     final c = VideoPlayerController.file(File(path));
     await c.initialize();
@@ -369,6 +373,8 @@ class _RoundVideoState extends State<RoundVideo> {
 
   Future<void> _toggle() async {
     if (!videoSupported) return widget.openExternally();
+    // сервер / RDP: кружок открывается во встроенном проигрывателе mpv
+    if (useMpv) return openVideo(context, widget.event, widget.openExternally);
     final c = _c;
     if (c != null) {
       c.value.isPlaying ? await c.pause() : await c.play();
@@ -478,6 +484,7 @@ class VideoPlayerView extends StatefulWidget {
 
 class _VideoPlayerViewState extends State<VideoPlayerView> {
   VideoPlayerController? _c;
+  File? _mpvFile; // сервер / RDP: воспроизведение через mpv
   bool _failed = false;
 
   @override
@@ -486,6 +493,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     _decrypted(widget.event).then((f) async {
       if (!mounted) return;
       if (f == null) return setState(() => _failed = true);
+      if (useMpv) return setState(() => _mpvFile = f);
       final c = VideoPlayerController.file(f);
       try {
         await c.initialize().timeout(const Duration(seconds: 20));
@@ -526,6 +534,8 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         ]),
       );
     }
+    final mf = _mpvFile;
+    if (mf != null) return MpvVideoView(file: mf, autoplay: widget.autoplay, onFailed: () => setState(() => _failed = true));
     if (c == null) return const Center(child: CircularProgressIndicator());
     final playing = c.value.isPlaying;
     return Column(children: [
