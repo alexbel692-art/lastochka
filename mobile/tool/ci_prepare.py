@@ -213,6 +213,51 @@ if os.path.exists(mc):
         return s[:m.end()] + code + s[m.end():]
     edit(mc, mc_fn)
 
+# --- Windows: запись падений на уровне системы. Ошибку внутри видеомодуля, mpv или графики Ласточка сама не видит —
+# процесс просто закрывается. Обработчик пишет в %TEMP%\lastochka_native_crash.txt код ошибки и модуль, в котором
+# она случилась; при следующем запуске это попадает в отчёт («Настройки → отправить отчёт»).
+if os.path.exists(mc):
+    def crash_fn(s):
+        if 'LastochkaCrash' in s:
+            return s
+        inc = '#include "utils.h"\n'
+        if inc not in s:
+            raise SystemExit('main.cpp: шаблон изменился, запись падений не добавлена')
+        s = s.replace(inc, inc + r'''
+#include <cstdio>
+#include <cwchar>
+
+// Unhandled native crash -> one line in %TEMP%\lastochka_native_crash.txt (code, module, offset).
+static LONG WINAPI LastochkaCrash(EXCEPTION_POINTERS* ep) {
+  wchar_t path[MAX_PATH];
+  const DWORD n = GetTempPathW(MAX_PATH, path);
+  if (n == 0 || n > MAX_PATH - 40) return EXCEPTION_CONTINUE_SEARCH;
+  wcscat_s(path, MAX_PATH, L"lastochka_native_crash.txt");
+  FILE* f = nullptr;
+  if (_wfopen_s(&f, path, L"a") != 0 || f == nullptr) return EXCEPTION_CONTINUE_SEARCH;
+  void* addr = ep->ExceptionRecord->ExceptionAddress;
+  HMODULE mod = nullptr;
+  wchar_t name[MAX_PATH] = L"?";
+  if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                         static_cast<LPCWSTR>(addr), &mod) && mod != nullptr) {
+    GetModuleFileNameW(mod, name, MAX_PATH);
+  }
+  const wchar_t* base = wcsrchr(name, L'\\');
+  base = base ? base + 1 : name;
+  SYSTEMTIME t;
+  GetLocalTime(&t);
+  fwprintf(f, L"%04u-%02u-%02u %02u:%02u:%02u code=0x%08lX module=%ls offset=0x%llX\n",
+           t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond,
+           static_cast<unsigned long>(ep->ExceptionRecord->ExceptionCode), base,
+           static_cast<unsigned long long>(reinterpret_cast<const char*>(addr) - reinterpret_cast<const char*>(mod)));
+  fclose(f);
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+''', 1)
+        m = re.search(r'(wWinMain\([^)]*\)\s*\{)', s)
+        return s[:m.end()] + '\n  SetUnhandledExceptionFilter(LastochkaCrash);' + s[m.end():]
+    edit(mc, crash_fn)
+
 # --- Windows: при автозапуске (--hidden) окно не показывается — Ласточка стартует в трее ---
 fw = 'windows/runner/flutter_window.cpp'
 if os.path.exists(fw):

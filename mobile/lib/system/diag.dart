@@ -133,6 +133,26 @@ class Diag {
   // перезапустят, в следующем отчёте будет видно, на каком шаге это случилось.
   static File? _trail;
 
+  /// Windows: запись системного обработчика сбоев (main.cpp) о падении прошлого запуска —
+  /// код исключения и модуль, в котором оно случилось. Читается один раз, файл удаляется.
+  static final Future<String?> nativeCrash = _readNativeCrash();
+
+  static Future<String?> _readNativeCrash() async {
+    if (!Platform.isWindows) return null;
+    try {
+      final tmp = Platform.environment['TEMP'] ?? Platform.environment['TMP'];
+      if (tmp == null || tmp.isEmpty) return null;
+      final f = File(p.join(tmp, 'lastochka_native_crash.txt'));
+      if (!await f.exists()) return null;
+      var t = (await f.readAsString()).trim();
+      await f.delete();
+      if (t.length > 3000) t = t.substring(t.length - 3000);
+      return t.isEmpty ? null : t;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<void> initTrail() async {
     final dir = (await getApplicationSupportDirectory()).path;
     _dir = dir;
@@ -150,6 +170,8 @@ class Diag {
         }
       } catch (_) {}
     }
+    final crash = await nativeCrash;
+    if (crash != null) add('Падение программы (прошлый запуск):\n$crash');
     if (!Platform.isAndroid) _startWatchdog(dir);
     try {
       final f = File(p.join(dir, 'diag_trail.txt'));

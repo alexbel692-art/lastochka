@@ -535,7 +535,15 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       );
     }
     final mf = _mpvFile;
-    if (mf != null) return MpvVideoView(file: mf, autoplay: widget.autoplay, onFailed: () => setState(() => _failed = true));
+    if (mf != null) {
+      final info = widget.event.content.tryGetMap<String, Object?>('info');
+      return MpvVideoView(
+          file: mf,
+          autoplay: widget.autoplay,
+          videoW: info?['w'] as num?,
+          videoH: info?['h'] as num?,
+          onFailed: () => setState(() => _failed = true));
+    }
     if (c == null) return const Center(child: CircularProgressIndicator());
     final playing = c.value.isPlaying;
     return Column(children: [
