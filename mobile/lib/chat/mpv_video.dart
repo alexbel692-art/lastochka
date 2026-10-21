@@ -3,8 +3,10 @@
 // поэтому там он не используется вовсе: и кадр-превью, и воспроизведение — через mpv.
 //
 // Без видеокарты кадр рисуется процессором (программный вывод media_kit). Что здесь сделано против падений:
-// • размер картинки задаётся явно: сам media_kit для вертикального видео считал ширину 0, и преобразователь
-//   кадров mpv (zimg) читал память за пределами кадра — Ласточка падала в libmpv-2.dll (0xC0000005);
+// • поворот видео с телефона (метка «повернуть на 90°») mpv отдаёт программному выводу, а тот его не умеет:
+//   кадр читался как повёрнутый — за пределами памяти, и Ласточка падала в libmpv-2.dll (0xC0000005).
+//   Поэтому mpv поворот не передаётся (video-rotate=no), а кадр поворачивается заранее фильтром transpose;
+// • размер картинки задаётся явно: сам media_kit для вертикального видео считал ширину 0;
 // • преобразование кадров — через libswscale (FFmpeg), а не zimg;
 // • декодирование только процессором (hwdec=no): на виртуальном сервере нет видеоускорителя;
 // • кадр для превью mpv сохраняет сам (screenshot-to-file), а не через screenshot-raw media_kit;
@@ -109,7 +111,7 @@ Player _newPlayer() => Player(configuration: const PlayerConfiguration(title: '�
 Future<void> _safe(Player player) async {
   final n = player.platform;
   if (n is! NativePlayer) return;
-  for (final (k, v) in [('sws-allow-zimg', 'no'), ('hwdec', 'no'), ('screenshot-sw', 'yes'), ('screenshot-jpeg-quality', '85')]) {
+  for (final (k, v) in [('video-rotate', 'no'), ('sws-allow-zimg', 'no'), ('hwdec', 'no'), ('screenshot-sw', 'yes'), ('screenshot-jpeg-quality', '85')]) {
     try {
       await n.setProperty(k, v);
     } catch (e) {
@@ -117,6 +119,34 @@ Future<void> _safe(Player player) async {
     }
   }
 }
+
+/// Поворот видео по метке файла (0, 90, 180, 270 — по часовой). Ждёт, пока mpv откроет файл.
+Future<int> _rotation(NativePlayer n) async {
+  for (var i = 0; i < 100; i++) {
+    String id = '';
+    try {
+      id = await n.getProperty('current-tracks/video/id');
+    } catch (_) {
+      return 0; // проигрыватель уже закрыт
+    }
+    if (id.isNotEmpty) break;
+    await Future.delayed(const Duration(milliseconds: 100));
+  }
+  try {
+    final r = int.tryParse((await n.getProperty('current-tracks/video/demux-rotation')).trim()) ?? 0;
+    return ((r % 360) + 360) % 360;
+  } catch (_) {
+    return 0; // метки нет — видео не повёрнуто
+  }
+}
+
+/// Фильтр mpv, поворачивающий кадр заранее (вместо поворота при выводе).
+String? _rotateFilter(int rot) => switch (rot) {
+      90 => 'lavfi=[transpose=clock]',
+      180 => 'lavfi=[hflip,vflip]',
+      270 => 'lavfi=[transpose=cclock]',
+      _ => null,
+    };
 
 VideoController _videoController(Player player, int w, int h) => VideoController(player,
     configuration: VideoControllerConfiguration(enableHardwareAcceleration: false, hwdec: 'no', width: w, height: h));
@@ -148,9 +178,11 @@ Future<MpvFrame?> _makeFrame(String path) async {
     await controller.waitUntilFirstFrameRendered.timeout(const Duration(seconds: 15));
     final n = player.platform;
     if (n is! NativePlayer) return null;
+    final rot = await _rotation(n);
     await n.command(['screenshot-to-file', out.path, 'video']);
     if (!out.existsSync()) return null;
-    final small = await compute(_shrink, await out.readAsBytes());
+    // mpv снимает кадр без поворота — поворачиваем сами
+    final small = await compute(_shrink, (await out.readAsBytes(), rot));
     if (small == null) return null;
     return (jpeg: small.jpeg, w: small.w, h: small.h, durationMs: player.state.duration.inMilliseconds);
   } catch (e, st) {
@@ -168,9 +200,11 @@ Future<MpvFrame?> _makeFrame(String path) async {
 }
 
 /// Уменьшить кадр до 480 точек по большей стороне. w, h — размеры самого кадра (видео).
-({Uint8List jpeg, int w, int h})? _shrink(Uint8List bytes) {
-  final im = img.decodeImage(bytes);
+({Uint8List jpeg, int w, int h})? _shrink((Uint8List, int) a) {
+  final (bytes, rot) = a;
+  var im = img.decodeImage(bytes);
   if (im == null || im.width <= 0 || im.height <= 0) return null;
+  if (rot != 0) im = img.copyRotate(im, angle: rot);
   final big = math.max(im.width, im.height);
   final s = big > 480 ? img.copyResize(im, width: im.width * 480 ~/ big, height: im.height * 480 ~/ big, interpolation: img.Interpolation.average) : im;
   return (jpeg: img.encodeJpg(s, quality: 82), w: im.width, h: im.height);
@@ -215,7 +249,13 @@ class _MpvVideoViewState extends State<MpvVideoView> {
       // RDP: картинка не больше 1280×720 — её рисует процессор сервера и передаёт RDP
       final s = fitSize(widget.videoW, widget.videoH, 1280, 720);
       setState(() => _controller = _videoController(_player, s.w, s.h));
-      await _player.open(Media(Uri.file(widget.file.path).toString()), play: widget.autoplay);
+      await _player.open(Media(Uri.file(widget.file.path).toString()), play: false);
+      final n = _player.platform;
+      if (n is NativePlayer) {
+        final f = _rotateFilter(await _rotation(n));
+        if (f != null) await n.setProperty('vf', f);
+      }
+      if (mounted && widget.autoplay) await _player.play();
     } catch (e, st) {
       Diag.err('Воспроизведение видео (mpv)', e, st);
       if (mounted) widget.onFailed();
