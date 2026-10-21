@@ -196,6 +196,14 @@ if os.path.exists(mc):
         title = 'L"\\u041b\\u0430\\u0441\\u0442\\u043e\\u0447\\u043a\\u0430"'
         code = f"""
   HANDLE single = CreateMutexW(nullptr, TRUE, L"LastochkaSingleInstance");
+  // перезапуск после переподключения к RDP: ждём, пока прежняя копия завершится (до 10 с)
+  if (wcsstr(GetCommandLineW(), L"--restart") != nullptr) {{
+    for (int i = 0; i < 50 && single != nullptr && GetLastError() == ERROR_ALREADY_EXISTS; i++) {{
+      CloseHandle(single);
+      Sleep(200);
+      single = CreateMutexW(nullptr, TRUE, L"LastochkaSingleInstance");
+    }}
+  }}
   if (single != nullptr && GetLastError() == ERROR_ALREADY_EXISTS) {{
     HWND w = FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", {title});
     if (w) {{ ShowWindow(w, SW_SHOW); ShowWindow(w, SW_RESTORE); SetForegroundWindow(w); }}
@@ -209,6 +217,61 @@ if os.path.exists(mc):
 fw = 'windows/runner/flutter_window.cpp'
 if os.path.exists(fw):
     edit(fw, lambda s: s.replace('this->Show();', 'if (wcsstr(GetCommandLineW(), L"--hidden") == nullptr) this->Show();') if '--hidden' not in s else s)
+
+# --- Windows: переподключение к RDP-сеансу. При отключении сеанса Windows сбрасывает графику окна, и Flutter
+# её не восстанавливает — после переподключения окно белое и не отвечает. Ласточка ловит переподключение
+# и через 1,5 с тихо перезапускается в том же виде (окно или трей); вход и переписка сохраняются.
+if os.path.exists(fw):
+    def rdp_fn(s):
+        if 'WM_WTSSESSION_CHANGE' in s:
+            return s
+        head = '#include "flutter_window.h"\n'
+        if head not in s or 'SetChildContent(' not in s or '  switch (message) {\n' not in s:
+            raise SystemExit('flutter_window.cpp: шаблон изменился, обработчик переподключения RDP не добавлен')
+        s = s.replace(head, head + '''
+#include <wtsapi32.h>
+#include <string>
+#pragma comment(lib, "Wtsapi32.lib")
+
+namespace {
+constexpr UINT_PTR kLastochkaReconnectTimer = 0x4C41;
+
+// Restart Lastochka in the same state: visible window -> window, hidden in tray -> tray (ASCII only: MSVC /WX).
+void LastochkaRestart(HWND hwnd) {
+  wchar_t path[MAX_PATH];
+  if (GetModuleFileNameW(nullptr, path, MAX_PATH) == 0) return;
+  const bool visible = IsWindowVisible(hwnd) != FALSE;
+  std::wstring cmd = L"\\"" + std::wstring(path) + L"\\" --restart" + (visible ? L"" : L" --hidden");
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    ExitProcess(0);
+  }
+}
+}  // namespace
+''', 1)
+        i = s.index('SetChildContent(')
+        j = s.index(';', i) + 1
+        s = s[:j] + '\n  WTSRegisterSessionNotification(GetHandle(), NOTIFY_FOR_THIS_SESSION);' + s[j:]
+        s = s.replace('  switch (message) {\n', '''  switch (message) {
+    case WM_WTSSESSION_CHANGE:
+      if (wparam == WTS_REMOTE_CONNECT || wparam == WTS_CONSOLE_CONNECT) {
+        SetTimer(hwnd, kLastochkaReconnectTimer, 1500, nullptr);
+      }
+      break;
+    case WM_TIMER:
+      if (wparam == kLastochkaReconnectTimer) {
+        KillTimer(hwnd, kLastochkaReconnectTimer);
+        LastochkaRestart(hwnd);
+        return 0;
+      }
+      break;
+''', 1)
+        return s
+    edit(fw, rdp_fn)
 
 # --- Android: тема AppCompat (нужна окну входа по отпечатку на Android 8 и старше) ---
 for st in ('android/app/src/main/res/values/styles.xml', 'android/app/src/main/res/values-night/styles.xml'):
