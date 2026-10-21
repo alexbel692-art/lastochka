@@ -8,6 +8,14 @@ import 'package:flutter/material.dart';
 
 final bool remoteSession = _detect();
 
+/// Windows Server (например, RDP-сервер 2019). Видеомодуль Windows (Media Foundation) там часто неполный:
+/// без нужных кодеков или видеообработки он может уронить всю программу при разборе видео.
+final bool windowsServer = Platform.isWindows && Platform.operatingSystemVersion.contains('Server');
+
+/// Встроенные видео-функции Windows (кадр-превью, проигрыватель внутри Ласточки) включены только на
+/// обычном компьютере. На сервере и в RDP-сеансе видео открывается в проигрывателе системы — не роняя Ласточку.
+final bool windowsMediaSafe = !(Platform.isWindows && (windowsServer || remoteSession));
+
 bool _detect() {
   if (!Platform.isWindows) return false;
   try {

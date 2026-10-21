@@ -19,6 +19,7 @@ import '../system/lru.dart';
 import '../system/media_clean.dart';
 import '../system/image_guard.dart';
 import '../system/media_policy.dart';
+import '../system/perf.dart' show windowsMediaSafe;
 import '../system/privacy.dart';
 import 'autodelete.dart';
 import 'voice.dart' show fmtDur;
@@ -43,7 +44,8 @@ Map<String, Object?> captionContent(String caption, String fileName) =>
     caption.trim().isEmpty ? const {} : {'body': caption.trim(), 'filename': fileName};
 // Windows — через Media Foundation (video_player_win); если система не умеет (например, Windows Server без
 // компонента «Media Foundation»), видео откроется в проигрывателе системы
-final bool videoSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isWindows;
+// на Windows Server и в RDP-сеансе — только проигрыватель системы (Media Foundation там ронял Ласточку)
+final bool videoSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS || (Platform.isWindows && windowsMediaSafe);
 final bool canRecordRound = Platform.isAndroid || Platform.isIOS;
 
 const _system = MethodChannel('lastochka/system');
@@ -59,7 +61,7 @@ const _frames = MethodChannel('lastochka/video_frame');
 
 /// Где умеем доставать кадр из видео: Android — системой, iPhone и Mac — AVFoundation,
 /// Windows — Media Foundation (модуль packages/video_frame).
-final bool frameSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isWindows;
+final bool frameSupported = Platform.isAndroid || Platform.isIOS || Platform.isMacOS || (Platform.isWindows && windowsMediaSafe);
 
 /// Первый кадр видеофайла (JPEG до 480 точек) и размеры самого видео.
 Future<VideoFrame?> videoFrame(String path) async {
