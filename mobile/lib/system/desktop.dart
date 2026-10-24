@@ -130,17 +130,21 @@ Future<void> showMainWindow() async {
 /// и несколько раз просим нарисовать кадр.
 Future<void> wakeWindowOnStart() async {
   if (!Platform.isWindows) return;
-  for (final ms in const [400, 1500, 4000]) {
+  // RDP: рабочий стол сеанса может появиться не сразу — «будим» окно несколько раз, каждый раз полностью
+  for (final ms in const [400, 1500, 4000, 8000]) {
     await Future.delayed(Duration(milliseconds: ms));
     try {
-      if (!await windowManager.isVisible()) continue;
+      if (!await windowManager.isVisible() || await windowManager.isMinimized()) continue;
+      // как щелчок по трею; фокус забираем только в первый раз — дальше человек может работать в другой программе
       if (ms == 400) {
         await showMainWindow();
-        if (!await windowManager.isMaximized() && !await windowManager.isFullScreen()) {
-          final b = await windowManager.getBounds();
-          await windowManager.setBounds(Rect.fromLTWH(b.left, b.top, b.width + 1, b.height));
-          await windowManager.setBounds(b);
-        }
+      } else {
+        await windowManager.show(inactive: true);
+      }
+      if (!await windowManager.isMaximized() && !await windowManager.isFullScreen()) {
+        final b = await windowManager.getBounds();
+        await windowManager.setBounds(Rect.fromLTWH(b.left, b.top, b.width + 1, b.height));
+        await windowManager.setBounds(b);
       }
       SchedulerBinding.instance.scheduleForcedFrame();
     } catch (_) {}

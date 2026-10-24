@@ -27,6 +27,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../system/diag.dart';
+import 'mp4_rotation.dart';
 import '../system/perf.dart' show windowsMediaSafe;
 import '../system/updater.dart' show appVersion;
 
@@ -120,8 +121,10 @@ Future<void> _safe(Player player) async {
   }
 }
 
-/// Поворот видео по метке файла (0, 90, 180, 270 — по часовой). Ждёт, пока mpv откроет файл.
-Future<int> _rotation(NativePlayer n) async {
+/// Поворот видео по метке в самом файле (0, 90, 180, 270 — по часовой). Ждёт, пока mpv откроет файл.
+/// Запасной путь: у телефонных MP4/MOV поворот читается из заголовка (mp4Rotation) — эта сборка mpv
+/// получает его только из кадров, а там он отключён (video-rotate=no).
+Future<int> _mpvRotation(NativePlayer n) async {
   for (var i = 0; i < 100; i++) {
     String id = '';
     try {
@@ -178,7 +181,7 @@ Future<MpvFrame?> _makeFrame(String path) async {
     await controller.waitUntilFirstFrameRendered.timeout(const Duration(seconds: 15));
     final n = player.platform;
     if (n is! NativePlayer) return null;
-    final rot = await _rotation(n);
+    final rot = await mp4Rotation(path) ?? await _mpvRotation(n);
     await n.command(['screenshot-to-file', out.path, 'video']);
     if (!out.existsSync()) return null;
     // mpv снимает кадр без поворота — поворачиваем сами
@@ -249,11 +252,15 @@ class _MpvVideoViewState extends State<MpvVideoView> {
       // RDP: картинка не больше 1280×720 — её рисует процессор сервера и передаёт RDP
       final s = fitSize(widget.videoW, widget.videoH, 1280, 720);
       setState(() => _controller = _videoController(_player, s.w, s.h));
-      await _player.open(Media(Uri.file(widget.file.path).toString()), play: false);
       final n = _player.platform;
-      if (n is NativePlayer) {
-        final f = _rotateFilter(await _rotation(n));
-        if (f != null) await n.setProperty('vf', f);
+      // поворот — до открытия файла, чтобы видео сразу стояло правильно
+      final rot = await mp4Rotation(widget.file.path);
+      final f = _rotateFilter(rot ?? 0);
+      if (f != null && n is NativePlayer) await n.setProperty('vf', f);
+      await _player.open(Media(Uri.file(widget.file.path).toString()), play: false);
+      if (rot == null && n is NativePlayer) {
+        final f2 = _rotateFilter(await _mpvRotation(n));
+        if (f2 != null) await n.setProperty('vf', f2);
       }
       if (mounted && widget.autoplay) await _player.play();
     } catch (e, st) {

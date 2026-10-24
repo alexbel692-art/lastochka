@@ -71,6 +71,7 @@ Future<void> main(List<String> args) async {
   runApp(const Root());
   await initializeDateFormatting('ru');
   final hidden = args.contains('--hidden');
+  if (args.contains('--restart')) Diag.add('Запуск: перезапуск после переподключения к RDP${hidden ? ' (в трей)' : ''}');
   await initDesktop(hidden: hidden);
   await CertPinning.instance.init();
   await Appearance.instance.init();

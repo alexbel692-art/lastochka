@@ -275,11 +275,26 @@ if os.path.exists(fw):
             raise SystemExit('flutter_window.cpp: шаблон изменился, обработчик переподключения RDP не добавлен')
         s = s.replace(head, head + '''
 #include <wtsapi32.h>
+#include <cwchar>
 #include <string>
 #pragma comment(lib, "Wtsapi32.lib")
 
 namespace {
 constexpr UINT_PTR kLastochkaReconnectTimer = 0x4C41;
+bool g_lastochka_reconnected = false;
+int g_lastochka_tries = 0;
+
+// True when the user's own desktop is on screen (not the lock or logon screen, session not disconnected).
+// The input desktop of a locked session belongs to Winlogon and cannot be opened by the app.
+bool LastochkaDesktopReady() {
+  HDESK desk = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
+  if (desk == nullptr) return false;
+  wchar_t name[64] = L"";
+  DWORD needed = 0;
+  const bool ok = GetUserObjectInformationW(desk, UOI_NAME, name, sizeof(name), &needed) != FALSE;
+  CloseDesktop(desk);
+  return ok && _wcsicmp(name, L"Default") == 0;
+}
 
 // Restart Lastochka in the same state: visible window -> window, hidden in tray -> tray (ASCII only: MSVC /WX).
 void LastochkaRestart(HWND hwnd) {
@@ -304,12 +319,30 @@ void LastochkaRestart(HWND hwnd) {
         s = s.replace('  switch (message) {\n', '''  switch (message) {
     case WM_WTSSESSION_CHANGE:
       if (wparam == WTS_REMOTE_CONNECT || wparam == WTS_CONSOLE_CONNECT) {
-        SetTimer(hwnd, kLastochkaReconnectTimer, 1500, nullptr);
+        g_lastochka_reconnected = true;
+      }
+      // after a reconnect: restart once the session is unlocked and the desktop is really shown
+      if (g_lastochka_reconnected &&
+          (wparam == WTS_REMOTE_CONNECT || wparam == WTS_CONSOLE_CONNECT || wparam == WTS_SESSION_UNLOCK ||
+           wparam == WTS_SESSION_LOGON)) {
+        g_lastochka_tries = 0;
+        SetTimer(hwnd, kLastochkaReconnectTimer, 2500, nullptr);
       }
       break;
     case WM_TIMER:
       if (wparam == kLastochkaReconnectTimer) {
+        if (!LastochkaDesktopReady()) {
+          // lock screen or password prompt is still shown: check again every second, up to 3 minutes,
+          // then wait for the next unlock / connect event
+          if (++g_lastochka_tries < 180) {
+            SetTimer(hwnd, kLastochkaReconnectTimer, 1000, nullptr);
+          } else {
+            KillTimer(hwnd, kLastochkaReconnectTimer);
+          }
+          return 0;
+        }
         KillTimer(hwnd, kLastochkaReconnectTimer);
+        g_lastochka_reconnected = false;
         LastochkaRestart(hwnd);
         return 0;
       }
