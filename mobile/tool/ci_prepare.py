@@ -281,8 +281,31 @@ if os.path.exists(fw):
 
 namespace {
 constexpr UINT_PTR kLastochkaReconnectTimer = 0x4C41;
+constexpr UINT_PTR kLastochkaKickTimer = 0x4C42;
+constexpr UINT_PTR kLastochkaRedrawTimer = 0x4C43;
 bool g_lastochka_reconnected = false;
 int g_lastochka_tries = 0;
+bool g_lastochka_minimized = false;
+ULONGLONG g_lastochka_last_kick = 0;
+
+// The window is shown again (restored, unhidden, activated after a while, display or session changed):
+// after RDP reconnects or a restore the Flutter surface sometimes stays white until something resizes it.
+// Resize the Flutter view by one pixel and back - this makes Flutter draw a fresh frame of the right size.
+void LastochkaNudge(HWND hwnd, HWND child) {
+  if (child == nullptr || IsIconic(hwnd) || !IsWindowVisible(hwnd)) return;
+  RECT r;
+  if (!GetClientRect(hwnd, &r)) return;
+  const int w = r.right - r.left;
+  const int h = r.bottom - r.top;
+  if (w < 2 || h < 2) return;
+  MoveWindow(child, 0, 0, w, h - 1, FALSE);
+  MoveWindow(child, 0, 0, w, h, TRUE);
+}
+
+void LastochkaScheduleKick(HWND hwnd) {
+  g_lastochka_last_kick = GetTickCount64();
+  SetTimer(hwnd, kLastochkaKickTimer, 250, nullptr);
+}
 
 // True when the user's own desktop is on screen (not the lock or logon screen, session not disconnected).
 // The input desktop of a locked session belongs to Winlogon and cannot be opened by the app.
@@ -317,7 +340,31 @@ void LastochkaRestart(HWND hwnd) {
         j = s.index(';', i) + 1
         s = s[:j] + '\n  WTSRegisterSessionNotification(GetHandle(), NOTIFY_FOR_THIS_SESSION);' + s[j:]
         s = s.replace('  switch (message) {\n', '''  switch (message) {
+    case WM_SIZE:
+      if (wparam == SIZE_MINIMIZED) {
+        g_lastochka_minimized = true;
+      } else if ((wparam == SIZE_RESTORED || wparam == SIZE_MAXIMIZED) && g_lastochka_minimized) {
+        g_lastochka_minimized = false;
+        LastochkaScheduleKick(hwnd);
+      }
+      break;
+    case WM_SHOWWINDOW:
+      if (wparam == TRUE) LastochkaScheduleKick(hwnd);
+      break;
+    case WM_ACTIVATE:
+      // switching back to Lastochka from another program: redraw, at most once per 5 seconds
+      if (LOWORD(wparam) != WA_INACTIVE && GetTickCount64() - g_lastochka_last_kick > 5000) {
+        LastochkaScheduleKick(hwnd);
+      }
+      break;
+    case WM_DISPLAYCHANGE:
+    case WM_DWMCOMPOSITIONCHANGED:
+      LastochkaScheduleKick(hwnd);
+      break;
     case WM_WTSSESSION_CHANGE:
+      if (wparam == WTS_REMOTE_CONNECT || wparam == WTS_CONSOLE_CONNECT || wparam == WTS_SESSION_UNLOCK) {
+        LastochkaScheduleKick(hwnd);
+      }
       if (wparam == WTS_REMOTE_CONNECT || wparam == WTS_CONSOLE_CONNECT) {
         g_lastochka_reconnected = true;
       }
@@ -330,6 +377,20 @@ void LastochkaRestart(HWND hwnd) {
       }
       break;
     case WM_TIMER:
+      if (wparam == kLastochkaKickTimer) {
+        KillTimer(hwnd, kLastochkaKickTimer);
+        if (flutter_controller_ && flutter_controller_->view()) {
+          LastochkaNudge(hwnd, flutter_controller_->view()->GetNativeWindow());
+          flutter_controller_->ForceRedraw();
+        }
+        SetTimer(hwnd, kLastochkaRedrawTimer, 1200, nullptr);
+        return 0;
+      }
+      if (wparam == kLastochkaRedrawTimer) {
+        KillTimer(hwnd, kLastochkaRedrawTimer);
+        if (flutter_controller_) flutter_controller_->ForceRedraw();
+        return 0;
+      }
       if (wparam == kLastochkaReconnectTimer) {
         if (!LastochkaDesktopReady()) {
           // lock screen or password prompt is still shown: check again every second, up to 3 minutes,

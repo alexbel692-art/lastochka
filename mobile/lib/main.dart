@@ -181,6 +181,7 @@ Future<void> main(List<String> args) async {
   // автозапуск с Windows — сразу в трей, без окна
   if (hidden) appVisible = false;
   if (!hidden) unawaited(wakeWindowOnStart());
+  startScreenWatch();
 }
 
 class LastochkaApp extends StatefulWidget {
@@ -285,7 +286,10 @@ class _LastochkaAppState extends State<LastochkaApp> {
       ],
       home: client.isLogged() ? const VerifyGate(child: HomeShell()) : const LoginPage(),
       // код-пароль поверх всего приложения
-      builder: (context, child) => MediaQuery(
+      // никто не видит экран (RDP отключён, экран заблокирован) — анимации стоят
+      builder: (context, child) => ValueListenableBuilder<bool>(
+        valueListenable: screenShown,
+        builder: (context, shown, _) => TickerMode(enabled: shown, child: MediaQuery(
         // размер текста из «Оформления» поверх системного
         // в RDP-сеансе анимации выключены (кадры рисует процессор сервера)
         data: MediaQuery.of(context).copyWith(
@@ -318,7 +322,7 @@ class _LastochkaAppState extends State<LastochkaApp> {
           ]);
         },
       ),
-      ),
+      ))),
     );
   }
 }
