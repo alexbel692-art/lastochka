@@ -5,7 +5,8 @@
 // Без видеокарты кадр рисуется процессором (программный вывод media_kit). Что здесь сделано против падений:
 // • поворот видео с телефона (метка «повернуть на 90°») mpv отдаёт программному выводу, а тот его не умеет:
 //   кадр читался как повёрнутый — за пределами памяти, и Ласточка падала в libmpv-2.dll (0xC0000005).
-//   Поэтому mpv поворот не передаётся (video-rotate=no), а кадр поворачивается заранее фильтром transpose;
+//   Поэтому mpv поворот не передаётся (video-rotate=no), а картинку поворачивает сама Ласточка при показе
+//   (фильтр поворота mpv на сервере давал чёрный экран);
 // • размер картинки задаётся явно: сам media_kit для вертикального видео считал ширину 0;
 // • преобразование кадров — через libswscale (FFmpeg), а не zimg;
 // • декодирование только процессором (hwdec=no): на виртуальном сервере нет видеоускорителя;
@@ -20,11 +21,13 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../system/diag.dart';
 import 'mp4_rotation.dart';
@@ -143,14 +146,6 @@ Future<int> _mpvRotation(NativePlayer n) async {
   }
 }
 
-/// Фильтр mpv, поворачивающий кадр заранее (вместо поворота при выводе).
-String? _rotateFilter(int rot) => switch (rot) {
-      90 => 'lavfi=[transpose=clock]',
-      180 => 'lavfi=[hflip,vflip]',
-      270 => 'lavfi=[transpose=cclock]',
-      _ => null,
-    };
-
 VideoController _videoController(Player player, int w, int h) => VideoController(player,
     configuration: VideoControllerConfiguration(enableHardwareAcceleration: false, hwdec: 'no', width: w, height: h));
 
@@ -214,10 +209,14 @@ Future<MpvFrame?> _makeFrame(String path) async {
 }
 
 /// Проигрыватель внутри Ласточки (mpv): пауза, перемотка, громкость, полный экран — как в Telegram.
+///
+/// Поворот видео с телефона делает сама Ласточка при показе (RotatedBox): mpv на сервере отдаёт кадр
+/// как записан — и с поворотом в mpv (падение), и с фильтром поворота (чёрный экран) он не справлялся.
+/// Поэтому и кнопки управления свои: повернуть надо только картинку, а не их.
 class MpvVideoView extends StatefulWidget {
   final File file;
   final bool autoplay;
-  /// Размеры видео из сообщения (если отправитель их указал).
+  /// Размеры видео из сообщения (если отправитель их указал) — как его видит человек, уже повёрнутым.
   final num? videoW, videoH;
   final VoidCallback onFailed;
   const MpvVideoView({super.key, required this.file, required this.onFailed, this.autoplay = true, this.videoW, this.videoH});
@@ -228,14 +227,18 @@ class MpvVideoView extends StatefulWidget {
 class _MpvVideoViewState extends State<MpvVideoView> {
   final Player _player = _newPlayer();
   VideoController? _controller;
-  StreamSubscription? _err;
+  int _rot = 0; // поворот по часовой: 0, 90, 180, 270
+  final _subs = <StreamSubscription>[];
+  int _logged = 0;
 
   @override
   void initState() {
     super.initState();
-    _err = _player.stream.error.listen((e) {
-      Diag.add('Воспроизведение видео (mpv): $e');
-    });
+    _subs.add(_player.stream.error.listen((e) => Diag.add('Воспроизведение видео (mpv): $e')));
+    // сообщения самого mpv (только ошибки) — в отчёт, не больше 20 за просмотр
+    _subs.add(_player.stream.log.listen((l) {
+      if (_logged++ < 20) Diag.add('mpv [${l.prefix}] ${l.level}: ${l.text.trim()}');
+    }));
     _start();
   }
 
@@ -248,19 +251,20 @@ class _MpvVideoViewState extends State<MpvVideoView> {
       _busy(_play, true);
       Diag.mark('видео (mpv): воспроизведение');
       await _safe(_player);
-      if (!mounted) return;
-      // RDP: картинка не больше 1280×720 — её рисует процессор сервера и передаёт RDP
-      final s = fitSize(widget.videoW, widget.videoH, 1280, 720);
-      setState(() => _controller = _videoController(_player, s.w, s.h));
-      final n = _player.platform;
-      // поворот — до открытия файла, чтобы видео сразу стояло правильно
       final rot = await mp4Rotation(widget.file.path);
-      final f = _rotateFilter(rot ?? 0);
-      if (f != null && n is NativePlayer) await n.setProperty('vf', f);
+      if (!mounted) return;
+      final turned = rot == 90 || rot == 270;
+      // кадр приходит неповёрнутым: размер окна вывода — по нему; RDP: не больше 1280×720
+      final s = turned ? fitSize(widget.videoH, widget.videoW, 1280, 720) : fitSize(widget.videoW, widget.videoH, 1280, 720);
+      setState(() {
+        _rot = rot ?? 0;
+        _controller = _videoController(_player, s.w, s.h);
+      });
       await _player.open(Media(Uri.file(widget.file.path).toString()), play: false);
+      final n = _player.platform;
       if (rot == null && n is NativePlayer) {
-        final f2 = _rotateFilter(await _mpvRotation(n));
-        if (f2 != null) await n.setProperty('vf', f2);
+        final r = await _mpvRotation(n);
+        if (mounted && r != 0) setState(() => _rot = r);
       }
       if (mounted && widget.autoplay) await _player.play();
     } catch (e, st) {
@@ -271,7 +275,10 @@ class _MpvVideoViewState extends State<MpvVideoView> {
 
   @override
   void dispose() {
-    _err?.cancel();
+    for (final s in _subs) {
+      s.cancel();
+    }
+    if (_full) unawaited(windowManager.setFullScreen(false).catchError((_) {}));
     _player.dispose().whenComplete(() {
       _busy(_play, false);
       Diag.mark('видео (mpv): воспроизведение — готово');
@@ -279,14 +286,147 @@ class _MpvVideoViewState extends State<MpvVideoView> {
     super.dispose();
   }
 
+  bool _full = false;
+  Future<void> _toggleFull() async {
+    try {
+      _full = !_full;
+      await windowManager.setFullScreen(_full);
+      if (mounted) setState(() {});
+    } catch (_) {}
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = _controller;
     if (c == null) return const Center(child: CircularProgressIndicator());
-    return Video(
-      controller: c,
-      controls: MaterialDesktopVideoControls,
-      fill: Colors.black,
+    final picture = RotatedBox(
+      quarterTurns: _rot ~/ 90,
+      child: Video(controller: c, controls: NoVideoControls, fill: Colors.black),
+    );
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.space): _player.playOrPause,
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () => _player.seek(_player.state.position + const Duration(seconds: 5)),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _player.seek(_player.state.position - const Duration(seconds: 5)),
+        const SingleActivator(LogicalKeyboardKey.escape): () => _full ? _toggleFull() : null,
+      },
+      child: Focus(
+        autofocus: true,
+        child: ColoredBox(
+          color: Colors.black,
+          child: Column(children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: _player.playOrPause,
+                onDoubleTap: _toggleFull,
+                child: picture,
+              ),
+            ),
+            _MpvBar(player: _player, full: _full, onFull: _toggleFull),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+String _t(Duration d) {
+  final s = d.inSeconds;
+  String two(int v) => v.toString().padLeft(2, '0');
+  return s >= 3600 ? '${s ~/ 3600}:${two(s ~/ 60 % 60)}:${two(s % 60)}' : '${two(s ~/ 60)}:${two(s % 60)}';
+}
+
+/// Полоса управления: пауза, перемотка, время, звук, полный экран.
+class _MpvBar extends StatefulWidget {
+  final Player player;
+  final bool full;
+  final VoidCallback onFull;
+  const _MpvBar({required this.player, required this.full, required this.onFull});
+  @override
+  State<_MpvBar> createState() => _MpvBarState();
+}
+
+class _MpvBarState extends State<_MpvBar> {
+  final _subs = <StreamSubscription>[];
+  double? _drag; // перетаскивание ползунка, доля 0..1
+
+  @override
+  void initState() {
+    super.initState();
+    final st = widget.player.stream;
+    for (final s in <Stream>[st.playing, st.position, st.duration, st.volume, st.completed]) {
+      _subs.add(s.listen((_) {
+        if (mounted) setState(() {});
+      }));
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final s in _subs) {
+      s.cancel();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.player;
+    final st = p.state;
+    final dur = st.duration;
+    final pos = st.position > dur ? dur : st.position;
+    final frac = _drag ?? (dur.inMilliseconds > 0 ? pos.inMilliseconds / dur.inMilliseconds : 0.0);
+    final muted = st.volume <= 0;
+    const white = Colors.white;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 3,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+            activeTrackColor: white,
+            inactiveTrackColor: Colors.white24,
+            thumbColor: white,
+          ),
+          child: Slider(
+            value: frac.clamp(0.0, 1.0).toDouble(),
+            onChanged: dur.inMilliseconds > 0 ? (v) => setState(() => _drag = v) : null,
+            onChangeEnd: (v) async {
+              await p.seek(Duration(milliseconds: (v * dur.inMilliseconds).round()));
+              if (mounted) setState(() => _drag = null);
+            },
+          ),
+        ),
+        Row(children: [
+          IconButton(
+            color: white,
+            tooltip: st.playing ? 'Пауза' : 'Смотреть',
+            icon: Icon(st.playing ? Icons.pause : Icons.play_arrow),
+            onPressed: () async {
+              if (st.completed) await p.seek(Duration.zero);
+              await p.playOrPause();
+            },
+          ),
+          IconButton(
+            color: white,
+            tooltip: muted ? 'Включить звук' : 'Выключить звук',
+            icon: Icon(muted ? Icons.volume_off : Icons.volume_up),
+            onPressed: () => p.setVolume(muted ? 100 : 0),
+          ),
+          const SizedBox(width: 8),
+          Text('${_t(_drag != null ? Duration(milliseconds: (_drag! * dur.inMilliseconds).round()) : pos)} / ${_t(dur)}',
+              style: const TextStyle(color: white, fontFeatures: [FontFeature.tabularFigures()])),
+          const Spacer(),
+          IconButton(
+            color: white,
+            tooltip: widget.full ? 'Выйти из полноэкранного режима' : 'Во весь экран',
+            icon: Icon(widget.full ? Icons.fullscreen_exit : Icons.fullscreen),
+            onPressed: widget.onFull,
+          ),
+        ]),
+      ]),
     );
   }
 }
