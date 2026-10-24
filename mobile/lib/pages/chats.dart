@@ -16,6 +16,7 @@ import 'people.dart';
 import 'qr.dart';
 import '../chat/formatting.dart';
 import '../chat/polls.dart';
+import '../chat/heroes.dart';
 import '../chat/receipts.dart';
 import '../system/media_policy.dart';
 import '../system/perf.dart';
@@ -212,8 +213,13 @@ class _ChatsPageState extends State<ChatsPage> {
     // перерисовываем список, только если в синхронизации было что-то про чаты, и не чаще 4 раз в секунду
     _sub = client.onSync.stream.listen((s) {
       if (s.rooms != null || s.accountData != null || s.presence != null) _redraw();
+      // новые чаты и приглашения — подгрузить участников для имени
+      if (s.rooms != null) unawaited(loadRoomHeroes(client));
     });
     Drafts.instance.changed.addListener(_redraw);
+    // имена личных чатов — сразу после запуска, а не логины до первой загрузки участников
+    heroesLoaded.addListener(_redraw);
+    unawaited(loadRoomHeroes(client));
     _me = client.fetchOwnProfile();
   }
 
@@ -229,6 +235,7 @@ class _ChatsPageState extends State<ChatsPage> {
   @override
   void dispose() {
     Drafts.instance.changed.removeListener(_redraw);
+    heroesLoaded.removeListener(_redraw);
     _redrawTimer?.cancel();
     _msgTimer?.cancel();
     _gs.cancel();
