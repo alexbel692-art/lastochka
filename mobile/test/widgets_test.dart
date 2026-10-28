@@ -40,6 +40,9 @@ void main() {
 
   testWidgets('оформление: тема, цвет, размер текста, обои', (t) async {
     await Appearance.instance.init();
+    // экран высокий, чтобы обои были видны без прокрутки
+    await t.binding.setSurfaceSize(const Size(800, 1800));
+    addTearDown(() => t.binding.setSurfaceSize(null));
     await t.pumpWidget(const MaterialApp(home: AppearancePage()));
     await t.tap(find.text('Тёмная'));
     await t.pumpAndSettle();
@@ -47,7 +50,6 @@ void main() {
     await t.tap(find.byTooltip('Зелёный'));
     await t.pumpAndSettle();
     expect(accents[Appearance.instance.accent.value].name, 'Зелёный');
-    await t.scrollUntilVisible(find.text('Небо'), 200, scrollable: find.byType(Scrollable).first);
     await t.tap(find.text('Небо'));
     await t.pumpAndSettle();
     expect(Appearance.instance.wallpaper.value, 1);
