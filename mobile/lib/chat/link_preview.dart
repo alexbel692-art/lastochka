@@ -52,7 +52,7 @@ final _cache = Lru<String, Future<LinkInfo?>>(150)..register();
 
 String? _clean(Object? v, int max) {
   if (v is! String) return null;
-  final s = v.replaceAll(RegExp(r'[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩﻿]'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+  final s = v.replaceAll(RegExp(r'[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
   if (s.isEmpty) return null;
   return s.length > max ? '${s.substring(0, max)}…' : s;
 }
