@@ -97,6 +97,15 @@ class _Bubble extends StatelessWidget {
     final name = memberName(room, event.senderId, name: sender.calcDisplayname());
     final isSticker = e.type == EventTypes.Sticker && !event.redacted;
     final isImage = e.messageType == MessageTypes.Image && !event.redacted;
+    // одни эмодзи: обычный текст без ответа, пересылки и предупреждений — крупно, без пузыря
+    final jumbo = !event.redacted &&
+            e.type == EventTypes.Message &&
+            e.messageType == MessageTypes.Text &&
+            highlight == null &&
+            forwardedFrom(e) == null &&
+            e.content.tryGetMap<String, Object?>('m.relates_to')?['m.in_reply_to'] == null
+        ? jumboEmojiCount(e.body)
+        : null;
     final edited = !event.redacted && (e.eventId != event.eventId || event.aggregatedEvents(timeline, RelationshipTypes.edit).any((x) => x.senderId == event.senderId));
 
     // реакции
@@ -253,6 +262,9 @@ class _Bubble extends StatelessWidget {
           ),
         ]),
       );
+    } else if (jumbo != null) {
+      // одни эмодзи (1–3) — крупно и без пузыря, как в Telegram
+      content = _selectable(Text(e.body.trim(), style: TextStyle(fontSize: jumboEmojiSize(jumbo), height: 1.15)));
     } else {
       content = _selectable(RichMessage(
         event: e,
@@ -326,7 +338,8 @@ class _Bubble extends StatelessWidget {
     }
     final replyId = event.content.tryGetMap<String, Object?>('m.relates_to')?.tryGetMap<String, Object?>('m.in_reply_to')?.tryGet<String>('event_id');
     final maxW = min(paneWidth(context) * (avatarSpace ? 0.74 : 0.8), 520.0);
-    final bareMedia = isSticker || (isRound(e) && !event.redacted); // стикер и «кружок» без пузыря, как в Telegram
+    // стикер, «кружок» и крупные эмодзи — без пузыря, как в Telegram; предупреждение о подлинности — только в пузыре
+    final bareMedia = isSticker || (isRound(e) && !event.redacted) || (jumbo != null && warn == null && !plain);
     final isText = !isImage && !isSticker && !isPollStart(e) && e.messageType != MessageTypes.Audio && e.messageType != MessageTypes.File && e.messageType != MessageTypes.Video;
     final fwd = event.redacted ? null : forwardedFrom(e);
     final mediaOnly = !event.redacted && (isImage || e.messageType == MessageTypes.Video || (album != null && album!.length > 1)) && !isRound(e) && caption == null;

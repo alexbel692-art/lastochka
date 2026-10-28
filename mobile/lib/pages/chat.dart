@@ -29,6 +29,7 @@ import '../chat/outbox.dart';
 import '../chat/autodelete.dart';
 import '../chat/gallery.dart';
 import '../chat/drafts.dart';
+import '../chat/emoji_only.dart';
 import '../chat/formatting.dart';
 import '../chat/forward.dart';
 import '../chat/names.dart';
@@ -60,6 +61,7 @@ part 'chat_compose.dart';
 part 'chat_media.dart';
 part 'chat_messages.dart';
 part 'chat_search.dart';
+part 'chat_unread.dart';
 part 'chat_widgets.dart';
 
 final bool isDesktop = Platform.isWindows || Platform.isMacOS || Platform.isLinux;
@@ -69,7 +71,8 @@ class ChatPage extends StatefulWidget {
   final Room room;
   final bool embedded; // показан справа от списка чатов (планшет, компьютер)
   final String? jumpTo; // сразу перейти к этому сообщению (из поиска)
-  const ChatPage({super.key, required this.room, this.embedded = false, this.jumpTo});
+  final VoidCallback? onClose; // компьютер: Esc закрывает чат справа
+  const ChatPage({super.key, required this.room, this.embedded = false, this.jumpTo, this.onClose});
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
@@ -119,10 +122,20 @@ class _ChatPageState extends State<ChatPage> {
   List<User> _mentionHits = [];
   // выбор нескольких сообщений
   Set<String>? _sel;
+  // непрочитанное на момент открытия чата: разделитель «Новые сообщения» и упоминания
+  String _readAnchor = '';
+  int _unreadAtOpen = 0, _mentionsAtOpen = 0;
+  String? _dividerBefore; // разделитель показывается над этим сообщением
+  bool _unreadDone = false;
+  List<String> _mentionIds = []; // непрочитанные упоминания меня, от старых к новым
 
   @override
   void initState() {
     super.initState();
+    // запомнить, что было непрочитано, до того как чат отметится прочитанным
+    _readAnchor = room.fullyRead;
+    _unreadAtOpen = room.notificationCount;
+    _mentionsAtOpen = room.highlightCount;
     openRoomId = room.id;
     clearRoomNotification(room.id);
     visibility.addListener(_onVisible);
@@ -159,9 +172,16 @@ class _ChatPageState extends State<ChatPage> {
     setState(() => _tl = tl);
     openTimelines.add(tl);
     if (tl.events.length < 30) await _more();
+    await _findUnread(tl);
     _markRead();
     final j = widget.jumpTo;
-    if (j != null) WidgetsBinding.instance.addPostFrameCallback((_) => _jumpTo(j));
+    if (j != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _jumpTo(j));
+    } else if (_dividerBefore != null) {
+      // открыть на первом непрочитанном, как в Telegram
+      final d = _dividerBefore!;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _jumpTo(d, align: 0.92, flash: false, quiet: true));
+    }
   }
 
   void _onTrust() {
@@ -314,7 +334,10 @@ class _ChatPageState extends State<ChatPage> {
           const SingleActivator(LogicalKeyboardKey.escape): () {
             if (_sel != null) return setState(() => _sel = null);
             if (_searching) return _closeSearch();
-            if (_replyTo != null || _editing != null) _cancelBar();
+            if (_replyTo != null || _editing != null) return _cancelBar();
+            if (_info) return setState(() => _info = false);
+            // отменять нечего — закрыть чат, как Esc в Telegram Desktop
+            widget.onClose?.call();
           },
         },
         child: Scaffold(
@@ -409,6 +432,8 @@ class _ChatPageState extends State<ChatPage> {
                       ),
                     ),
                   if (_searching) Positioned(left: 0, right: 0, bottom: 0, child: _searchBar(context)),
+                  if (_mentionIds.isNotEmpty)
+                    Positioned(right: 12, bottom: _showDown ? 64 : 12, child: _mentionButton(context)),
                   if (_showDown)
                     Positioned(
                       right: 12,

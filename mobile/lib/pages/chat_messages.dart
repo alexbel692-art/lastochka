@@ -68,14 +68,15 @@ extension _ChatMessages on _ChatPageState {
     }
   }
 
-  Future<void> _jumpTo(String id) async {
+  Future<void> _jumpTo(String id, {double align = 0.5, bool flash = true, bool quiet = false}) async {
     // сообщение может быть и выше, и ниже текущего места — ищем от самых новых вверх
     if (_keys[id]?.currentContext == null && _scroll.hasClients) _scroll.jumpTo(0);
     await Future.delayed(const Duration(milliseconds: 30));
     for (var i = 0; i < 40 && mounted; i++) {
       final ctx = _keys[id]?.currentContext;
       if (ctx != null) {
-        await Scrollable.ensureVisible(ctx, alignment: 0.5, duration: const Duration(milliseconds: 300));
+        await Scrollable.ensureVisible(ctx, alignment: align, duration: const Duration(milliseconds: 300));
+        if (!flash) return;
         _set(() => _flash = id);
         Future.delayed(const Duration(milliseconds: 1200), () => mounted ? _set(() => _flash = null) : null);
         return;
@@ -93,7 +94,7 @@ extension _ChatMessages on _ChatPageState {
       _scroll.jumpTo(target);
       await Future.delayed(const Duration(milliseconds: 30));
     }
-    _toast('Сообщение не найдено — возможно, оно удалено');
+    if (!quiet) _toast('Сообщение не найдено — возможно, оно удалено');
   }
 
   // ---------- меню сообщения ----------

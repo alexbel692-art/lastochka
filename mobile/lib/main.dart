@@ -34,6 +34,7 @@ import 'theme.dart';
 import 'widgets/splash.dart';
 import 'system/perf.dart';
 import 'chat/mpv_video.dart' show initMpv;
+import 'chat/link_preview.dart' show initLinkPreviews;
 import 'system/stale_sessions.dart';
 
 late Client client;
@@ -134,6 +135,7 @@ Future<void> main(List<String> args) async {
   await AppLock.instance.init();
   AppLock.instance.onWipe = wipeDevice;
   await initPrivacy();
+  await initLinkPreviews();
   switcherCoverWanted = () => screenProtect.value || AppLock.instance.enabled;
   await initDeviceGuard();
   await Trust.instance.init();

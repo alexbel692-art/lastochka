@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:matrix/matrix.dart';
 
@@ -236,6 +237,7 @@ class _ChatsPageState extends State<ChatsPage> {
   void dispose() {
     Drafts.instance.changed.removeListener(_redraw);
     heroesLoaded.removeListener(_redraw);
+    _kbFocus.dispose();
     _redrawTimer?.cancel();
     _msgTimer?.cancel();
     _gs.cancel();
@@ -251,7 +253,10 @@ class _ChatsPageState extends State<ChatsPage> {
     final k = '${sel.id}|$_jump';
     if (_pane == null || _paneKey != k) {
       _paneKey = k;
-      _pane = ChatPage(key: ValueKey(k), room: sel, embedded: true, jumpTo: _jump);
+      _pane = ChatPage(key: ValueKey(k), room: sel, embedded: true, jumpTo: _jump, onClose: () {
+        setState(() => _selected = null);
+        _kbFocus.requestFocus(); // сочетания клавиш продолжают работать и после закрытия чата
+      });
     }
     return _pane!;
   }
@@ -512,7 +517,46 @@ class _ChatsPageState extends State<ChatsPage> {
 
   // Планшет или телефон в альбомной ориентации: список слева, чат справа (как в Telegram).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => !isDesktop ? _build(context) : _keys(_build(context));
+
+  /// Компьютер: горячие клавиши, как в Telegram Desktop.
+  /// Ctrl+K — быстро найти и открыть чат; Alt+↑/↓, Ctrl+Tab, Ctrl+PageUp/PageDown — соседний чат.
+  final _kbFocus = FocusNode(debugLabel: 'Ласточка: горячие клавиши списка');
+  Widget _keys(Widget child) => CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyK, control: true): _quickSwitch,
+          const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _quickSwitch,
+          const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true): () => _step(-1),
+          const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true): () => _step(1),
+          const SingleActivator(LogicalKeyboardKey.pageUp, control: true): () => _step(-1),
+          const SingleActivator(LogicalKeyboardKey.pageDown, control: true): () => _step(1),
+          const SingleActivator(LogicalKeyboardKey.tab, control: true): () => _step(1),
+          const SingleActivator(LogicalKeyboardKey.tab, control: true, shift: true): () => _step(-1),
+        },
+        // фокус всегда внутри — иначе сочетания не доходят, пока ни на что не нажали
+        child: Focus(focusNode: _kbFocus, autofocus: true, child: child),
+      );
+
+  /// Открыть соседний чат в текущем списке (с учётом папки и поиска).
+  void _step(int d) {
+    if (!_wide) return;
+    final list = _rooms.where((r) => r.membership == Membership.join).toList();
+    if (list.isEmpty) return;
+    final i = _selected == null ? -1 : list.indexWhere((r) => r.id == _selected!.id);
+    final next = i < 0 ? (d > 0 ? 0 : list.length - 1) : (i + d).clamp(0, list.length - 1);
+    if (next == i) return;
+    _open(list[next]);
+  }
+
+  Future<void> _quickSwitch() async {
+    final room = await showDialog<Room>(context: context, builder: (_) => const _QuickSwitch());
+    if (room != null && mounted) {
+      if (_leftTab != 0) setState(() => _leftTab = 0);
+      await _open(room);
+    }
+  }
+
+  Widget _build(BuildContext context) {
     return LayoutBuilder(builder: (context, c) {
       _wide = c.maxWidth >= 720;
       if (!_wide) return _list(context);
@@ -781,6 +825,16 @@ class _ChatsPageState extends State<ChatsPage> {
                                 : Text(previewText(r), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: tHint, fontSize: 15)),
                           ),
                           if (r.isFavourite && unread == 0) Icon(Icons.push_pin, size: 16, color: tHint),
+                          // вас упомянули — «@», как в Telegram; заметен и в чате без звука
+                          if (r.highlightCount > 0)
+                            Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              width: 22,
+                              height: 22,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(color: sel ? Colors.white : tAccent, shape: BoxShape.circle),
+                              child: Text('@', style: TextStyle(color: sel ? Theme.of(context).colorScheme.primary : Colors.white, fontSize: 13.5, fontWeight: FontWeight.w700, height: 1.1)),
+                            ),
                           if (unread > 0 || r.membership == Membership.invite)
                             Container(
                               margin: const EdgeInsets.only(left: 6),
@@ -833,6 +887,92 @@ class _Header extends StatelessWidget {
           Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w600))),
         ]);
       },
+    );
+  }
+}
+
+/// Ctrl+K: быстрый переход к чату по имени — набрать несколько букв, Enter.
+class _QuickSwitch extends StatefulWidget {
+  const _QuickSwitch();
+  @override
+  State<_QuickSwitch> createState() => _QuickSwitchState();
+}
+
+class _QuickSwitchState extends State<_QuickSwitch> {
+  final _q = TextEditingController();
+  int _sel = 0;
+
+  List<Room> get _hits {
+    final q = _q.text.trim().toLowerCase();
+    final all = client.rooms.where((r) => r.membership == Membership.join || r.membership == Membership.invite);
+    final list = q.isEmpty
+        ? all.take(8).toList()
+        : [
+            // сначала — чьё имя начинается с набранного, потом — содержит
+            ...all.where((r) => r.getLocalizedDisplayname().toLowerCase().startsWith(q)),
+            ...all.where((r) {
+              final n = r.getLocalizedDisplayname().toLowerCase();
+              return !n.startsWith(q) && n.contains(q);
+            }),
+          ].take(8).toList();
+    return list;
+  }
+
+  @override
+  void dispose() {
+    _q.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hits = _hits;
+    if (_sel >= hits.length) _sel = hits.isEmpty ? 0 : hits.length - 1;
+    final accent = Theme.of(context).colorScheme.primary;
+    return Dialog(
+      alignment: const Alignment(0, -0.6),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.arrowDown): () => setState(() => _sel = hits.isEmpty ? 0 : (_sel + 1) % hits.length),
+            const SingleActivator(LogicalKeyboardKey.arrowUp): () => setState(() => _sel = hits.isEmpty ? 0 : (_sel - 1 + hits.length) % hits.length),
+          },
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+              child: TextField(
+                enableIMEPersonalizedLearning: false,
+                controller: _q,
+                autofocus: true,
+                decoration: const InputDecoration(hintText: 'Перейти к чату…', prefixIcon: Icon(Icons.search), isDense: true),
+                onChanged: (_) => setState(() => _sel = 0),
+                onSubmitted: (_) {
+                  if (hits.isNotEmpty) Navigator.pop(context, hits[_sel]);
+                },
+              ),
+            ),
+            if (hits.isEmpty)
+              Padding(padding: const EdgeInsets.all(16), child: Text('Ничего не найдено', style: TextStyle(color: Theme.of(context).hintColor)))
+            else
+              Flexible(
+                child: ListView(shrinkWrap: true, padding: const EdgeInsets.only(bottom: 8), children: [
+                  for (final (i, r) in hits.indexed)
+                    ListTile(
+                      dense: true,
+                      selected: i == _sel,
+                      selectedTileColor: accent.withValues(alpha: 0.12),
+                      leading: Avatar(mxc: r.avatar, name: r.getLocalizedDisplayname(), size: 34),
+                      title: Text(r.getLocalizedDisplayname(), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      trailing: r.notificationCount > 0 ? Text('${r.notificationCount}', style: TextStyle(color: accent, fontWeight: FontWeight.w600)) : null,
+                      onTap: () => Navigator.pop(context, r),
+                    ),
+                ]),
+              ),
+          ]),
+        ),
+      ),
     );
   }
 }

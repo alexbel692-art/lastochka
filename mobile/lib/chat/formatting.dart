@@ -3,6 +3,7 @@
 // Element и другие клиенты показывают так же. Показ — только безопасного набора тегов.
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'link_preview.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html;
 import 'package:matrix/matrix.dart';
@@ -224,8 +225,9 @@ class _RichMessageState extends State<RichMessage> {
 
   String? _firstLink;
 
-  /// Текст и под ним карточка первой ссылки: сайт и раздел (страницу не загружаем — так никто
-  /// не узнаёт, что вы открыли чат, и не видит ваш адрес).
+  /// Текст и под ним карточка первой ссылки: сайт и раздел. Сама страница с устройства не загружается —
+  /// так сайт не узнаёт, что вы открыли чат, и не видит ваш адрес. С включённым «Превью ссылок» заголовок,
+  /// описание и картинку получает ваш сервер (link_preview.dart).
   Widget _withCard(Color accent) {
     final text = Text.rich(TextSpan(style: widget.style, children: _spans));
     final link = _firstLink;
@@ -233,6 +235,15 @@ class _RichMessageState extends State<RichMessage> {
     if (link == null || parts == null) return text;
     final href = link.toLowerCase().startsWith('www.') ? 'https://$link' : link;
     final base = widget.style.color ?? Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
+    final uri = linkPreviews.value ? firstLink(link) : null;
+    if (uri == null) return _cardColumn(text, href, parts, accent, base, null);
+    return FutureBuilder<LinkInfo?>(
+      future: linkInfo(uri),
+      builder: (_, s) => _cardColumn(text, href, parts, accent, base, s.data),
+    );
+  }
+
+  Widget _cardColumn(Widget text, String href, ({String host, String path}) parts, Color accent, Color base, LinkInfo? info) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
       text,
       const SizedBox(height: 6),
@@ -252,7 +263,9 @@ class _RichMessageState extends State<RichMessage> {
             Flexible(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                 Text(parts.host, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: accent, fontWeight: FontWeight.w700, fontSize: 14.5)),
-                if (parts.path.isNotEmpty)
+                // заголовок и картинка с вашего сервера; пока их нет (или превью выключены) — раздел сайта
+                if (info != null) LinkInfoBody(info: info, textColor: base)
+                else if (parts.path.isNotEmpty)
                   Text(parts.path, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: base.withValues(alpha: 0.8), fontSize: 13.5, height: 1.25)),
               ]),
             ),

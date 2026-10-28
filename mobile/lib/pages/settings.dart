@@ -31,6 +31,7 @@ import '../system/privacy.dart';
 import '../system/trust.dart';
 import '../widgets/avatar.dart';
 import 'login.dart';
+import '../chat/link_preview.dart' show linkPreviews, setLinkPreviews;
 
 Future<void> logout(BuildContext context) async {
   final ok = await showDialog<bool>(
@@ -159,6 +160,40 @@ class _SettingsPageState extends State<SettingsPage> {
       await MediaPolicy.set(previews: v);
     } catch (_) {}
     if (mounted) setState(() {});
+  }
+
+  void _hotkeys() {
+    final mod = Platform.isMacOS ? '⌘' : 'Ctrl';
+    final rows = [
+      ('$mod+K', 'Найти и открыть чат'),
+      ('Alt+↑ / Alt+↓', 'Предыдущий / следующий чат'),
+      ('Ctrl+Tab, Ctrl+PgUp / PgDn', 'Соседний чат'),
+      ('$mod+F', 'Поиск в открытом чате'),
+      ('↑ в пустом поле', 'Изменить своё последнее сообщение'),
+      ('Enter / Shift+Enter', 'Отправить / новая строка'),
+      ('$mod+V', 'Вставить картинку или файл'),
+      ('Esc', 'Отменить ответ, поиск, выделение; затем — закрыть чат'),
+    ];
+    showDialog<void>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: const Text('Горячие клавиши'),
+        content: SizedBox(
+          width: 420,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            for (final (k, v) in rows)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  SizedBox(width: 170, child: Text(k, style: const TextStyle(fontWeight: FontWeight.w600))),
+                  Expanded(child: Text(v)),
+                ]),
+              ),
+          ]),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(d), child: const Text('Закрыть'))],
+      ),
+    );
   }
 
   Future<void> _blocked() async {
@@ -384,11 +419,17 @@ class _SettingsPageState extends State<SettingsPage> {
           await setSendTyping(v);
           if (mounted) setState(() {});
         }),
+        _switch(Icons.link_rounded, 'Превью ссылок', 'Заголовок и картинка сайта под сообщением. Страницу открывает ваш сервер — сайт вас не видит', linkPreviews.value, (v) async {
+          await setLinkPreviews(v);
+          if (mounted) setState(() {});
+        }),
         _row(Icons.block, 'Заблокированные', sub: client.ignoredUsers.isEmpty ? 'Никого' : '${client.ignoredUsers.length}', onTap: _blocked),
         _switch(Icons.how_to_reg_outlined, 'Принимать личные чаты автоматически', 'От коллег с вашего сервера — без нажатия «Вступить»', _pref('invites.autoAccept'), (v) => _set('invites.autoAccept', v)),
         _row(Icons.data_usage, 'Хранилище', sub: 'Сколько места занято, очистка кэша', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StoragePage()))),
         _header('Оформление'),
         _row(Icons.palette_outlined, 'Оформление', sub: 'Тема, размер текста, обои чатов', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AppearancePage()))),
+        if (Platform.isWindows || Platform.isMacOS || Platform.isLinux)
+          _row(Icons.keyboard_outlined, 'Горячие клавиши', sub: 'Ctrl+K — перейти к чату, Alt+↑/↓ — соседний чат', onTap: _hotkeys),
         _header('Уведомления'),
         _switch(Icons.notifications_outlined, 'Уведомления', 'О новых сообщениях и звонках', _pref('notify.enabled'), (v) => _set('notify.enabled', v)),
         _switch(Icons.short_text, 'Текст сообщения', 'Показывать текст в уведомлении (иначе — «Новое сообщение»)', _pref('notify.text'), (v) => _set('notify.text', v)),

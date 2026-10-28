@@ -38,6 +38,7 @@ extension _ChatCompose on _ChatPageState {
     final key = _keys.putIfAbsent(e.eventId, GlobalKey.new);
     return Column(key: key, children: [
       if (newDay) _DayChip(e.originServerTs),
+      if (e.eventId == _dividerBefore) const _UnreadDivider(),
       if (service)
         _ServiceChip(serviceText)
       else
