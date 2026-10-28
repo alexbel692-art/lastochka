@@ -418,6 +418,8 @@ Future<Client> createClient() async {
     nativeImplementations: NativeImplementationsIsolate(compute, vodozemacInit: () => vod.init()),
     logLevel: kReleaseMode ? Level.warning : Level.info,
   );
+  // «Показывать, когда я в сети» выключено — с первой же синхронизации сервер видит вас «не в сети»
+  if ((await SharedPreferences.getInstance()).getBool('privacy.online') == false) client.syncPresence = PresenceType.offline;
   await client.init(waitForFirstSync: false);
   _keepFileCacheDir();
   return client;

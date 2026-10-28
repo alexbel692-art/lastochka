@@ -53,6 +53,33 @@ class AppearancePage extends StatelessWidget {
                 ),
               ),
               Padding(
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
+                child: Text('Цвет оформления', style: TextStyle(color: accent, fontWeight: FontWeight.w600)),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Wrap(spacing: 10, runSpacing: 10, children: [
+                  for (var i = 0; i < accents.length; i++)
+                    Tooltip(
+                      message: accents[i].name,
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: () => a.setAccent(i),
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).brightness == Brightness.dark ? accents[i].dark : accents[i].light,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: a.accent.value == i ? Theme.of(context).colorScheme.onSurface : Colors.transparent, width: 3),
+                          ),
+                          child: a.accent.value == i ? const Icon(Icons.check_rounded, color: Colors.white, size: 22) : null,
+                        ),
+                      ),
+                    ),
+                ]),
+              ),
+              Padding(
                 padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
                 child: Text('Размер текста: ${(a.textScale.value * 100).round()}%', style: TextStyle(color: accent, fontWeight: FontWeight.w600)),
               ),

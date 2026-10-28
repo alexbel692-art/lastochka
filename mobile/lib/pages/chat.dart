@@ -30,6 +30,8 @@ import '../chat/autodelete.dart';
 import '../chat/gallery.dart';
 import '../chat/drafts.dart';
 import '../chat/emoji_only.dart';
+import '../chat/presence_text.dart';
+import '../chat/reminders.dart';
 import '../chat/formatting.dart';
 import '../chat/forward.dart';
 import '../chat/names.dart';
@@ -93,6 +95,7 @@ class _ChatPageState extends State<ChatPage> {
   final _rec = VoiceRecorder();
   Timer? _recTimer;
   bool get _recording => _rec.started != null;
+  (File, int, List<int>)? _review; // записанное голосовое — прослушать перед отправкой
   DateTime _typingSent = DateTime(2000);
   Timer? _ttlTick, _floatHide;
   // поиск по чату
@@ -128,6 +131,10 @@ class _ChatPageState extends State<ChatPage> {
   String? _dividerBefore; // разделитель показывается над этим сообщением
   bool _unreadDone = false;
   List<String> _mentionIds = []; // непрочитанные упоминания меня, от старых к новым
+  bool _sendOriginal = false; // фото «в оригинале» — выбрано в окне перед отправкой
+  CachedPresence? _presence; // личный чат: собеседник в сети / был(а) …
+  StreamSubscription? _presenceSub;
+  Timer? _presenceTick;
 
   @override
   void initState() {
@@ -141,6 +148,7 @@ class _ChatPageState extends State<ChatPage> {
     visibility.addListener(_onVisible);
     Trust.instance.changed.addListener(_onTrust);
     Trust.instance.senderChecks.addListener(_onTrust);
+    Reminders.instance.changed.addListener(_onTrust);
     _init();
     // исчезающие сообщения: раз в секунду обновляем таймеры и скрываем истёкшие
     // раз в секунду обновляются только таймеры 🔥, а весь чат — лишь когда сообщение исчезло
@@ -157,6 +165,7 @@ class _ChatPageState extends State<ChatPage> {
     });
     final draft = Drafts.instance.of(room.id);
     if (draft != null) _text.text = draft;
+    _watchPresence();
     _text.addListener(_onText);
     _syncSub = client.onSync.stream.where((s) => s.rooms?.join?.containsKey(room.id) == true).listen((_) {
       if (mounted) setState(() {});
@@ -265,13 +274,19 @@ class _ChatPageState extends State<ChatPage> {
     visibility.removeListener(_onVisible);
     Trust.instance.changed.removeListener(_onTrust);
     Trust.instance.senderChecks.removeListener(_onTrust);
+    Reminders.instance.changed.removeListener(_onTrust);
     openTimelines.remove(_tl);
     _tl?.cancelSubscriptions();
     _syncSub?.cancel();
+    _presenceSub?.cancel();
+    _presenceTick?.cancel();
     _ttlTick?.cancel();
     _floatHide?.cancel();
     _recTimer?.cancel();
     _rec.dispose();
+    // неотправленное записанное голосовое не оставляем на диске
+    final rv = _review;
+    if (rv != null) rv.$1.delete().catchError((Object _) => rv.$1);
     _focus.dispose();
     super.dispose();
   }
@@ -296,17 +311,41 @@ class _ChatPageState extends State<ChatPage> {
     return memberText(e) != null;
   }
 
+  /// «В сети» / «был(а) …» собеседника — только в личном чате и если вы сами не скрыли своё время.
+  void _watchPresence() {
+    final other = room.isDirectChat ? room.directChatMatrixID : null;
+    if (other == null || !showOnline) return;
+    client.fetchCurrentPresence(other).then((p) {
+      if (mounted) setState(() => _presence = p);
+    }).catchError((Object _) {});
+    _presenceSub = client.onPresenceChanged.stream.where((p) => p.userid == other).listen((p) {
+      if (mounted) setState(() => _presence = p);
+    });
+    // «5 минут назад» само становится «6 минут назад»
+    _presenceTick = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted && _presence != null) setState(() {});
+    });
+  }
+
   String _subtitle() {
     final typing = room.typingUsers.where((u) => u.id != client.userID).toList();
     if (typing.isNotEmpty) {
       return room.isDirectChat ? 'печатает…' : '${typing.map((u) => u.calcDisplayname()).take(2).join(', ')} ${typing.length > 1 ? 'печатают' : 'печатает'}…';
     }
     if (room.isDirectChat) {
-      if (!room.encrypted) return 'личный чат';
+      final pr = _presence;
+      final seenAny = pr == null || !showOnline
+          ? null
+          : presenceText(online: pr.presence == PresenceType.online, currentlyActive: pr.currentlyActive, lastActive: pr.lastActiveTimestamp);
+      if (!room.encrypted) return seenAny ?? 'личный чат';
       // ключ собеседника запомнен при первой встрече, но подлинность не проверена сравнением эмодзи —
       // так и пишем, чтобы не путать с подтверждённым собеседником (проверить — в профиле чата)
       final other = room.directChatMatrixID;
-      return other != null && Trust.instance.userVerified(other) ? 'защищённый чат · собеседник подтверждён' : 'защищённый чат · собеседник не подтверждён';
+      final verified = other != null && Trust.instance.userVerified(other);
+      final seen = seenAny;
+      // время в сети — первым, пометка о неподтверждённом собеседнике остаётся
+      if (seen != null) return verified ? seen : '$seen · не подтверждён';
+      return verified ? 'защищённый чат · собеседник подтверждён' : 'защищённый чат · собеседник не подтверждён';
     }
     final n = room.summary.mJoinedMemberCount ?? room.getParticipants([Membership.join]).length;
     return '$n ${_plural(n, 'участник', 'участника', 'участников')}';

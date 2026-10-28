@@ -90,7 +90,7 @@ class _Bubble extends StatelessWidget {
     final mine = event.senderId == client.userID;
     final hint = Theme.of(context).hintColor;
     final accent = Theme.of(context).colorScheme.primary;
-    final metaColor = mine ? (Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF4FAE4E)) : hint;
+    final metaColor = mine ? Bubbles.outMeta(context) : hint;
     final time = DateFormat.Hm('ru').format(event.originServerTs);
     final sender = event.senderFromMemoryOrFallback;
     // у тёзок в группе — с логином, чтобы под чужое имя нельзя было замаскироваться
@@ -146,6 +146,7 @@ class _Bubble extends StatelessWidget {
           valueListenable: ttlTick,
           builder: (_, __, ___) => Text('🔥${fmtLeft(exp - DateTime.now().millisecondsSinceEpoch)} ', style: TextStyle(fontSize: 11.5, color: mc)),
         ),
+      if (Reminders.instance.of(event.eventId) != null) Padding(padding: const EdgeInsets.only(right: 3), child: Icon(Icons.alarm_rounded, size: 13, color: mc)),
       if (edited) Text('изм. ', style: TextStyle(fontSize: 11.5, color: mc)),
       Text(time, style: TextStyle(fontSize: 11.5, color: mc)),
       if (mine) ...[
@@ -216,7 +217,7 @@ class _Bubble extends StatelessWidget {
         Text(mine ? 'Исходящий звонок' : 'Входящий звонок'),
       ]);
     } else if (isPollStart(e)) {
-      content = PollView(event: event, timeline: timeline, accent: mine ? const Color(0xFF4FAE4E) : accent);
+      content = PollView(event: event, timeline: timeline, accent: mine ? Bubbles.outAccent(context) : accent);
     } else if (album != null && album!.length > 1) {
       content = _Album(items: album!, width: min(paneWidth(context) * 0.7, 380.0));
     } else if (isRound(e)) {
@@ -224,7 +225,7 @@ class _Bubble extends StatelessWidget {
     } else if (isImage || isSticker) {
       content = _Image(e, sticker: isSticker);
     } else if (e.messageType == MessageTypes.Audio) {
-      content = VoiceMessage(event: e, color: mine ? const Color(0xFF4FAE4E) : accent);
+      content = VoiceMessage(event: e, color: mine ? Bubbles.outAccent(context) : accent);
     } else if (e.messageType == MessageTypes.Video) {
       content = VideoPreview(
         event: e,
@@ -239,7 +240,7 @@ class _Bubble extends StatelessWidget {
       );
     } else if (e.messageType == 'm.key.verification.request') {
       content = Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.verified_user_outlined, size: 18, color: mine ? const Color(0xFF4FAE4E) : accent),
+        Icon(Icons.verified_user_outlined, size: 18, color: mine ? Bubbles.outAccent(context) : accent),
         const SizedBox(width: 6),
         Flexible(child: Text(mine ? 'Запрос подтверждения устройства' : 'Собеседник запросил подтверждение устройства', style: TextStyle(fontStyle: FontStyle.italic, color: hint))),
       ]);
@@ -250,7 +251,7 @@ class _Bubble extends StatelessWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           CircleAvatar(
             radius: 22,
-            backgroundColor: mine ? const Color(0xFF4FAE4E) : accent,
+            backgroundColor: mine ? Bubbles.outAccent(context) : accent,
             child: const Icon(Icons.insert_drive_file, color: Colors.white),
           ),
           const SizedBox(width: 10),
@@ -355,11 +356,11 @@ class _Bubble extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                     decoration: BoxDecoration(
-                      color: value.any((r) => r.senderId == client.userID) ? (mine ? const Color(0xFF4FAE4E) : accent) : (mine ? const Color(0x334FAE4E) : accent.withValues(alpha: 0.13)),
+                      color: value.any((r) => r.senderId == client.userID) ? (mine ? Bubbles.outAccent(context) : accent) : (mine ? Bubbles.outAccent(context).withValues(alpha: 0.2) : accent.withValues(alpha: 0.13)),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Text('$key ${value.length}',
-                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: value.any((r) => r.senderId == client.userID) ? Colors.white : (mine ? const Color(0xFF3A8C39) : accent))),
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: value.any((r) => r.senderId == client.userID) ? Colors.white : (mine ? Bubbles.outAccent(context) : accent))),
                   ),
                 ),
             ]),

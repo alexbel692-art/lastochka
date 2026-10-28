@@ -17,6 +17,7 @@ import 'device_guard.dart';
 
 import '../main.dart';
 import 'notify.dart';
+import 'perf.dart' show screenShown;
 
 const lockTimeouts = [(0, 'Сразу'), (60, 'Через 1 минуту'), (300, 'Через 5 минут'), (900, 'Через 15 минут'), (3600, 'Через 1 час')];
 
@@ -148,6 +149,11 @@ class AppLock {
     unawaited(_syncRecents());
     await _loadBlock();
     visibility.addListener(_onVisibility);
+    // Windows: отключились от RDP или заблокировали экран — Ласточка запирается сразу, без ожидания
+    // автоблокировки: на общем сервере сеанс может остаться открытым надолго
+    screenShown.addListener(() {
+      if (enabled && !screenShown.value) locked.value = true;
+    });
   }
 
   void _onVisibility() {

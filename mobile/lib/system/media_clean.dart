@@ -190,3 +190,57 @@ Uint8List? stripVideoMetadata(Uint8List b) {
   }
   return b;
 }
+
+/// Фото «в оригинале» (без сжатия): картинка не перекодируется, но скрытые сведения всё равно убираются —
+/// у JPEG вырезаются EXIF/XMP/IPTC (кроме отметки поворота, иначе снимок с телефона лёг бы набок),
+/// у PNG — текстовые блоки, EXIF и дата. Другие форматы (HEIC, WebP…) так не очистить — null:
+/// тогда фото уходит обычным, сжатым.
+Future<Uint8List?> cleanOriginal(Uint8List bytes) => compute(cleanOriginalSync, bytes);
+
+Uint8List? cleanOriginalSync(Uint8List b) {
+  if (b.length > 4 && b[0] == 0xFF && b[1] == 0xD8) {
+    final stripped = stripJpegMetadata(b);
+    if (identical(stripped, b)) return null; // повреждённый файл
+    var orientation = 1;
+    try {
+      orientation = img.decodeJpgExif(b)?.imageIfd.orientation ?? 1;
+    } catch (_) {}
+    if (orientation < 2 || orientation > 8) return stripped;
+    // SOI + APP1 c одним тегом Orientation + остальное
+    final exif = <int>[
+      0x45, 0x78, 0x69, 0x66, 0x00, 0x00, // "Exif\0\0"
+      0x4D, 0x4D, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x08, // TIFF, big-endian, IFD0 по смещению 8
+      0x00, 0x01, // одна запись
+      0x01, 0x12, 0x00, 0x03, 0x00, 0x00, 0x00, 0x01, 0x00, orientation, 0x00, 0x00, // Orientation, SHORT, 1
+      0x00, 0x00, 0x00, 0x00, // следующего IFD нет
+    ];
+    final len = exif.length + 2;
+    return (BytesBuilder(copy: false)
+          ..add([0xFF, 0xD8, 0xFF, 0xE1, len >> 8, len & 0xFF])
+          ..add(exif)
+          ..add(Uint8List.sublistView(stripped, 2)))
+        .toBytes();
+  }
+  const pngSig = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+  if (b.length > 8 && List.generate(8, (i) => b[i]).join(',') == pngSig.join(',')) {
+    // оставляем только сам рисунок и цвет; tEXt/zTXt/iTXt/eXIf/tIME и прочее — нет
+    const keep = {'IHDR', 'PLTE', 'IDAT', 'IEND', 'tRNS', 'gAMA', 'cHRM', 'sRGB', 'iCCP', 'sBIT', 'pHYs', 'acTL', 'fcTL', 'fdAT'};
+    final out = BytesBuilder(copy: false)..add(Uint8List.sublistView(b, 0, 8));
+    final bd = ByteData.sublistView(b);
+    var i = 8;
+    var ended = false;
+    while (i + 12 <= b.length) {
+      final len = bd.getUint32(i);
+      final type = String.fromCharCodes(b.sublist(i + 4, i + 8));
+      if (len > b.length - i - 12) return null; // оборванный файл
+      if (keep.contains(type)) out.add(Uint8List.sublistView(b, i, i + 12 + len));
+      i += 12 + len;
+      if (type == 'IEND') {
+        ended = true;
+        break;
+      }
+    }
+    return ended ? out.toBytes() : null;
+  }
+  return null;
+}

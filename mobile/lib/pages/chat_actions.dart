@@ -28,12 +28,13 @@ extension _ChatActions on _ChatPageState {
 
   /// Окно перед отправкой вложений: что уходит и подпись к нему (как в Telegram). null — отмена.
   /// Если в поле ввода уже набран текст — он становится подписью и из поля убирается.
-  Future<String?> _askCaption(String title, [List<String> names = const []]) async {
+  Future<String?> _askCaption(String title, [List<String> names = const [], bool offerOriginal = false]) async {
     final draft = _text.text.trim();
     final ctl = TextEditingController(text: draft);
+    _sendOriginal = false;
     final r = await showDialog<String>(
       context: context,
-      builder: (d) {
+      builder: (d) => StatefulBuilder(builder: (d, setD) {
         void send() => Navigator.pop(d, ctl.text);
         return AlertDialog(
           title: Text(title),
@@ -56,6 +57,16 @@ extension _ChatActions on _ChatPageState {
                 onSubmitted: isDesktop ? (_) => send() : null,
                 decoration: const InputDecoration(hintText: 'Добавить подпись…'),
               ),
+              // как в Telegram: «Сжать изображение» — или отправить файлом в исходном качестве
+              if (offerOriginal)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: _sendOriginal,
+                  onChanged: (v) => setD(() => _sendOriginal = v ?? false),
+                  title: const Text('В оригинале, без сжатия'),
+                  subtitle: const Text('Фото уйдёт файлом в полном качестве; место съёмки всё равно удаляется'),
+                ),
             ]),
           ),
           actions: [
@@ -63,7 +74,7 @@ extension _ChatActions on _ChatPageState {
             FilledButton(onPressed: send, child: const Text('Отправить')),
           ],
         );
-      },
+      }),
     );
     ctl.dispose();
     if (r == null) return null;
@@ -86,8 +97,11 @@ extension _ChatActions on _ChatPageState {
     final files = paths.map(File.new).where((f) => f.existsSync()).toList();
     if (files.isEmpty || !mounted) return;
     final names = files.map((f) => p.basename(f.path)).toList();
-    final caption = await _askCaption(files.length == 1 ? 'Отправить файл?' : 'Отправить файлы (${files.length})?', names);
+    final photos = names.any((n) => RegExp(r'\.(jpe?g|png|webp)$', caseSensitive: false).hasMatch(n));
+    final caption = await _askCaption(files.length == 1 ? 'Отправить файл?' : 'Отправить файлы (${files.length})?', names, photos);
     if (caption == null) return;
+    final original = _sendOriginal;
+    var notOriginal = 0;
     // одно вложение — подпись к нему; несколько — подпись отдельным сообщением после них
     final single = files.length == 1 ? caption : '';
     final reply = _replyTo;
@@ -98,7 +112,12 @@ extension _ChatActions on _ChatPageState {
         final name = p.basename(f.path);
         final bytes = await f.readAsBytes();
         final lower = name.toLowerCase();
-        if (RegExp(r'\.(jpe?g|png|webp)$').hasMatch(lower)) {
+        final asOriginal = original && RegExp(r'\.(jpe?g|png|webp)$').hasMatch(lower) ? await cleanOriginal(bytes) : null;
+        if (original && asOriginal == null && RegExp(r'\.(jpe?g|png|webp)$').hasMatch(lower)) notOriginal++;
+        if (asOriginal != null) {
+          ensureCanSend(room);
+          await room.sendFileEvent(MatrixFile(bytes: asOriginal, name: name), inReplyTo: reply, extraContent: {...captionContent(single, name), ...ttlExtra(room)});
+        } else if (RegExp(r'\.(jpe?g|png|webp)$').hasMatch(lower)) {
           final clean = await cleanPhoto(bytes, name);
           ensureCanSend(room);
           await room.sendFileEvent(MatrixImageFile(bytes: clean.bytes, name: clean.name, width: clean.width, height: clean.height),
@@ -123,6 +142,7 @@ extension _ChatActions on _ChatPageState {
       } catch (_) {}
     }
     if (failed > 0) _toast('Не отправлено файлов: $failed');
+    if (notOriginal > 0) _toast('Этот формат не очистить от места съёмки без сжатия — фото отправлено сжатым');
     _toBottom();
   }
 
@@ -337,7 +357,9 @@ extension _ChatActions on _ChatPageState {
     final what = items.length == 1
         ? (videos == 1 ? 'Отправить видео?' : 'Отправить фото?')
         : 'Отправить ${videos == items.length ? 'видео' : videos == 0 ? 'фото' : 'фото и видео'} (${items.length})?';
-    final caption = await _askCaption(what);
+    final caption = await _askCaption(what, const [], items.any((m) => !m.video));
+    final original = _sendOriginal;
+    var notOriginal = 0;
     if (caption == null) {
       // передумали — временные копии не оставляем
       for (final m in items) {
@@ -372,6 +394,17 @@ extension _ChatActions on _ChatPageState {
             failed++;
           }
         } else {
+          // в оригинале: исходный файл без перекодирования, но без места съёмки — файлом, как в Telegram
+          if (original) {
+            final src = await (m.original ?? m.bytes)!();
+            final orig = src == null ? null : await cleanOriginal(src);
+            if (orig != null) {
+              ensureCanSend(room);
+              await room.sendFileEvent(MatrixFile(bytes: orig, name: m.name), inReplyTo: r, extraContent: {...captionContent(single, m.name), ...ttlExtra(room)});
+              continue;
+            }
+            notOriginal++;
+          }
           final bytes = await m.bytes!();
           if (bytes == null) {
             failed++;
@@ -413,6 +446,7 @@ extension _ChatActions on _ChatPageState {
       } catch (_) {}
     }
     if (failed > 0 && items.length > 1) _toast('Не отправлено: $failed из ${items.length}');
+    if (notOriginal > 0) _toast('Этот формат не очистить от места съёмки без сжатия — фото отправлено сжатым');
     _toBottom();
   }
 
@@ -445,7 +479,7 @@ extension _ChatActions on _ChatPageState {
           for (final x in res)
             x.type == AssetType.video
                 ? _Media(x.title ?? 'Видео.mp4', video: true, path: () async => (await x.file)?.path)
-                : _Media('${x.title ?? 'photo'}.jpg', bytes: () => x.thumbnailDataWithSize(const ThumbnailSize(2560, 2560), quality: 92)),
+                : _Media('${x.title ?? 'photo'}.jpg', bytes: () => x.thumbnailDataWithSize(const ThumbnailSize(2560, 2560), quality: 92), original: () => x.originBytes),
         ]);
       } else if (a == 'photo') {
         // системный выбор: можно отметить несколько фото и видео — уйдут альбомом
@@ -499,8 +533,10 @@ class _Media {
   final bool video, temp;
   final Future<String?> Function()? path;
   final Future<Uint8List?> Function()? bytes;
+  /// Исходный файл без перекодирования (для «в оригинале»); нет — берётся [bytes].
+  final Future<Uint8List?> Function()? original;
   final String? tempPath;
-  const _Media(this.name, {this.video = false, this.temp = false, this.path, this.bytes, this.tempPath});
+  const _Media(this.name, {this.video = false, this.temp = false, this.path, this.bytes, this.original, this.tempPath});
 }
 
 class _AttachItem {

@@ -84,7 +84,11 @@ class VoiceRecorder {
       }
       if (!ok) throw last ?? 'запись не началась';
       started = DateTime.now();
+      _seg = started;
+      _accum = 0;
+      paused = false;
       _amp = _rec.onAmplitudeChanged(const Duration(milliseconds: 80)).listen((a) {
+        if (paused) return;
         final db = a.current.isFinite ? a.current : -60.0;
         levels.add(pow(10, max(-60.0, db) / 20).toDouble());
       });
@@ -99,7 +103,39 @@ class VoiceRecorder {
   /// Формат последней записи — для отправки.
   bool get isWav => _wav;
 
-  int get elapsedMs => started == null ? 0 : DateTime.now().difference(started!).inMilliseconds;
+  // пауза: время на паузе в длительность не входит
+  int _accum = 0;
+  DateTime? _seg;
+  bool paused = false;
+
+  int get elapsedMs => started == null ? 0 : _accum + (paused || _seg == null ? 0 : DateTime.now().difference(_seg!).inMilliseconds);
+
+  /// Пауза записи. Возвращает текст ошибки или null.
+  Future<String?> pause() async {
+    if (started == null || paused) return null;
+    try {
+      await _rec.pause();
+      _accum += DateTime.now().difference(_seg!).inMilliseconds;
+      paused = true;
+      return null;
+    } catch (e) {
+      Diag.err('Пауза записи', e);
+      return 'Пауза здесь недоступна';
+    }
+  }
+
+  Future<String?> resume() async {
+    if (started == null || !paused) return null;
+    try {
+      await _rec.resume();
+      _seg = DateTime.now();
+      paused = false;
+      return null;
+    } catch (e) {
+      Diag.err('Продолжение записи', e);
+      return 'Не удалось продолжить запись';
+    }
+  }
 
   /// Остановить; вернуть файл, длительность и волну. null — слишком короткое.
   Future<(File, int, List<int>)?> stop() async {
@@ -107,6 +143,7 @@ class VoiceRecorder {
     await _amp?.cancel();
     final path = await _rec.stop() ?? _path;
     started = null;
+    paused = false;
     if (path == null || dur < 700) return null;
     return (File(path), dur, waveformFrom(levels));
   }
@@ -114,6 +151,7 @@ class VoiceRecorder {
   Future<void> cancel() async {
     await _amp?.cancel();
     started = null;
+    paused = false;
     try {
       await _rec.cancel();
     } catch (_) {}
@@ -311,4 +349,93 @@ class _Wave extends CustomPainter {
 
   @override
   bool shouldRepaint(_Wave o) => o.frac != frac || o.wf != wf || o.on != on;
+}
+
+/// Записанное голосовое перед отправкой: прослушать, удалить или отправить (как в Telegram).
+class VoiceReviewBar extends StatefulWidget {
+  final File file;
+  final int durationMs;
+  final List<int> waveform;
+  final VoidCallback onSend, onDelete;
+  const VoiceReviewBar({super.key, required this.file, required this.durationMs, required this.waveform, required this.onSend, required this.onDelete});
+  @override
+  State<VoiceReviewBar> createState() => _VoiceReviewBarState();
+}
+
+class _VoiceReviewBarState extends State<VoiceReviewBar> {
+  final _player = AudioPlayer();
+  final _subs = <StreamSubscription>[];
+  bool _playing = false;
+  Duration _pos = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _subs
+      ..add(_player.onPositionChanged.listen((d) => mounted ? setState(() => _pos = d) : null))
+      ..add(_player.onPlayerComplete.listen((_) => mounted ? setState(() {
+            _playing = false;
+            _pos = Duration.zero;
+          }) : null));
+  }
+
+  @override
+  void dispose() {
+    for (final s in _subs) {
+      s.cancel();
+    }
+    _player.dispose();
+    super.dispose();
+  }
+
+  Future<void> _toggle() async {
+    try {
+      if (_playing) {
+        await _player.pause();
+      } else if (_pos > Duration.zero) {
+        await _player.resume();
+      } else {
+        await _player.play(DeviceFileSource(widget.file.path));
+      }
+      setState(() => _playing = !_playing);
+    } catch (e) {
+      Diag.err('Прослушивание голосового', e);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.primary;
+    final hint = Theme.of(context).hintColor;
+    final frac = widget.durationMs > 0 ? (_pos.inMilliseconds / widget.durationMs).clamp(0.0, 1.0) : 0.0;
+    final wf = widget.waveform.isEmpty ? List.filled(40, 8) : widget.waveform;
+    return SizedBox(
+      height: 56,
+      child: Row(children: [
+        IconButton(tooltip: 'Удалить', icon: const Icon(Icons.delete_outline, color: Colors.redAccent), onPressed: widget.onDelete),
+        IconButton(tooltip: _playing ? 'Пауза' : 'Прослушать', icon: Icon(_playing ? Icons.pause_circle_filled : Icons.play_circle_fill, color: accent, size: 32), onPressed: _toggle),
+        Expanded(
+          child: LayoutBuilder(builder: (_, c) {
+            final n = max(10, min(wf.length, (c.maxWidth / 4).floor()));
+            return Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+              for (var i = 0; i < n; i++)
+                Expanded(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 0.6),
+                    height: 4 + 20 * (wf[(i * wf.length / n).floor().clamp(0, wf.length - 1)] / 1024).clamp(0.0, 1.0),
+                    decoration: BoxDecoration(color: i / n <= frac ? accent : hint.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+            ]);
+          }),
+        ),
+        const SizedBox(width: 8),
+        Text(fmtDur(_playing || _pos > Duration.zero ? _pos.inMilliseconds : widget.durationMs), style: const TextStyle(fontSize: 14, fontFeatures: [FontFeature.tabularFigures()])),
+        Padding(
+          padding: const EdgeInsets.only(left: 4, right: 8),
+          child: IconButton.filled(tooltip: 'Отправить', onPressed: widget.onSend, icon: const Icon(Icons.arrow_upward)),
+        ),
+      ]),
+    );
+  }
 }

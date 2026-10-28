@@ -32,6 +32,7 @@ import '../system/trust.dart';
 import '../widgets/avatar.dart';
 import 'login.dart';
 import '../chat/link_preview.dart' show linkPreviews, setLinkPreviews;
+import '../calls/voip.dart' show micNoise, micGain, micNoisePref, micGainPref;
 
 Future<void> logout(BuildContext context) async {
   final ok = await showDialog<bool>(
@@ -415,6 +416,10 @@ class _SettingsPageState extends State<SettingsPage> {
           await setSendReadReceipts(v);
           if (mounted) setState(() {});
         }),
+        _switch(Icons.visibility_outlined, 'Показывать, когда я в сети', '«В сети» и «был(а) 5 минут назад». Выключите — и вы тоже не увидите это у других', showOnline, (v) async {
+          await setShowOnline(client, v);
+          if (mounted) setState(() {});
+        }),
         _switch(Icons.keyboard_outlined, '«Печатает…»', 'Собеседники видят, что вы набираете сообщение', sendTyping, (v) async {
           await setSendTyping(v);
           if (mounted) setState(() {});
@@ -426,6 +431,15 @@ class _SettingsPageState extends State<SettingsPage> {
         _row(Icons.block, 'Заблокированные', sub: client.ignoredUsers.isEmpty ? 'Никого' : '${client.ignoredUsers.length}', onTap: _blocked),
         _switch(Icons.how_to_reg_outlined, 'Принимать личные чаты автоматически', 'От коллег с вашего сервера — без нажатия «Вступить»', _pref('invites.autoAccept'), (v) => _set('invites.autoAccept', v)),
         _row(Icons.data_usage, 'Хранилище', sub: 'Сколько места занято, очистка кэша', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StoragePage()))),
+        _header('Звонки'),
+        _switch(Icons.graphic_eq_rounded, 'Шумо- и эхоподавление', 'Убирает гул, стук клавиш и эхо из колонок. Выключите, если голос звучит «как из бочки»', micNoise, (v) async {
+          micNoise = v;
+          await _set(micNoisePref, v);
+        }),
+        _switch(Icons.mic_external_on_outlined, 'Автоусиление микрофона', 'Выравнивает громкость, если вас плохо слышно. Применится со следующего звонка', micGain, (v) async {
+          micGain = v;
+          await _set(micGainPref, v);
+        }),
         _header('Оформление'),
         _row(Icons.palette_outlined, 'Оформление', sub: 'Тема, размер текста, обои чатов', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AppearancePage()))),
         if (Platform.isWindows || Platform.isMacOS || Platform.isLinux)

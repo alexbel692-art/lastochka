@@ -335,6 +335,30 @@ jobs:
           dart run flutter_launcher_icons
       - name: Сборка Windows
         run: tool/annotate.sh "build windows" flutter build windows --release --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
+      # Проигрыватель видео (mpv + FFmpeg): сборка из media_kit — 2023 года, без исправлений безопасности FFmpeg
+      # с тех пор. Подменяем libmpv-2.dll свежей сборкой mpv (shinchiro/mpv-winbuild-cmake, обычная x86_64 —
+      # без требования AVX2). Версия закреплена тегом и отпечатком SHA-256; не сошлось — сборка останавливается.
+      - name: Свежий libmpv (FFmpeg)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MPV_TAG: '20261021'
+          MPV_SHA256: ''
+        run: |
+          R=build/windows/x64/runner/Release
+          J=$(gh api "repos/shinchiro/mpv-winbuild-cmake/releases/tags/$MPV_TAG")
+          N=$(echo "$J" | jq -r '.assets[].name' | grep -E '^mpv-dev-x86_64-[0-9]{8}-git-[0-9a-f]+\.7z$' | head -1)
+          [ -n "$N" ] || { echo "::error::в выпуске $MPV_TAG нет mpv-dev-x86_64"; exit 1; }
+          D=$(echo "$J" | jq -r --arg n "$N" '.assets[] | select(.name == $n) | .digest // ""')
+          mkdir -p ../mpv && gh release download "$MPV_TAG" -R shinchiro/mpv-winbuild-cmake -p "$N" -D ../mpv
+          H="sha256:$(sha256sum "../mpv/$N" | cut -d' ' -f1)"
+          [ -z "$D" ] || [ "$H" = "$D" ] || { echo "::error::$N: $H, а GitHub указывает $D"; exit 1; }
+          [ -z "$MPV_SHA256" ] || [ "$H" = "sha256:$MPV_SHA256" ] || { echo "::error::$N: $H вместо закреплённого $MPV_SHA256"; exit 1; }
+          7z e -y "../mpv/$N" -o../mpv/x libmpv-2.dll -r > /dev/null
+          [ -s ../mpv/x/libmpv-2.dll ] || { echo "::error::в $N нет libmpv-2.dll"; exit 1; }
+          OLD=$(grep -a -o -m1 'mpv v0\.[0-9][0-9.]*[-0-9a-z]*' "$R/libmpv-2.dll" | head -1 || true)
+          cp -f ../mpv/x/libmpv-2.dll "$R/libmpv-2.dll"
+          NEW=$(grep -a -o -m1 'mpv v0\.[0-9][0-9.]*[-0-9a-z]*' "$R/libmpv-2.dll" | head -1 || true)
+          echo "::notice::libmpv: $OLD -> $NEW ($N, $H)"
       - name: Установщик и архив
         run: |
           R=build/windows/x64/runner/Release

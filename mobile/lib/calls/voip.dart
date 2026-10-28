@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 import 'package:matrix/matrix.dart';
 import 'package:webrtc_interface/webrtc_interface.dart' hide Navigator;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
 import 'call_page.dart';
@@ -283,6 +284,41 @@ bool canCall(Room room) {
   return n == 2;
 }
 
+/// Обработка звука микрофона в звонках (Настройки → Звонки): подавление шума и эха, автоусиление.
+/// Шумо- и эхоподавление включены по умолчанию — без них с ноутбука и колонок слышно эхо и гул.
+/// Автоусиление выключено: оно «тянет» тихие шумы комнаты в паузах.
+const micNoisePref = 'call.noise', micGainPref = 'call.agc';
+bool micNoise = true, micGain = false;
+
+Future<void> loadMicPrefs() async {
+  final p = await SharedPreferences.getInstance();
+  micNoise = p.getBool(micNoisePref) ?? true;
+  micGain = p.getBool(micGainPref) ?? false;
+}
+
+/// Параметры микрофона: общие (Windows, Mac, iPhone) и в старом виде goog* — их читает Android.
+Map<String, dynamic> withMicProcessing(Map<String, dynamic> c) {
+  final a = c['audio'];
+  if (a == null || a == false) return c;
+  final base = a is Map ? Map<String, dynamic>.from(a) : <String, dynamic>{};
+  base
+    ..['echoCancellation'] = micNoise
+    ..['noiseSuppression'] = micNoise
+    ..['autoGainControl'] = micGain
+    ..['optional'] = [
+      ...((base['optional'] as List?) ?? const []).where((o) => o is! Map || !o.keys.any((k) => '$k'.startsWith('goog'))),
+      {'googEchoCancellation': micNoise},
+      {'googEchoCancellation2': micNoise},
+      {'googNoiseSuppression': micNoise},
+      {'googNoiseSuppression2': micNoise},
+      {'googHighpassFilter': micNoise},
+      {'googTypingNoiseDetection': micNoise},
+      {'googAutoGainControl': micGain},
+      {'googAutoGainControl2': micGain},
+    ];
+  return {...c, 'audio': base};
+}
+
 /// Камера и микрофон. Пока окно Ласточки закрыто (звонок пришёл в фоне), камеру не включаем —
 /// Android её не даст, и звонок оборвался бы. Видео включится после ответа.
 class _Media extends MediaDevices {
@@ -291,6 +327,7 @@ class _Media extends MediaDevices {
 
   @override
   Future<MediaStream> getUserMedia(Map<String, dynamic> c) async {
+    c = withMicProcessing(c);
     // окно скрыто или Ласточка заблокирована код-паролем — только звук (камера включится после разблокировки кнопкой)
     if ((!appVisible || AppLock.instance.locked.value) && c['video'] != null && c['video'] != false) {
       return inner.getUserMedia({...c, 'video': false});

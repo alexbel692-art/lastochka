@@ -14,15 +14,42 @@ extension _ChatMessages on _ChatPageState {
     _set(() {});
   }
 
-  Future<void> _stopRec({required bool send}) async {
+  /// [review] — не отправлять сразу, а показать для прослушивания.
+  Future<void> _stopRec({required bool send, bool review = false}) async {
     _recTimer?.cancel();
-    if (!send) {
+    if (!send && !review) {
       await _rec.cancel();
       return _set(() {});
     }
     final r = await _rec.stop();
     _set(() {});
     if (r == null) return _toast('Слишком короткое голосовое');
+    if (review) return _set(() => _review = r);
+    await _sendVoiceRec(r);
+  }
+
+  Future<void> _toggleRecPause() async {
+    final err = _rec.paused ? await _rec.resume() : await _rec.pause();
+    if (err != null) _toast(err);
+    _set(() {});
+  }
+
+  Future<void> _dropReview() async {
+    final r = _review;
+    _set(() => _review = null);
+    try {
+      await r?.$1.delete();
+    } catch (_) {}
+  }
+
+  Future<void> _sendReview() async {
+    final r = _review;
+    if (r == null) return;
+    _set(() => _review = null);
+    await _sendVoiceRec(r);
+  }
+
+  Future<void> _sendVoiceRec((File, int, List<int>) r) async {
     final reply = _replyTo;
     _set(() => _replyTo = null);
     try {
@@ -129,11 +156,19 @@ extension _ChatMessages on _ChatPageState {
           ListTile(leading: const Icon(Icons.reply), title: const Text('Ответить'), onTap: () => Navigator.pop(c, 'reply')),
           if (!e.redacted && e.relationshipType != RelationshipTypes.thread && !room.isDirectChat)
             ListTile(leading: const Icon(Icons.forum_outlined), title: const Text('Обсудить в ветке'), onTap: () => Navigator.pop(c, 'thread')),
+          if (!mine && !room.isDirectChat && !e.redacted && !client.ignoredUsers.contains(e.senderId))
+            ListTile(leading: const Icon(Icons.reply_all_rounded), title: const Text('Ответить лично'), onTap: () => Navigator.pop(c, 'private')),
           if (mine && !room.isDirectChat && !e.redacted)
             ListTile(leading: const Icon(Icons.done_all_rounded), title: const Text('Кто прочитал'), onTap: () => Navigator.pop(c, 'readers')),
           if (!e.redacted && e.hasAggregatedEvents(tl, RelationshipTypes.edit))
             ListTile(leading: const Icon(Icons.history_rounded), title: const Text('История правок'), onTap: () => Navigator.pop(c, 'history')),
           if (canForward(e)) ListTile(leading: const Icon(Icons.forward_outlined), title: const Text('Переслать'), onTap: () => Navigator.pop(c, 'forward')),
+          if (!e.redacted && !e.status.isSending)
+            ListTile(
+              leading: const Icon(Icons.alarm_rounded),
+              title: Text(Reminders.instance.of(e.eventId) == null ? 'Напомнить' : 'Напоминание: ${_remindLabel(Reminders.instance.of(e.eventId)!.time)}'),
+              onTap: () => Navigator.pop(c, 'remind'),
+            ),
           ListTile(leading: const Icon(Icons.check_circle_outline), title: const Text('Выбрать'), onTap: () => Navigator.pop(c, 'select')),
           if (isPollStart(e) && !e.redacted && (mine || room.ownPowerLevel.level >= 50) && pollStateOf(e, tl) == null)
             ListTile(leading: const Icon(Icons.stop_circle_outlined), title: const Text('Завершить опрос'), onTap: () => Navigator.pop(c, 'endpoll')),
@@ -177,6 +212,10 @@ extension _ChatMessages on _ChatPageState {
       case 'copy':
         await copySensitive(disp.calcUnlocalizedBody(hideReply: true));
         _toast('Текст скопирован (буфер очистится через минуту)');
+      case 'remind':
+        await _remind(e, disp, tl, isText);
+      case 'private':
+        await _replyPrivately(e, disp, tl, isText);
       case 'thread':
         if (mounted) await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ThreadPage(room: room, root: e)));
       case 'readers':
@@ -222,6 +261,81 @@ extension _ChatMessages on _ChatPageState {
             if (m.canRedact && !m.redacted) await m.redactEvent();
           }
         }
+    }
+  }
+
+  /// «Напомнить»: выбор срока, как в Telegram; если напоминание уже стоит — можно отменить.
+  Future<void> _remind(Event e, Event disp, Timeline tl, bool isText) async {
+    final has = Reminders.instance.of(e.eventId);
+    final now = DateTime.now();
+    final pick = await showModalBottomSheet<Object>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(padding: EdgeInsets.only(bottom: 4), child: Text('Напомнить об этом сообщении', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15))),
+          for (final (label, at) in reminderChoices(now))
+            ListTile(leading: const Icon(Icons.schedule_rounded), title: Text(label), trailing: Text(_remindLabel(at), style: TextStyle(color: Theme.of(c).hintColor)), onTap: () => Navigator.pop(c, at)),
+          ListTile(leading: const Icon(Icons.edit_calendar_rounded), title: const Text('Выбрать дату и время…'), onTap: () => Navigator.pop(c, 'custom')),
+          if (has != null)
+            ListTile(
+              leading: const Icon(Icons.alarm_off_rounded, color: Colors.redAccent),
+              title: const Text('Отменить напоминание', style: TextStyle(color: Colors.redAccent)),
+              onTap: () => Navigator.pop(c, 'cancel'),
+            ),
+        ]),
+      ),
+    );
+    if (pick == null || !mounted) return;
+    if (pick == 'cancel') {
+      await Reminders.instance.cancel(e.eventId);
+      return _toast('Напоминание отменено');
+    }
+    DateTime? at = pick is DateTime ? pick : null;
+    if (pick == 'custom') {
+      final d = await showDatePicker(context: context, initialDate: now, firstDate: now, lastDate: now.add(const Duration(days: 365)), locale: const Locale('ru'));
+      if (d == null || !mounted) return;
+      final t = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))));
+      if (t == null) return;
+      at = DateTime(d.year, d.month, d.day, t.hour, t.minute);
+      if (!at.isAfter(DateTime.now())) return _toast('Это время уже прошло');
+    }
+    if (at == null) return;
+    final preview = (isText ? stripMarkdown(disp.calcUnlocalizedBody(hideReply: true)) : eventPreview(disp, tl)).replaceAll('\n', ' ').trim();
+    final ok = await Reminders.instance.set(room, e, at, preview);
+    _toast(ok ? 'Напомню ${_remindLabel(at)}' : 'Не удалось поставить напоминание — проверьте разрешение на уведомления');
+  }
+
+  String _remindLabel(DateTime at) {
+    final now = DateTime.now();
+    final hm = DateFormat.Hm('ru').format(at);
+    if (DateUtils.isSameDay(at, now)) return 'сегодня в $hm';
+    if (DateUtils.isSameDay(at, now.add(const Duration(days: 1)))) return 'завтра в $hm';
+    return '${DateFormat('d MMMM', 'ru').format(at)} в $hm';
+  }
+
+  /// «Ответить лично»: личный чат с автором (если его нет — создаётся, с шифрованием) и в поле ввода —
+  /// цитата его сообщения с названием группы. Ответ-ссылкой нельзя: сообщение из другого чата Matrix
+  /// не позволяет «процитировать», поэтому — текстом, как в Telegram.
+  Future<void> _replyPrivately(Event e, Event disp, Timeline tl, bool isText) async {
+    final uid = e.senderId;
+    final name = memberName(room, uid, name: e.senderFromMemoryOrFallback.calcDisplayname());
+    var text = (isText ? stripMarkdown(disp.calcUnlocalizedBody(hideReply: true)) : eventPreview(disp, tl)).trim();
+    if (text.length > 400) text = '${text.substring(0, 400)}…';
+    final quote = [
+      '> $name в «${room.getLocalizedDisplayname()}»:',
+      for (final l in text.split('\n')) '> $l',
+    ].join('\n');
+    try {
+      final id = client.getDirectChatFromUserId(uid) ?? await client.startDirectChat(uid, enableEncryption: true);
+      final dm = client.getRoomById(id) ?? await client.waitForRoomInSync(id).then((_) => client.getRoomById(id));
+      if (dm == null || !mounted) return;
+      final prev = Drafts.instance.of(dm.id);
+      Drafts.instance.set(dm.id, prev == null || prev.trim().isEmpty ? '$quote\n\n' : '$prev\n$quote\n\n');
+      await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => ChatPage(room: dm)));
+    } catch (err) {
+      Diag.err('Ответить лично', err);
+      _toast('Не удалось открыть личный чат');
     }
   }
 

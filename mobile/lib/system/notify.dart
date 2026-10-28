@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 import '../main.dart';
 import '../calls/voip.dart' show callActive;
@@ -163,25 +164,33 @@ void _handle(String action, String payload) {
   }
   if (payload.isEmpty) return;
   showMainWindow();
+  // напоминание: открыть чат на том самом сообщении
+  if (payload.startsWith('remind:')) {
+    final rest = payload.substring(7);
+    final i = rest.indexOf('|');
+    final room = i < 0 ? null : client.getRoomById(rest.substring(0, i));
+    if (room != null) openRoom(room, jumpTo: rest.substring(i + 1));
+    return;
+  }
   final room = client.getRoomById(payload);
   if (room == null) return;
   openRoom(room);
 }
 
 /// Открыть чат из уведомления.
-void openRoom(Room room) {
+void openRoom(Room room, {String? jumpTo}) {
   final nav = navKey.currentState;
   if (nav == null) return;
-  if (openRoomId == room.id) return;
+  if (openRoomId == room.id && jumpTo == null) return;
   // вход ещё не подтверждён — чаты откроются после подтверждения
   if (client.isUnknownSession && client.encryption?.crossSigning.enabled == true) return;
   // во время звонка экран звонка не закрываем (иначе звонок бы оборвался) — чат открывается поверх
   if (callActive.value) {
-    nav.push(MaterialPageRoute(builder: (_) => ChatPage(room: room)));
+    nav.push(MaterialPageRoute(builder: (_) => ChatPage(room: room, jumpTo: jumpTo)));
     return;
   }
   nav.popUntil((r) => r.isFirst);
-  nav.push(MaterialPageRoute(builder: (_) => ChatPage(room: room)));
+  nav.push(MaterialPageRoute(builder: (_) => ChatPage(room: room, jumpTo: jumpTo)));
 }
 
 int _idFor(String roomId) => roomId.hashCode & 0x7fffffff;
@@ -335,5 +344,56 @@ Future<void> showSecurityNotification(String title, String body) async {
         macOS: DarwinNotificationDetails(),
       ),
     );
+  } catch (_) {}
+}
+
+// ---------- напоминания о сообщениях (lib/chat/reminders.dart) ----------
+
+const _reminderDetails = NotificationDetails(
+  android: AndroidNotificationDetails('reminders', 'Напоминания', channelDescription: 'Напоминания о сообщениях', importance: Importance.high, priority: Priority.high),
+  iOS: DarwinNotificationDetails(),
+  macOS: DarwinNotificationDetails(),
+);
+
+/// Заголовок и текст напоминания. Текст сообщения — только если в настройках он разрешён в уведомлениях
+/// и не включён код-пароль (как у обычных уведомлений).
+Future<(String, String)> reminderTexts(String roomName, String preview) async {
+  final prefs = await SharedPreferences.getInstance();
+  final showText = (prefs.getBool('notify.text') ?? true) && (prefs.getString('lock.hash') ?? '').isEmpty;
+  return ('Напоминание · $roomName', showText && preview.isNotEmpty ? preview : 'Вы просили напомнить об этом сообщении');
+}
+
+Future<void> showReminderNotification(int id, String roomId, String eventId, String roomName, String preview) async {
+  final (title, body) = await reminderTexts(roomName, preview);
+  try {
+    await _fln.show(id: id, title: title, body: body, payload: 'remind:$roomId|$eventId', notificationDetails: _reminderDetails);
+  } catch (e) {
+    Logs().w('[Ласточка] напоминание не показано', e);
+  }
+}
+
+/// Телефон и Mac: напоминание ставит сама система — придёт, даже если Ласточка закрыта.
+Future<bool> scheduleReminderNotification(int id, DateTime at, String roomId, String eventId, String roomName, String preview) async {
+  final (title, body) = await reminderTexts(roomName, preview);
+  try {
+    await _fln.zonedSchedule(
+      id: id,
+      title: title,
+      body: body,
+      payload: 'remind:$roomId|$eventId',
+      scheduledDate: tz.TZDateTime.from(at.toUtc(), tz.UTC),
+      notificationDetails: _reminderDetails,
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+    );
+    return true;
+  } catch (e) {
+    Logs().w('[Ласточка] напоминание не поставлено', e);
+    return false;
+  }
+}
+
+Future<void> cancelReminderNotification(int id) async {
+  try {
+    await _fln.cancel(id: id);
   } catch (_) {}
 }

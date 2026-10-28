@@ -14,6 +14,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:matrix/matrix.dart' show Client, PresenceType;
 
 import 'device_guard.dart';
 
@@ -38,11 +39,24 @@ Future<void> setSendTyping(bool on) async {
   await (await SharedPreferences.getInstance()).setBool('privacy.typing', on);
 }
 
+/// Показывать собеседникам, когда вы в сети («в сети», «был(а) 5 минут назад»). Как в Telegram:
+/// кто скрыл своё время, тот не видит и чужое.
+bool showOnline = true;
+
+Future<void> setShowOnline(Client c, bool on) async {
+  showOnline = on;
+  await (await SharedPreferences.getInstance()).setBool('privacy.online', on);
+  c.syncPresence = on ? null : PresenceType.offline;
+  final me = c.userID;
+  if (me != null) await c.setPresence(me, on ? PresenceType.online : PresenceType.offline).catchError((Object _) {});
+}
+
 Future<void> initPrivacy() async {
   final prefs = await SharedPreferences.getInstance();
   screenProtect.value = prefs.getBool('privacy.screen') ?? false;
   sendReadReceipts = prefs.getBool('privacy.readReceipts') ?? true;
   sendTyping = prefs.getBool('privacy.typing') ?? true;
+  showOnline = prefs.getBool('privacy.online') ?? true;
   await _apply(screenProtect.value);
   await purgeDecryptedFiles();
 }

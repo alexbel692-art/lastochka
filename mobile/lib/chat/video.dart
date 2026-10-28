@@ -272,6 +272,10 @@ Future<Uint8List?> _preview(Event e) => _previews.putIfAbsent(e.eventId, () asyn
       }
       final size = (e.content.tryGetMap<String, Object?>('info')?['size'] as num?)?.toInt() ?? 0;
       if (!frameSupported || size <= 0 || size > _autoFrameLimit) return null;
+      // Windows Server / RDP: чужое видео не разбираем без нажатия — кадр достался бы проигрывателю mpv
+      // сам, едва сообщение появилось в чате (ошибки в разборе видео — частый путь атаки). Плитка — без кадра,
+      // видео открывается и разбирается только по нажатию. Свои отправленные видео — как обычно.
+      if (useMpv && e.senderId != e.room.client.userID) return null;
       final f = await _decrypted(e);
       if (f == null) return null;
       return (await videoFrame(f.path))?.jpeg;

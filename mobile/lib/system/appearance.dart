@@ -18,6 +18,24 @@ const wallpapers = [
   Wallpaper('Без рисунка', [Color(0xFFF1F1F3), Color(0xFFF1F1F3)], [Color(0xFF181818), Color(0xFF181818)], pattern: false),
 ];
 
+/// Цвет оформления (акцент): кнопки, ссылки, выделение, свои сообщения. Первый — прежний, как в Telegram.
+class Accent {
+  final String name;
+  final Color light, dark;
+  const Accent(this.name, this.light, this.dark);
+}
+
+const accents = [
+  Accent('Синий', Color(0xFF3390EC), Color(0xFF8774E1)),
+  Accent('Голубой', Color(0xFF1E9BD7), Color(0xFF3FAEE0)),
+  Accent('Бирюзовый', Color(0xFF0F9D8F), Color(0xFF26B3A4)),
+  Accent('Зелёный', Color(0xFF2E9D4B), Color(0xFF4CAF6A)),
+  Accent('Оранжевый', Color(0xFFE5791B), Color(0xFFEE9440)),
+  Accent('Красный', Color(0xFFDE3F45), Color(0xFFE5666A)),
+  Accent('Розовый', Color(0xFFD13F86), Color(0xFFE06AA6)),
+  Accent('Фиолетовый', Color(0xFF7652D6), Color(0xFF9B80EA)),
+];
+
 class Appearance {
   Appearance._();
   static final instance = Appearance._();
@@ -25,15 +43,22 @@ class Appearance {
   final themeMode = ValueNotifier<ThemeMode>(ThemeMode.system);
   final textScale = ValueNotifier<double>(1.0);
   final wallpaper = ValueNotifier<int>(0);
+  final accent = ValueNotifier<int>(0);
   SharedPreferences? _p;
 
-  Listenable get all => Listenable.merge([themeMode, textScale, wallpaper]);
+  Listenable get all => Listenable.merge([themeMode, textScale, wallpaper, accent]);
 
   Future<void> init() async {
     _p = await SharedPreferences.getInstance();
     themeMode.value = ThemeMode.values.elementAtOrNull(_p!.getInt('look.theme') ?? 0) ?? ThemeMode.system;
     textScale.value = (_p!.getDouble('look.scale') ?? 1.0).clamp(0.8, 1.4);
     wallpaper.value = (_p!.getInt('look.wall') ?? 0).clamp(0, wallpapers.length - 1);
+    accent.value = (_p!.getInt('look.accent') ?? 0).clamp(0, accents.length - 1);
+  }
+
+  Future<void> setAccent(int i) async {
+    accent.value = i;
+    await _p?.setInt('look.accent', i);
   }
 
   Future<void> setTheme(ThemeMode m) async {

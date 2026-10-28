@@ -299,13 +299,33 @@ extension _ChatCompose on _ChatPageState {
                 const _Blink(),
                 const SizedBox(width: 10),
                 Text(fmtDur(_rec.elapsedMs), style: const TextStyle(fontSize: 16, fontFeatures: [FontFeature.tabularFigures()])),
+                if (_rec.paused) Padding(padding: const EdgeInsets.only(left: 8), child: Text('пауза', style: TextStyle(color: hint))),
                 const Spacer(),
                 TextButton(onPressed: () => _stopRec(send: false), child: const Text('Отмена')),
+                IconButton(
+                  tooltip: _rec.paused ? 'Продолжить запись' : 'Пауза',
+                  icon: Icon(_rec.paused ? Icons.mic_rounded : Icons.pause_rounded, color: _rec.paused ? Colors.redAccent : hint),
+                  onPressed: _toggleRecPause,
+                ),
+                IconButton(
+                  tooltip: 'Остановить и прослушать',
+                  icon: Icon(Icons.stop_rounded, color: hint),
+                  onPressed: () => _stopRec(send: false, review: true),
+                ),
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
-                  child: IconButton.filled(onPressed: () => _stopRec(send: true), icon: const Icon(Icons.arrow_upward)),
+                  child: IconButton.filled(tooltip: 'Отправить', onPressed: () => _stopRec(send: true), icon: const Icon(Icons.arrow_upward)),
                 ),
               ]),
+            )
+          else if (_review != null)
+            VoiceReviewBar(
+              key: ValueKey(_review!.$1.path),
+              file: _review!.$1,
+              durationMs: _review!.$2,
+              waveform: _review!.$3,
+              onSend: _sendReview,
+              onDelete: _dropReview,
             )
           else
             Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
