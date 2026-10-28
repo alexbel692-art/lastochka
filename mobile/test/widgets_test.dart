@@ -38,18 +38,23 @@ void main() {
     expect(find.text('Неверный код'), findsNothing);
   });
 
-  testWidgets('оформление: тема, размер текста, обои', (t) async {
+  testWidgets('оформление: тема, цвет, размер текста, обои', (t) async {
     await Appearance.instance.init();
     await t.pumpWidget(const MaterialApp(home: AppearancePage()));
     await t.tap(find.text('Тёмная'));
     await t.pumpAndSettle();
     expect(Appearance.instance.themeMode.value, ThemeMode.dark);
+    await t.tap(find.byTooltip('Зелёный'));
+    await t.pumpAndSettle();
+    expect(accents[Appearance.instance.accent.value].name, 'Зелёный');
+    await t.scrollUntilVisible(find.text('Небо'), 200, scrollable: find.byType(Scrollable).first);
     await t.tap(find.text('Небо'));
     await t.pumpAndSettle();
     expect(Appearance.instance.wallpaper.value, 1);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getInt('look.theme'), ThemeMode.dark.index);
     expect(prefs.getInt('look.wall'), 1);
+    expect(prefs.getInt('look.accent'), Appearance.instance.accent.value);
   });
 
   test('ссылки Matrix из QR-кодов', () {

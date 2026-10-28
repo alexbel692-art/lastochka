@@ -17,7 +17,9 @@ void main() {
     expect(exif?.imageIfd.orientation, 6); // поворот сохранён
     expect(exif?.gpsIfd.isEmpty ?? true, isTrue); // места съёмки нет
     expect(String.fromCharCodes(out).contains('PhoneMaker'), isFalse); // прочих сведений тоже
-    expect(img.decodeJpg(out)!.width, 8); // картинка та же, не перекодирована
+    // картинка та же; при показе поворачивается по отметке (8×4 на боку → 4×8)
+    final shown = img.decodeJpg(out)!;
+    expect((shown.width, shown.height), (4, 8));
 
     final png = img.encodePng(img.Image(width: 3, height: 3));
     final withText = _addPngText(png, 'Location', 'secret');
