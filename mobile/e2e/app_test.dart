@@ -109,10 +109,17 @@ void main() {
     await step('секретная фраза', () async {
       await waitFor(t, find.text('Сохранить фразу'), 'экран секретной фразы после входа', seconds: 180);
       final fields = find.byType(TextField);
-      await t.enterText(fields.at(0), phrase);
-      await t.enterText(fields.at(1), phrase);
-      // Enter во втором поле — то же, что кнопка (кнопку на маленьком экране может закрыть всплывающая плашка)
-      await t.testTextInput.receiveAction(TextInputAction.done);
+      // экран может перерисоваться сразу после появления и стереть ввод — тогда вводим ещё раз
+      for (var k = 0; k < 4; k++) {
+        await t.pump(const Duration(seconds: 2));
+        await t.enterText(fields.at(0), phrase);
+        await t.enterText(fields.at(1), phrase);
+        await t.pump(const Duration(milliseconds: 500));
+        // Enter во втором поле — то же, что кнопка (кнопку на маленьком экране может закрыть всплывающая плашка)
+        await t.testTextInput.receiveAction(TextInputAction.done);
+        await t.pump(const Duration(seconds: 2));
+        if (find.textContaining('слишком короткая').evaluate().isEmpty && find.textContaining('не совпадают').evaluate().isEmpty) break;
+      }
       // сервер может попросить пароль (подтверждение действия) — тогда вводим
       // ключ из фразы считается нарочно долго (защита от подбора) — в отладочной сборке на эмуляторе это минуты
       final i = await waitAny(t, [find.text('Подтвердите паролем'), find.text('Тест-группа')], 'подтверждение паролем или список чатов', seconds: 900);
