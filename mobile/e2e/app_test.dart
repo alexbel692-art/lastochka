@@ -178,8 +178,9 @@ void main() {
       await waitFor(t, find.text('Настройки'), 'нижнее меню');
       await t.tap(find.text('Настройки').last);
       await waitFor(t, find.text('Конфиденциальность'), 'настройки');
-      await t.scrollUntilVisible(find.text('Оформление'), 300, scrollable: find.byType(Scrollable).first);
-      await t.tap(find.text('Оформление').last);
+      final row = find.text('Тема, размер текста, обои чатов');
+      await t.scrollUntilVisible(row, 300, scrollable: find.byType(Scrollable).first);
+      await t.tap(row);
       await waitFor(t, find.byTooltip('Зелёный'), 'выбор цвета');
       await t.tap(find.byTooltip('Зелёный'));
       await settle(t, 600);
