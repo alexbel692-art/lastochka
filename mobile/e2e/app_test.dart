@@ -69,7 +69,10 @@ Future<void> tapUntil(WidgetTester t, Finder target, Finder expect, String what,
   throw TestFailure('нажатие не сработало: $what. На экране: ${screenText()}');
 }
 
+String currentStep = '';
+
 Future<void> step(String name, Future<void> Function() body) async {
+  currentStep = name;
   debugPrint('E2E: $name');
   await body();
   debugPrint('E2E: $name — готово');
@@ -84,7 +87,10 @@ void main() {
     final errs = <String>[];
     final prevOnError = FlutterError.onError;
     FlutterError.onError = (d) {
-      final line = '${d.exceptionAsString().split('\n').first} — ${d.context?.toDescription() ?? ''} ${d.library ?? ''}';
+      final full = d.toString().split('\n');
+      final i = full.indexWhere((l) => l.contains('relevant error-causing widget'));
+      final where = i >= 0 && i + 1 < full.length ? full[i + 1].trim() : '';
+      final line = '[$currentStep] ${d.exceptionAsString().split('\n').first} — $where';
       errs.add(line);
       debugPrint('E2E-ERR: $line');
     };
@@ -172,7 +178,7 @@ void main() {
       await waitFor(t, find.text('Настройки'), 'нижнее меню');
       await t.tap(find.text('Настройки').last);
       await waitFor(t, find.text('Конфиденциальность'), 'настройки');
-      await t.scrollUntilVisible(find.text('Оформление').last, 300, scrollable: find.byType(Scrollable).first);
+      await t.scrollUntilVisible(find.text('Оформление'), 300, scrollable: find.byType(Scrollable).first);
       await t.tap(find.text('Оформление').last);
       await waitFor(t, find.byTooltip('Зелёный'), 'выбор цвета');
       await t.tap(find.byTooltip('Зелёный'));
