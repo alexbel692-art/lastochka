@@ -1,4 +1,10 @@
 include: package:flutter_lints/flutter.yaml
+
+# автотест интерфейса: его зависимость (integration_test) подключается только в сборке автотестов
+analyzer:
+  exclude:
+    - e2e/**
+    - integration_test/**
 linter:
   rules:
     use_build_context_synchronously: false
