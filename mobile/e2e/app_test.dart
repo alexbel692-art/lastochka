@@ -39,7 +39,12 @@ Future<void> waitFor(WidgetTester t, Finder f, String what, {int seconds = 60}) 
 /// Ждать одно из нескольких состояний; возвращает номер найденного.
 Future<int> waitAny(WidgetTester t, List<Finder> fs, String what, {int seconds = 60}) async {
   final end = DateTime.now().add(Duration(seconds: seconds));
+  var last = DateTime.now();
   while (DateTime.now().isBefore(end)) {
+    if (DateTime.now().difference(last).inSeconds >= 60) {
+      last = DateTime.now();
+      debugPrint('E2E: ждём «$what»… На экране: ${screenText()}');
+    }
     await settle(t, 250);
     for (var i = 0; i < fs.length; i++) {
       if (fs[i].evaluate().isNotEmpty) return i;
@@ -77,7 +82,8 @@ void main() {
       await t.enterText(fields.at(1), phrase);
       await t.tap(find.text('Сохранить фразу'));
       // сервер может попросить пароль (подтверждение действия) — тогда вводим
-      final i = await waitAny(t, [find.text('Подтвердите паролем'), find.text('Тест-группа')], 'подтверждение паролем или список чатов', seconds: 180);
+      // ключ из фразы считается нарочно долго (защита от подбора) — в отладочной сборке на эмуляторе это минуты
+      final i = await waitAny(t, [find.text('Подтвердите паролем'), find.text('Тест-группа')], 'подтверждение паролем или список чатов', seconds: 900);
       if (i == 0) {
         await t.enterText(find.descendant(of: find.byType(AlertDialog), matching: find.byType(TextField)), pass);
         await t.tap(find.text('Подтвердить'));
@@ -85,7 +91,7 @@ void main() {
     });
 
     await step('приглашение в группу', () async {
-      await waitFor(t, find.text('Тест-группа'), 'группа в списке чатов', seconds: 180);
+      await waitFor(t, find.text('Тест-группа'), 'группа в списке чатов', seconds: 600);
       await t.tap(find.text('Тест-группа').first);
       await waitFor(t, find.text('Вступить'), 'окно приглашения');
       await t.tap(find.text('Вступить'));
