@@ -86,6 +86,7 @@ void main() {
     // ошибки интерфейса (переполнение строк и т. п.) — собираем и показываем списком в конце
     final errs = <String>[];
     final prevOnError = FlutterError.onError;
+    final prevErrorWidget = ErrorWidget.builder; // приложение ставит свой — тест требует вернуть
     FlutterError.onError = (d) {
       final full = d.toString().split('\n');
       final i = full.indexWhere((l) => l.contains('relevant error-causing widget'));
@@ -198,6 +199,7 @@ void main() {
     });
     } finally {
       FlutterError.onError = prevOnError;
+      ErrorWidget.builder = prevErrorWidget;
     }
     if (errs.isNotEmpty) fail('ошибки интерфейса (${errs.length}): ${errs.toSet().take(8).join(' ‖ ')}');
   });
