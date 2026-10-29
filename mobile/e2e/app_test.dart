@@ -89,7 +89,10 @@ void main() {
     FlutterError.onError = (d) {
       final full = d.toString().split('\n');
       final i = full.indexWhere((l) => l.contains('relevant error-causing widget'));
-      final where = i >= 0 && i + 1 < full.length ? full[i + 1].trim() : '';
+      var where = i >= 0 ? full.skip(i + 1).take(2).map((l) => l.trim()).join(' ') : '';
+      // цепочка родителей — чтобы найти, какой именно виджет переполнился
+      final cr = full.where((l) => l.contains('creator:')).firstOrNull;
+      if (cr != null) where += ' | ${cr.trim().length > 600 ? cr.trim().substring(0, 600) : cr.trim()}';
       final line = '[$currentStep] ${d.exceptionAsString().split('\n').first} — $where';
       errs.add(line);
       debugPrint('E2E-ERR: $line');
