@@ -118,7 +118,7 @@ void main() {
       final composer = find.byType(TextField).last;
       await t.enterText(composer, 'Сообщение из автотеста');
       await settle(t);
-      await t.tap(find.byTooltip('Отправить').last);
+      await t.tap(find.byIcon(Icons.send).last);
       await waitFor(
         t,
         find.byWidgetPredicate((w) => w is RichText && w.text.toPlainText().contains('Сообщение из автотеста')),
@@ -129,7 +129,7 @@ void main() {
     await step('крупные эмодзи', () async {
       await t.enterText(find.byType(TextField).last, '👍');
       await settle(t);
-      await t.tap(find.byTooltip('Отправить').last);
+      await t.tap(find.byIcon(Icons.send).last);
       await waitFor(t, find.byWidgetPredicate((w) => w is Text && w.data == '👍' && (w.style?.fontSize ?? 0) >= 40), 'крупный 👍 без пузыря');
     });
 

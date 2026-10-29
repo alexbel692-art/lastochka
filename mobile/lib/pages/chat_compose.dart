@@ -384,15 +384,20 @@ extension _ChatCompose on _ChatPageState {
               if (empty && _editing == null)
                 IconButton(tooltip: 'Голосовое сообщение', icon: Icon(Icons.mic_none, color: hint), onPressed: _startRec)
               else
-                // нажатие — отправить, долгое нажатие (правая кнопка мыши) — отправить позже
-                InkWell(
-                  customBorder: const CircleBorder(),
-                  onTap: _send,
-                  onLongPress: _editing == null ? _schedule : null,
-                  onSecondaryTap: _editing == null ? _schedule : null,
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Icon(_editing != null ? Icons.check_circle : Icons.send, color: accent, semanticLabel: _editing != null ? 'Сохранить' : 'Отправить'),
+                // нажатие — отправить, долгое нажатие (правая кнопка мыши) — отправить позже;
+                // подсказка — для наведения мышью и экранного диктора (долгое нажатие занято «отправить позже»)
+                Tooltip(
+                  message: _editing != null ? 'Сохранить' : 'Отправить',
+                  triggerMode: TooltipTriggerMode.manual,
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: _send,
+                    onLongPress: _editing == null ? _schedule : null,
+                    onSecondaryTap: _editing == null ? _schedule : null,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Icon(_editing != null ? Icons.check_circle : Icons.send, color: accent, semanticLabel: _editing != null ? 'Сохранить' : 'Отправить'),
+                    ),
                   ),
                 ),
             ]),

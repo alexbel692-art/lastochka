@@ -23,7 +23,7 @@ if [ "$code" = "124" ] || [ "$code" = "130" ]; then
   exit 1
 fi
 if [ "$code" != "0" ]; then
-  msg=$(grep -E "не дождались|нажатие не сработало|TestFailure|Expected|══╡" ../../e2e-out/test.txt | tail -10 | tr '\n' ' ' | cut -c1-2500)
+  msg=$(grep -A6 -E "не дождались|нажатие не сработало|TestFailure|Expected|══╡|could not find|Bad state" ../../e2e-out/test.txt | grep -v "^--$" | tail -14 | tr '\n' ' ' | cut -c1-2500)
   echo "::error title=Автотест интерфейса::$msg"
   exit 1
 fi
