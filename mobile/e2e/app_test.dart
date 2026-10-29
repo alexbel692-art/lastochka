@@ -72,7 +72,7 @@ void main() {
       await t.enterText(fields.at(0), server);
       await t.enterText(fields.at(1), user);
       await t.enterText(fields.at(2), pass);
-      await t.tap(find.text('Войти'));
+      await t.testTextInput.receiveAction(TextInputAction.done);
     });
 
     await step('секретная фраза', () async {
@@ -80,7 +80,8 @@ void main() {
       final fields = find.byType(TextField);
       await t.enterText(fields.at(0), phrase);
       await t.enterText(fields.at(1), phrase);
-      await t.tap(find.text('Сохранить фразу'));
+      // Enter во втором поле — то же, что кнопка (кнопку на маленьком экране может закрыть всплывающая плашка)
+      await t.testTextInput.receiveAction(TextInputAction.done);
       // сервер может попросить пароль (подтверждение действия) — тогда вводим
       // ключ из фразы считается нарочно долго (защита от подбора) — в отладочной сборке на эмуляторе это минуты
       final i = await waitAny(t, [find.text('Подтвердите паролем'), find.text('Тест-группа')], 'подтверждение паролем или список чатов', seconds: 900);

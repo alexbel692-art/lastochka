@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Внутри эмулятора Android: автотест интерфейса (e2e/app_test.dart) против Synapse на хосте (10.0.2.2:8008),
+# Версия не задаётся (0.0.0) — так Ласточка не проверяет обновления и не закрывает кнопки плашкой.
 # затем проверка на сервере, что сообщение Ласточки действительно дошло.
 set -u
 cd src/mobile
@@ -8,8 +9,7 @@ adb wait-for-device
 adb logcat -c
 code=0
 flutter test integration_test/app_test.dart -d emulator-5554 \
-  --dart-define=E2E_SERVER=http://10.0.2.2:8008 --dart-define=E2E_USER=alice --dart-define=E2E_PASS="$E2E_PASS" \
-  --dart-define=APP_VERSION=0.0.0-e2e 2>&1 | tee ../../e2e-out/test.txt
+  --dart-define=E2E_SERVER=http://10.0.2.2:8008 --dart-define=E2E_USER=alice --dart-define=E2E_PASS="$E2E_PASS" 2>&1 | tee ../../e2e-out/test.txt
 code=${PIPESTATUS[0]}
 adb logcat -d > ../../e2e-out/logcat.txt
 adb exec-out screencap -p > ../../e2e-out/screen.png || true
