@@ -348,7 +348,7 @@ class _ChatsPageState extends State<ChatsPage> {
     final pick = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
-      builder: (c) => SafeArea(
+      builder: (c) => ScrollSheet(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           for (final f in list)
             CheckboxListTile(
@@ -468,7 +468,7 @@ class _ChatsPageState extends State<ChatsPage> {
     final a = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
-      builder: (c) => SafeArea(
+      builder: (c) => ScrollSheet(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           if (canCall(room)) ...[
             ListTile(leading: const Icon(Icons.call_outlined), title: const Text('Аудиозвонок'), onTap: () => Navigator.pop(c, 'call')),

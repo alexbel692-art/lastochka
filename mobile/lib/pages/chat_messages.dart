@@ -138,7 +138,7 @@ extension _ChatMessages on _ChatPageState {
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (c) => SafeArea(
+      builder: (c) => ScrollSheet(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           if (!e.redacted)
             Padding(
@@ -275,7 +275,7 @@ extension _ChatMessages on _ChatPageState {
     final pick = await showModalBottomSheet<Object>(
       context: context,
       showDragHandle: true,
-      builder: (c) => SafeArea(
+      builder: (c) => ScrollSheet(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           const Padding(padding: EdgeInsets.only(bottom: 4), child: Text('Напомнить об этом сообщении', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15))),
           for (final (label, at) in reminderChoices(now))
@@ -474,7 +474,7 @@ extension _ChatMessages on _ChatPageState {
     final a = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
-      builder: (c) => SafeArea(
+      builder: (c) => ScrollSheet(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           const Padding(padding: EdgeInsets.only(bottom: 6), child: Text('Сообщение не отправлено — уйдёт само, когда появится связь', style: TextStyle(fontSize: 13.5))),
           ListTile(leading: const Icon(Icons.refresh_rounded), title: const Text('Отправить сейчас'), onTap: () => Navigator.pop(c, 'again')),

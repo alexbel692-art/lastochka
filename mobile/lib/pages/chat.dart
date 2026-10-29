@@ -55,6 +55,7 @@ import 'verify.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/bubble_shape.dart';
+import '../widgets/adaptive.dart' show ScrollSheet;
 import 'chats.dart';
 import 'room_info.dart';
 import 'thread.dart';

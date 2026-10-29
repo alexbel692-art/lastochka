@@ -61,3 +61,11 @@ class _DialogShellState<T> extends State<_DialogShell<T>> {
     );
   }
 }
+
+/// Содержимое нижнего меню: на маленьком экране прокручивается, а не обрезается снизу.
+class ScrollSheet extends StatelessWidget {
+  final Widget child;
+  const ScrollSheet({super.key, required this.child});
+  @override
+  Widget build(BuildContext context) => SafeArea(child: SingleChildScrollView(child: child));
+}

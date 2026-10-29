@@ -171,7 +171,7 @@ void main() {
       await settle(t, 600);
       await waitFor(t, find.text('Настройки'), 'нижнее меню');
       await t.tap(find.text('Настройки').last);
-      await waitFor(t, find.text('Оформление'), 'настройки');
+      await waitFor(t, find.text('Конфиденциальность'), 'настройки');
       await t.scrollUntilVisible(find.text('Оформление').last, 300, scrollable: find.byType(Scrollable).first);
       await t.tap(find.text('Оформление').last);
       await waitFor(t, find.byTooltip('Зелёный'), 'выбор цвета');

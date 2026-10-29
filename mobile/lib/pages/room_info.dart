@@ -15,6 +15,7 @@ import '../main.dart';
 import '../widgets/avatar.dart';
 import 'room_media.dart';
 import '../system/clipboard.dart';
+import '../widgets/adaptive.dart' show ScrollSheet;
 
 /// Информация о чате (как профиль в Telegram): звонки, уведомления, участники, выход.
 class RoomInfoPage extends StatefulWidget {
@@ -319,7 +320,7 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
     final a = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
-      builder: (c) => SafeArea(
+      builder: (c) => ScrollSheet(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(leading: Avatar(mxc: u.avatarUrl, name: u.calcDisplayname(), size: 40), title: Text(u.calcDisplayname()), subtitle: Text(u.id)),
           ListTile(leading: const Icon(Icons.chat_outlined), title: const Text('Написать'), onTap: () => Navigator.pop(c, 'dm')),
@@ -419,7 +420,7 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
     final who = await showModalBottomSheet<User>(
       context: context,
       showDragHandle: true,
-      builder: (c) => SafeArea(
+      builder: (c) => ScrollSheet(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Text(banned.isEmpty ? 'Никто не заблокирован' : 'Заблокированы: ${banned.length}', style: const TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
@@ -461,7 +462,7 @@ class _RoomInfoPageState extends State<RoomInfoPage> {
     final st = await showModalBottomSheet<PushRuleState>(
       context: context,
       showDragHandle: true,
-      builder: (c) => SafeArea(
+      builder: (c) => ScrollSheet(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           for (final (s, icon, title) in [
             (PushRuleState.notify, Icons.notifications_active_outlined, 'Все уведомления'),
