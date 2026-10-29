@@ -406,8 +406,8 @@ extension _ChatCompose on _ChatPageState {
               key: ValueKey('panel$_panelTab'),
               initialTab: _panelTab,
               room: room,
-              // пока закрывается клавиатура — меньше, чтобы экран не переполнялся
-              height: min(320, (MediaQuery.sizeOf(context).height - MediaQuery.viewInsetsOf(context).bottom) * 0.4),
+              // не больше 40% места под чат (без шапки, закрепа и клавиатуры) — иначе поле ввода не помещается
+              height: min(320, min(_paneH, MediaQuery.sizeOf(context).height - MediaQuery.viewInsetsOf(context).bottom) * 0.4),
               onEmoji: (em) {
                 final s = _text.selection;
                 final t = _text.text;

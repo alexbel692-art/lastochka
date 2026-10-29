@@ -92,6 +92,12 @@ class _ChatPageState extends State<ChatPage> {
   StreamSubscription? _syncSub;
   Event? _replyTo, _editing;
   bool _loadingMore = false, _panel = false, _showDown = false;
+  // высота области чата (без шапки и клавиатуры) — по ней размер панели эмодзи, чтобы поле ввода помещалось
+  double _paneH = double.infinity;
+  double _measure(BoxConstraints box) {
+    _paneH = box.maxHeight;
+    return box.maxWidth;
+  }
   String? _flash;
   int _pinIdx = -1;
   // запись голосового
@@ -436,7 +442,7 @@ class _ChatPageState extends State<ChatPage> {
         child: Stack(children: [
           LayoutBuilder(
         builder: (context, box) => _PaneWidth(
-          width: box.maxWidth,
+          width: _measure(box),
           child: ChatWallpaper(
             child: Column(children: [
               _pinBar(context),
