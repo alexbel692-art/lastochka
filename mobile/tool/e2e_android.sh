@@ -16,6 +16,8 @@ adb logcat -d > ../../e2e-out/logcat.txt
 adb exec-out screencap -p > ../../e2e-out/screen.png || true
 # ход теста — всегда (шаги и что было на экране, если ждали)
 steps=$( (grep -E "E2E:" ../../e2e-out/test.txt; grep -E "flutter.*E2E:" ../../e2e-out/logcat.txt | sed 's/.*E2E:/E2E:/') | tail -12 | tr '\n' ' ' | cut -c1-2500)
+errs=$(grep -E "E2E-ERR:" ../../e2e-out/test.txt | sort -u | head -8 | tr '\n' ' ' | cut -c1-2500)
+[ -n "$errs" ] && echo "::warning title=Автотест: ошибки интерфейса::$errs"
 [ -z "$steps" ] && steps="шагов нет; конец вывода: $(tail -8 ../../e2e-out/test.txt | tr '\n' ' ' | cut -c1-1500)"
 echo "::notice title=Автотест: шаги::$steps"
 if [ "$code" = "124" ] || [ "$code" = "130" ]; then

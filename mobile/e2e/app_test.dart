@@ -80,6 +80,15 @@ void main() {
 
   testWidgets('Ласточка: вход, защита, чат, эмодзи, напоминание, стикеры, оформление', (t) async {
     expect(pass, isNotEmpty, reason: 'нужен --dart-define=E2E_PASS');
+    // ошибки интерфейса (переполнение строк и т. п.) — собираем и показываем списком в конце
+    final errs = <String>[];
+    final prevOnError = FlutterError.onError;
+    FlutterError.onError = (d) {
+      final line = '${d.exceptionAsString().split('\n').first} — ${d.context?.toDescription() ?? ''} ${d.library ?? ''}';
+      errs.add(line);
+      debugPrint('E2E-ERR: $line');
+    };
+    try {
     app.main(const []);
 
     await step('экран входа', () async {
@@ -157,7 +166,9 @@ void main() {
     });
 
     await step('цвет оформления', () async {
-      await t.pageBack();
+      // системная кнопка «Назад» Android
+      await t.binding.handlePopRoute();
+      await settle(t, 600);
       await waitFor(t, find.text('Настройки'), 'нижнее меню');
       await t.tap(find.text('Настройки').last);
       await waitFor(t, find.text('Оформление'), 'настройки');
@@ -168,5 +179,9 @@ void main() {
       await settle(t, 600);
       expect(accents[Appearance.instance.accent.value].name, 'Зелёный');
     });
+    } finally {
+      FlutterError.onError = prevOnError;
+    }
+    if (errs.isNotEmpty) fail('ошибки интерфейса (${errs.length}): ${errs.toSet().take(8).join(' ‖ ')}');
   });
 }
