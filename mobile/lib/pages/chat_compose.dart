@@ -408,6 +408,25 @@ extension _ChatCompose on _ChatPageState {
                 final start = s.isValid ? s.start : t.length, end = s.isValid ? s.end : t.length;
                 _text.value = TextEditingValue(text: t.replaceRange(start, end, em), selection: TextSelection.collapsed(offset: start + em.length));
               },
+              onGif: (g) async {
+                final reply = _replyTo;
+                _set(() {
+                  _replyTo = null;
+                  _panel = false;
+                });
+                try {
+                  if (g is SavedGif) {
+                    await sendSavedGif(room, g, inReplyTo: reply);
+                  } else if (g is GifResult) {
+                    final b = await downloadGif(g.full);
+                    if (b == null) throw StateError('gif');
+                    await sendGifBytes(room, b, inReplyTo: reply);
+                  }
+                  _toBottom();
+                } catch (_) {
+                  _toast('GIF не отправлена');
+                }
+              },
               onSticker: (st) async {
                 final reply = _replyTo;
                 _set(() {

@@ -30,6 +30,8 @@ import '../chat/autodelete.dart';
 import '../chat/gallery.dart';
 import '../chat/drafts.dart';
 import '../chat/emoji_only.dart';
+import '../chat/gifs.dart';
+import '../system/perf.dart' show remoteSession;
 import '../chat/presence_text.dart';
 import '../chat/reminders.dart';
 import '../chat/formatting.dart';

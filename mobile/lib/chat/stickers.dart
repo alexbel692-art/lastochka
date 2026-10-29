@@ -3,12 +3,13 @@
 // и наборы чата (im.ponies.room_emotes). Встроенный стикер загружается на сервер
 // один раз, дальше переиспользуется ссылка mxc.
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image/image.dart' as img;
+import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,20 +19,26 @@ import '../main.dart';
 import 'autodelete.dart';
 import '../system/diag.dart';
 import '../widgets/mxc_image.dart';
+import 'gif_panel.dart';
+import 'save_media.dart';
+import 'sticker_packs.dart';
 
 class StickerImg {
   final String key, body;
   final String? asset; // встроенный стикер
   final Uri? url; // mxc://
   final Map<String, Object?> info;
-  StickerImg({required this.key, required this.body, this.asset, this.url, this.info = const {}});
+  final String? packId; // свой набор (для ссылки «добавить набор» у получателя)
+  StickerImg({required this.key, required this.body, this.asset, this.url, this.info = const {}, this.packId});
 }
 
 class StickerPack {
   final String name;
   final List<StickerImg> items;
   final bool own;
-  StickerPack(this.name, this.items, {this.own = false});
+  /// Свой набор: ownPackId («Мои стикеры») или id набора; null — встроенный или набор чата.
+  final String? id;
+  StickerPack(this.name, this.items, {this.own = false, this.id});
 }
 
 // Набор «Смайлы»: объёмные эмодзи Noto 3D (Google, свободная лицензия — assets/stickers/NOTO-LICENSE.txt)
@@ -52,7 +59,7 @@ const _builtin = [
   ('Мемы', [('m_lapki', 'У меня лапки'), ('m_podozr', 'Подозрительно…'), ('m_ya_vse', 'Я всё'), ('m_kofe', 'Мой кофе!'), ('m_ponedelnik', 'Понедельник…'), ('m_hochu', 'Хочу!'), ('m_ponyatiya', 'Без понятия'), ('m_shpion', 'Я только посмотреть'), ('m_pyatnitsa', 'Пятница!'), ('m_dedlain', 'Дедлайн!'), ('m_obida', 'Обиделась'), ('m_slezhu', 'Слежу'), ('m_spat', 'Спать пора'), ('m_obnimashki', 'Обнимашки')]),
 ];
 
-List<StickerImg> _fromImages(Map? images) {
+List<StickerImg> _fromImages(Map? images, [String? packId]) {
   final out = <StickerImg>[];
   if (images == null) return out;
   for (final MapEntry(:key, :value) in images.entries) {
@@ -66,6 +73,7 @@ List<StickerImg> _fromImages(Map? images) {
       body: '${value['body'] ?? key}',
       url: url,
       info: value['info'] is Map ? Map<String, Object?>.from(value['info'] as Map) : const {},
+      packId: packId,
     ));
   }
   return out;
@@ -82,7 +90,12 @@ List<StickerPack> stickerPacks(Room room) {
       ]),
   ];
   final own = client.accountData['im.ponies.user_emotes']?.content;
-  packs.add(StickerPack('Мои стикеры', _fromImages(own?['images'] as Map?), own: true));
+  packs.add(StickerPack('Мои стикеры', _fromImages(own?['images'] as Map?, ownPackId), own: true, id: ownPackId));
+  for (final p in userPacks()) {
+    packs.add(StickerPack(p.name, [
+      for (final it in p.items) StickerImg(key: it.key, body: it.body, url: it.url, info: it.info, packId: p.id),
+    ], own: true, id: p.id));
+  }
   for (final ev in room.states['im.ponies.room_emotes']?.values ?? const <StrippedStateEvent>[]) {
     final items = _fromImages(ev.content['images'] as Map?);
     if (items.isEmpty) continue;
@@ -108,8 +121,11 @@ Future<Uri> _builtinMxc(StickerImg s) async {
 
 Future<void> sendSticker(Room room, StickerImg s, {Event? inReplyTo}) async {
   final url = s.url ?? await _builtinMxc(s);
+  // свой набор — со ссылкой на него: получатель сможет добавить набор целиком
+  final ref = s.packId == null ? null : await packRefFor(s.packId!);
   ensureCanSend(room);
-  await room.sendEvent({'body': s.body, 'url': url.toString(), 'info': {...s.info}, ...ttlExtra(room)}, type: EventTypes.Sticker, inReplyTo: inReplyTo);
+  await room.sendEvent({'body': s.body, 'url': url.toString(), 'info': {...s.info}, if (ref != null) packRefKey: ref, ...ttlExtra(room)},
+      type: EventTypes.Sticker, inReplyTo: inReplyTo);
 }
 
 Map<String, dynamic> _ownPack() => Map<String, dynamic>.from(client.accountData['im.ponies.user_emotes']?.content ?? {});
@@ -131,60 +147,14 @@ String _freeKey(Map<String, dynamic> images, String name) {
   return sc;
 }
 
-/// Свой набор: добавить картинки с устройства (уменьшаются до 512 точек, без сведений о съёмке).
-/// Стикеры в Matrix не шифруются — их видит сервер, поэтому личные фото сюда лучше не добавлять.
-Future<String> addImagesToOwnPack() async {
-  final xs = await ImagePicker().pickMultiImage(requestFullMetadata: false, limit: 30);
-  if (xs.isEmpty) return '';
-  final prev = _ownPack();
-  final images = Map<String, dynamic>.from(prev['images'] as Map? ?? {});
-  var added = 0;
-  for (final x in xs) {
-    try {
-      final png = await compute(_toSticker, await x.readAsBytes());
-      if (png == null) continue;
-      final uri = await client.uploadContent(png.$1, filename: 'sticker.png', contentType: 'image/png');
-      images[_freeKey(images, x.name)] = {
-        'url': uri.toString(),
-        'body': 'Стикер',
-        'info': {'w': png.$2, 'h': png.$3, 'mimetype': 'image/png', 'size': png.$1.length},
-        'usage': ['sticker'],
-      };
-      added++;
-    } catch (e) {
-      Diag.err('Свой стикер', e);
-    }
-  }
-  if (added > 0) await _saveOwn(prev, images);
-  return added == 0 ? 'Не удалось добавить картинки' : 'Добавлено в «Мои стикеры»: $added';
-}
-
-(Uint8List, int, int)? _toSticker(Uint8List bytes) {
-  var im = img.decodeImage(bytes);
-  if (im == null) return null;
-  im = img.bakeOrientation(im);
-  if (im.width > 512 || im.height > 512) {
-    im = im.width >= im.height ? img.copyResize(im, width: 512) : img.copyResize(im, height: 512);
-  }
-  im.exif = img.ExifData();
-  return (img.encodePng(im), im.width, im.height);
-}
-
-Future<void> removeFromOwnPack(String key) async {
-  final prev = _ownPack();
-  final images = Map<String, dynamic>.from(prev['images'] as Map? ?? {})..remove(key);
-  await _saveOwn(prev, images);
-}
-
-/// Поделиться своим набором в группе: он появится у всех участников во вкладке стикеров этого чата.
-Future<String> shareOwnPackToRoom(Room room) async {
-  final images = Map<String, dynamic>.from(_ownPack()['images'] as Map? ?? {});
-  if (images.isEmpty) return 'В «Моих стикерах» пока пусто';
+/// Поделиться набором в группе: он появится у всех участников во вкладке стикеров этого чата.
+Future<String> sharePackToRoom(Room room, String packId, String name) async {
+  final images = packImages(packId);
+  if (images.isEmpty) return 'В наборе пока пусто';
   if (!room.canChangeStateEvent('im.ponies.room_emotes')) return 'Нужны права администратора группы';
   final me = client.userID!;
-  final name = (await client.fetchOwnProfile()).displayName ?? me.localpart ?? 'участника';
-  await client.setRoomStateWithKey(room.id, 'im.ponies.room_emotes', 'lastochka_${me.localpart}', {
-    'pack': {'display_name': 'Стикеры $name'},
+  await client.setRoomStateWithKey(room.id, 'im.ponies.room_emotes', 'lastochka_${me.localpart}_$packId', {
+    'pack': {'display_name': packId == ownPackId ? 'Стикеры ${(await client.fetchOwnProfile()).displayName ?? me.localpart}' : name},
     'images': images,
   });
   return 'Набор доступен всем в этом чате';
@@ -237,15 +207,17 @@ class EmojiStickerPanel extends StatefulWidget {
   final Room room;
   final void Function(String emoji) onEmoji;
   final void Function(StickerImg s) onSticker;
+  /// GIF: сохранённая (SavedGif) или найденная (GifResult).
+  final void Function(Object gif)? onGif;
   final double height;
-  final int initialTab; // 0 — эмодзи, 1 — стикеры
-  const EmojiStickerPanel({super.key, required this.room, required this.onEmoji, required this.onSticker, this.height = 300, this.initialTab = 0});
+  final int initialTab; // 0 — эмодзи, 1 — стикеры, 2 — GIF
+  const EmojiStickerPanel({super.key, required this.room, required this.onEmoji, required this.onSticker, this.onGif, this.height = 300, this.initialTab = 0});
   @override
   State<EmojiStickerPanel> createState() => _EmojiStickerPanelState();
 }
 
 class _EmojiStickerPanelState extends State<EmojiStickerPanel> with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 2, vsync: this, initialIndex: widget.initialTab.clamp(0, 1));
+  late final TabController _tabs = TabController(length: widget.onGif == null ? 2 : 3, vsync: this, initialIndex: widget.initialTab.clamp(0, widget.onGif == null ? 1 : 2));
   List<String> _recent = [];
 
   @override
@@ -297,11 +269,13 @@ class _EmojiStickerPanelState extends State<EmojiStickerPanel> with SingleTicker
     if (msg.isNotEmpty) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  Future<void> _remove(StickerImg s) async {
+  bool get _desktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+
+  Future<void> _remove(StickerPack pk, StickerImg s) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (d) => AlertDialog(
-        title: const Text('Убрать стикер из «Моих»?'),
+        title: Text('Убрать стикер из «${pk.name}»?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
           FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Убрать')),
@@ -309,25 +283,136 @@ class _EmojiStickerPanelState extends State<EmojiStickerPanel> with SingleTicker
       ),
     );
     if (ok == true) {
-      await removeFromOwnPack(s.key);
+      await removeFromPack(pk.id!, s.key);
       if (mounted) setState(() {});
     }
   }
 
+  /// Картинки (и ZIP-архивы) с устройства → в набор.
+  Future<String> _addTo(String packId, {bool archive = false}) async {
+    final files = <(Uint8List, String)>[];
+    if (_desktop || archive) {
+      final picked = await FilePicker.pickFiles(
+        dialogTitle: archive ? 'Архив с картинками (ZIP)' : 'Картинки или архив для набора',
+        type: FileType.custom,
+        allowedExtensions: archive ? const ['zip'] : const ['png', 'jpg', 'jpeg', 'webp', 'gif', 'zip'],
+      );
+      for (final f in picked) {
+        files.add((await f.readAsBytes(), f.name));
+      }
+    } else {
+      final xs = await ImagePicker().pickMultiImage(requestFullMetadata: false, limit: 30);
+      for (final x in xs) {
+        files.add((await x.readAsBytes(), x.name));
+      }
+    }
+    if (files.isEmpty) return '';
+    final imgs = await compute(imagesFromFiles, files);
+    if (imgs.isEmpty) return 'Картинок не найдено (подходят PNG, JPG, WebP, GIF и ZIP с ними)';
+    final n = await addImagesToPack(packId, imgs);
+    return n == 0 ? 'Не удалось добавить картинки' : 'Добавлено стикеров: $n';
+  }
+
+  Future<String?> _askName(String title, [String initial = '']) async {
+    final c = TextEditingController(text: initial);
+    final r = await showDialog<String>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: Text(title),
+        content: TextField(controller: c, autofocus: true, maxLength: 64, decoration: const InputDecoration(hintText: 'Название набора'), onSubmitted: (v) => Navigator.pop(d, v)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(d, c.text), child: const Text('Готово')),
+        ],
+      ),
+    );
+    c.dispose();
+    return r == null || r.trim().isEmpty ? null : r.trim();
+  }
+
+  Future<void> _newPack() async {
+    final name = await _askName('Новый набор стикеров');
+    if (name == null) return;
+    await _run(() async {
+      final id = await createPack(name);
+      final msg = await _addTo(id);
+      return msg.isEmpty ? 'Набор «$name» создан — добавьте в него картинки' : msg;
+    }());
+  }
+
+  Future<String> _download(StickerPack pk) async {
+    final items = [for (final s in pk.items) if (s.url != null) PackItem(s.key, s.body, s.url!, s.info)];
+    if (items.isEmpty) return 'В наборе пока пусто';
+    final zip = await packZip(pk.name, items);
+    final where = await FilePicker.saveFile(dialogTitle: 'Сохранить набор', fileName: '${freeKey(const {}, pk.name)}.zip', bytes: zip, mimeType: 'application/zip');
+    return where == null ? '' : 'Набор сохранён архивом';
+  }
+
+  Future<void> _packMenu(StickerPack pk, String action) async {
+    final id = pk.id!;
+    switch (action) {
+      case 'add':
+        await _run(_addTo(id));
+      case 'zip':
+        await _run(_addTo(id, archive: true));
+      case 'rename':
+        final name = await _askName('Переименовать набор', pk.name);
+        if (name != null) await _run(renamePack(id, name).then((_) => ''));
+      case 'download':
+        await _run(_download(pk));
+      case 'room':
+        await _run(sharePackToRoom(widget.room, id, pk.name));
+      case 'delete':
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (d) => AlertDialog(
+            title: Text('Удалить набор «${pk.name}»?'),
+            content: const Text('Набор пропадёт на всех ваших устройствах. У тех, кто его уже добавил, он останется.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Отмена')),
+              FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Удалить')),
+            ],
+          ),
+        );
+        if (ok == true) await _run(deletePack(id).then((_) => 'Набор удалён'));
+    }
+    if (mounted) setState(() {});
+  }
+
   Widget _stickerTab() {
     final packs = stickerPacks(widget.room);
+    final hint = Theme.of(context).hintColor;
+    final canRoom = !widget.room.isDirectChat && widget.room.canChangeStateEvent('im.ponies.room_emotes');
     return CustomScrollView(slivers: [
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(onPressed: _busy ? null : _newPack, icon: const Icon(Icons.add_circle_outline, size: 18), label: const Text('Новый набор')),
+          ),
+        ),
+      ),
       for (final pk in packs) ...[
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 4, 0),
+            padding: const EdgeInsets.fromLTRB(12, 6, 0, 0),
             child: Row(children: [
-              Expanded(child: Text(pk.name, style: TextStyle(color: Theme.of(context).hintColor, fontSize: 13))),
-              if (pk.own) ...[
-                if (pk.items.isNotEmpty && !widget.room.isDirectChat && widget.room.canChangeStateEvent('im.ponies.room_emotes'))
-                  TextButton(onPressed: () => _run(shareOwnPackToRoom(widget.room)), child: const Text('В этот чат', style: TextStyle(fontSize: 12.5))),
-                TextButton.icon(onPressed: () => _run(addImagesToOwnPack()), icon: const Icon(Icons.add_photo_alternate_outlined, size: 18), label: const Text('Добавить', style: TextStyle(fontSize: 12.5))),
-              ],
+              Expanded(child: Text(pk.name, style: TextStyle(color: hint, fontSize: 13))),
+              if (pk.own && pk.id != null)
+                PopupMenuButton<String>(
+                  tooltip: 'Набор',
+                  icon: Icon(Icons.more_horiz, color: hint, size: 20),
+                  onSelected: (a) => _packMenu(pk, a),
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'add', child: Text('Добавить картинки')),
+                    if (!_desktop) const PopupMenuItem(value: 'zip', child: Text('Добавить из архива (ZIP)')),
+                    if (pk.id != ownPackId) const PopupMenuItem(value: 'rename', child: Text('Переименовать')),
+                    if (pk.items.isNotEmpty) const PopupMenuItem(value: 'download', child: Text('Скачать набор (ZIP)')),
+                    if (pk.items.isNotEmpty && canRoom) const PopupMenuItem(value: 'room', child: Text('Добавить в этот чат')),
+                    if (pk.id != ownPackId) const PopupMenuItem(value: 'delete', child: Text('Удалить набор')),
+                  ],
+                ),
             ]),
           ),
         ),
@@ -335,8 +420,8 @@ class _EmojiStickerPanelState extends State<EmojiStickerPanel> with SingleTicker
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: Text('«Добавить» — свои картинки; или долгое нажатие на стикер в чате → «В мои стикеры». Удалить — долгое нажатие на стикер здесь.',
-                  style: TextStyle(color: Theme.of(context).hintColor, fontSize: 12)),
+              child: Text('«…» → «Добавить картинки» (можно архив ZIP). Или долгое нажатие на стикер в чате → «В мои стикеры». Нажатие на чужой стикер в чате — добавить его набор целиком.',
+                  style: TextStyle(color: hint, fontSize: 12)),
             ),
           ),
         SliverGrid(
@@ -348,8 +433,8 @@ class _EmojiStickerPanelState extends State<EmojiStickerPanel> with SingleTicker
                 child: InkWell(
                   borderRadius: BorderRadius.circular(10),
                   onTap: () => widget.onSticker(s),
-                  onLongPress: pk.own ? () => _remove(s) : null,
-                  onSecondaryTap: pk.own ? () => _remove(s) : null,
+                  onLongPress: pk.own && pk.id != null ? () => _remove(pk, s) : null,
+                  onSecondaryTap: pk.own && pk.id != null ? () => _remove(pk, s) : null,
                   child: Padding(
                     padding: const EdgeInsets.all(4),
                     child: s.asset != null ? Image.asset(s.asset!, fit: BoxFit.contain) : MxcImage(mxc: s.url!, size: 160, fit: BoxFit.contain),
@@ -368,10 +453,122 @@ class _EmojiStickerPanelState extends State<EmojiStickerPanel> with SingleTicker
     return SizedBox(
       height: widget.height,
       child: Column(children: [
-        TabBar(controller: _tabs, tabs: const [Tab(text: 'Эмодзи', height: 38), Tab(text: 'Стикеры', height: 38)]),
+        TabBar(controller: _tabs, tabs: [
+          const Tab(text: 'Эмодзи', height: 38),
+          const Tab(text: 'Стикеры', height: 38),
+          if (widget.onGif != null) const Tab(text: 'GIF', height: 38),
+        ]),
         if (_busy) const LinearProgressIndicator(minHeight: 2),
-        Expanded(child: TabBarView(controller: _tabs, children: [_emojiTab(), _stickerTab()])),
+        Expanded(
+          child: TabBarView(controller: _tabs, children: [
+            _emojiTab(),
+            _stickerTab(),
+            if (widget.onGif != null) GifTab(onSaved: widget.onGif!, onFound: widget.onGif!),
+          ]),
+        ),
       ]),
+    );
+  }
+}
+
+/// Нажатие на стикер в чате (как в Telegram): его набор — посмотреть и добавить целиком,
+/// а также «В мои стикеры» и «Сохранить».
+Future<void> showStickerPackSheet(BuildContext context, Event e) => showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => _PackSheet(event: e),
+    );
+
+class _PackSheet extends StatefulWidget {
+  final Event event;
+  const _PackSheet({required this.event});
+  @override
+  State<_PackSheet> createState() => _PackSheetState();
+}
+
+class _PackSheetState extends State<_PackSheet> {
+  late final Map<String, Object?>? _ref = widget.event.content.tryGetMap<String, Object?>(packRefKey);
+  late final Future<(String, List<PackItem>)?>? _pack = _ref == null ? null : fetchPack(_ref);
+  bool _busy = false;
+
+  void _toast(String s) => ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(s)));
+
+  Future<void> _do(Future<String> f) async {
+    setState(() => _busy = true);
+    try {
+      _toast(await f);
+    } catch (err) {
+      Diag.err('Набор стикеров', err);
+      _toast('Не получилось');
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    final manifest = _ref?['manifest'] as String?;
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.75),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (_pack == null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text('У этого стикера нет набора — его можно добавить к себе по одному', style: TextStyle(color: hint)),
+            )
+          else
+            Flexible(
+              child: FutureBuilder<(String, List<PackItem>)?>(
+                future: _pack,
+                builder: (context, s) {
+                  if (s.connectionState != ConnectionState.done) return const Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator());
+                  final p = s.data;
+                  if (p == null) {
+                    return Padding(padding: const EdgeInsets.all(16), child: Text('Набор не загрузился — возможно, автор его удалил', style: TextStyle(color: hint)));
+                  }
+                  final (name, items) = p;
+                  final added = manifest != null && packAdded(manifest);
+                  return Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+                    Text('${items.length} стикер${items.length % 10 == 1 && items.length % 100 != 11 ? '' : items.length % 10 >= 2 && items.length % 10 <= 4 && (items.length % 100 < 12 || items.length % 100 > 14) ? 'а' : 'ов'}',
+                        style: TextStyle(color: hint, fontSize: 13)),
+                    Flexible(
+                      child: GridView.extent(
+                        shrinkWrap: true,
+                        maxCrossAxisExtent: 84,
+                        padding: const EdgeInsets.all(8),
+                        children: [for (final it in items) Padding(padding: const EdgeInsets.all(4), child: MxcImage(mxc: it.url, size: 160, fit: BoxFit.contain))],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+                        onPressed: added || _busy || manifest == null
+                            ? null
+                            : () => _do(addPackFromManifest(manifest, name, items).then((_) {
+                                  if (mounted) setState(() {});
+                                  return 'Набор «$name» добавлен';
+                                })),
+                        icon: Icon(added ? Icons.check : Icons.add),
+                        label: Text(added ? 'Набор уже добавлен' : 'Добавить набор'),
+                      ),
+                    ),
+                  ]);
+                },
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              TextButton.icon(onPressed: _busy ? null : () => _do(addToOwnPack(widget.event)), icon: const Icon(Icons.emoji_emotions_outlined), label: const Text('В мои стикеры')),
+              TextButton.icon(onPressed: () => saveMedia(context, widget.event), icon: const Icon(Icons.download_rounded), label: const Text('Сохранить')),
+            ]),
+          ),
+        ]),
+      ),
     );
   }
 }

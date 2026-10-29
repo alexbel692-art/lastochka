@@ -150,10 +150,12 @@ jobs:
       # APK собирается БЕЗ ключа подписи (временной подписью сборки) — настоящую подпись ставит отдельный
       # этап android-sign на чистой машине, где не работает ни код сборки, ни сторонние библиотеки
       - name: Сборка APK
+        env:
+          GIPHY_KEY: ${{ secrets.GIPHY_KEY }}
         id: apk
         run: |
           mkdir -p ../dist
-          B="--release --dart-define=APP_VERSION=$V --build-name=$V --build-number=${{ github.run_number }}"
+          B="--release --dart-define=APP_VERSION=$V --dart-define=GIPHY_KEY=$GIPHY_KEY --build-name=$V --build-number=${{ github.run_number }}"
           # отдельные APK под тип процессора (в 3 раза меньше) — их и ставит автообновление;
           # общий APK — для ручной установки и для обновления с версий до 4.5
           grep -q LASTOCHKA_ABI android/app/build.gradle.kts || { echo "::error::нет фильтра ABI в build.gradle.kts"; exit 1; }
@@ -254,8 +256,10 @@ jobs:
       # Без платной подписи Apple: собираем приложение без подписи и упаковываем в .ipa.
       # Поставить на iPhone можно через Sideloadly/AltStore со своим Apple ID.
       - name: Сборка iOS
+        env:
+          GIPHY_KEY: ${{ secrets.GIPHY_KEY }}
         run: |
-          tool/annotate.sh "ios config" flutter build ios --release --no-codesign --config-only --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
+          tool/annotate.sh "ios config" flutter build ios --release --no-codesign --config-only --dart-define=APP_VERSION="$V" --dart-define=GIPHY_KEY="$GIPHY_KEY" --build-name="$V" --build-number="${{ github.run_number }}"
           cd ios
           ../tool/annotate.sh "build ios" xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release \
             -sdk iphoneos -destination generic/platform=iOS -derivedDataPath build/dd \
@@ -294,7 +298,9 @@ jobs:
           else tool/annotate.sh "macos pub get" flutter pub get; fi
           dart run flutter_launcher_icons
       - name: Сборка macOS
-        run: tool/annotate.sh "build macos" flutter build macos --release --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
+        env:
+          GIPHY_KEY: ${{ secrets.GIPHY_KEY }}
+        run: tool/annotate.sh "build macos" flutter build macos --release --dart-define=APP_VERSION="$V" --dart-define=GIPHY_KEY="$GIPHY_KEY" --build-name="$V" --build-number="${{ github.run_number }}"
       - name: Образ диска
         run: |
           APP=build/macos/Build/Products/Release/Lastochka.app
@@ -334,7 +340,9 @@ jobs:
           else tool/annotate.sh "windows pub get" flutter pub get; fi
           dart run flutter_launcher_icons
       - name: Сборка Windows
-        run: tool/annotate.sh "build windows" flutter build windows --release --dart-define=APP_VERSION="$V" --build-name="$V" --build-number="${{ github.run_number }}"
+        env:
+          GIPHY_KEY: ${{ secrets.GIPHY_KEY }}
+        run: tool/annotate.sh "build windows" flutter build windows --release --dart-define=APP_VERSION="$V" --dart-define=GIPHY_KEY="$GIPHY_KEY" --build-name="$V" --build-number="${{ github.run_number }}"
       # Проигрыватель видео (mpv + FFmpeg): сборка из media_kit — 2023 года, без исправлений безопасности FFmpeg
       # с тех пор. Подменяем libmpv-2.dll свежей сборкой mpv (shinchiro/mpv-winbuild-cmake, обычная x86_64 —
       # без требования AVX2). Версия закреплена тегом и отпечатком SHA-256; не сошлось — сборка останавливается.

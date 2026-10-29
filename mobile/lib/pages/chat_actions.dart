@@ -114,7 +114,10 @@ extension _ChatActions on _ChatPageState {
         final lower = name.toLowerCase();
         final asOriginal = original && RegExp(r'\.(jpe?g|png|webp)$').hasMatch(lower) ? await cleanOriginal(bytes) : null;
         if (original && asOriginal == null && RegExp(r'\.(jpe?g|png|webp)$').hasMatch(lower)) notOriginal++;
-        if (asOriginal != null) {
+        if (lower.endsWith('.gif') && gifSize(bytes) != null) {
+          // GIF — как есть (анимация), без комментариев внутри файла
+          await sendGifBytes(room, bytes, inReplyTo: reply);
+        } else if (asOriginal != null) {
           ensureCanSend(room);
           await room.sendFileEvent(MatrixFile(bytes: asOriginal, name: name), inReplyTo: reply, extraContent: {...captionContent(single, name), ...ttlExtra(room)});
         } else if (RegExp(r'\.(jpe?g|png|webp)$').hasMatch(lower)) {
@@ -394,6 +397,14 @@ extension _ChatActions on _ChatPageState {
             failed++;
           }
         } else {
+          // GIF — анимацией, без перекодирования
+          if (m.name.toLowerCase().endsWith('.gif')) {
+            final g = await (m.original ?? m.bytes)!();
+            if (g != null && gifSize(g) != null) {
+              await sendGifBytes(room, g, inReplyTo: r);
+              continue;
+            }
+          }
           // в оригинале: исходный файл без перекодирования, но без места съёмки — файлом, как в Telegram
           if (original) {
             final src = await (m.original ?? m.bytes)!();
@@ -479,7 +490,9 @@ extension _ChatActions on _ChatPageState {
           for (final x in res)
             x.type == AssetType.video
                 ? _Media(x.title ?? 'Видео.mp4', video: true, path: () async => (await x.file)?.path)
-                : _Media('${x.title ?? 'photo'}.jpg', bytes: () => x.thumbnailDataWithSize(const ThumbnailSize(2560, 2560), quality: 92), original: () => x.originBytes),
+                : (x.mimeType == 'image/gif' || (x.title ?? '').toLowerCase().endsWith('.gif'))
+                    ? _Media('${x.title ?? 'animation'}${(x.title ?? '').toLowerCase().endsWith('.gif') ? '' : '.gif'}', bytes: () => x.originBytes)
+                    : _Media('${x.title ?? 'photo'}.jpg', bytes: () => x.thumbnailDataWithSize(const ThumbnailSize(2560, 2560), quality: 92), original: () => x.originBytes),
         ]);
       } else if (a == 'photo') {
         // системный выбор: можно отметить несколько фото и видео — уйдут альбомом

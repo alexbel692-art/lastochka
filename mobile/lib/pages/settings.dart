@@ -163,6 +163,30 @@ class _SettingsPageState extends State<SettingsPage> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _giphyKeyDialog() async {
+    final c = TextEditingController(text: _p?.getString('gif.giphyKey') ?? '');
+    final r = await showDialog<String>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: const Text('Ключ GIPHY'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Создайте приложение на developers.giphy.com (тип «API») и вставьте его ключ. Пусто — ключ из сборки Ласточки, если он там задан.',
+              style: TextStyle(fontSize: 13.5)),
+          const SizedBox(height: 10),
+          TextField(controller: c, autocorrect: false, enableIMEPersonalizedLearning: false, decoration: const InputDecoration(hintText: 'Ключ API')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(d, c.text.trim()), child: const Text('Сохранить')),
+        ],
+      ),
+    );
+    c.dispose();
+    if (r == null) return;
+    await _p?.setString('gif.giphyKey', r);
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(r.isEmpty ? 'Ключ убран' : 'Ключ сохранён')));
+  }
+
   void _hotkeys() {
     final mod = Platform.isMacOS ? '⌘' : 'Ctrl';
     final rows = [
@@ -431,6 +455,9 @@ class _SettingsPageState extends State<SettingsPage> {
         _row(Icons.block, 'Заблокированные', sub: client.ignoredUsers.isEmpty ? 'Никого' : '${client.ignoredUsers.length}', onTap: _blocked),
         _switch(Icons.how_to_reg_outlined, 'Принимать личные чаты автоматически', 'От коллег с вашего сервера — без нажатия «Вступить»', _pref('invites.autoAccept'), (v) => _set('invites.autoAccept', v)),
         _row(Icons.data_usage, 'Хранилище', sub: 'Сколько места занято, очистка кэша', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StoragePage()))),
+        _header('GIF'),
+        _switch(Icons.gif_box_outlined, 'Поиск GIF', 'Через GIPHY: он видит запрос и адрес устройства. «Мои GIF» работают и без поиска', _pref('gif.search'), (v) => _set('gif.search', v)),
+        _row(Icons.key_outlined, 'Ключ GIPHY', sub: 'Нужен для поиска; бесплатный — на developers.giphy.com', onTap: _giphyKeyDialog),
         _header('Звонки'),
         _switch(Icons.graphic_eq_rounded, 'Шумо- и эхоподавление', 'Убирает гул, стук клавиш и эхо из колонок. Выключите, если голос звучит «как из бочки»', micNoise, (v) async {
           micNoise = v;

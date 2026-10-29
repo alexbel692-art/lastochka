@@ -86,6 +86,9 @@ class _ImageState extends State<_Image> {
   bool get sticker => widget.sticker;
   Size? get box => widget.box;
 
+  /// GIF — целиком (с анимацией), а не уменьшенной неподвижной копией; на RDP — неподвижной (меньше нагрузка).
+  bool get _gif => isGifEvent(event) && !remoteSession && ((event.content.tryGetMap<String, Object?>('info')?['size'] as num?)?.toInt() ?? 0) <= maxGifBytes;
+
   Future<Uint8List?> _load({bool full = false}) => _images.putIfAbsent('${event.eventId}$full', () async {
         try {
           final f = await event.downloadAndDecryptAttachment(getThumbnail: !full && event.hasThumbnail);
@@ -117,10 +120,10 @@ class _ImageState extends State<_Image> {
         ? SizedBox(width: box!.width, height: box!.height, child: child)
         : SizedBox(width: maxW, child: AspectRatio(aspectRatio: sticker ? 1 : ratio.clamp(0.5, 2.5), child: child));
     return MouseRegion(
-      cursor: sticker ? MouseCursor.defer : SystemMouseCursors.click,
+      cursor: SystemMouseCursors.click,
       child: GestureDetector(
       onTap: sticker && !big
-          ? null
+          ? () => showStickerPackSheet(context, event)
           : big
               ? () => setState(() => _manualLoaded.add(event.eventId))
               : () {
@@ -142,7 +145,7 @@ class _ImageState extends State<_Image> {
                     ]),
                   )
                 : FutureBuilder<Uint8List?>(
-                    future: _load(),
+                    future: _load(full: _gif),
                     builder: (_, s) => s.data == null
                         ? Container(color: sticker ? Colors.transparent : Colors.black12, child: s.connectionState == ConnectionState.done ? const Icon(Icons.broken_image_outlined) : null)
                         : Image.memory(

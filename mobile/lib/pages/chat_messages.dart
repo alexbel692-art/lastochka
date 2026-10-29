@@ -178,7 +178,8 @@ extension _ChatMessages on _ChatPageState {
             ListTile(leading: Icon(pinned ? Icons.push_pin : Icons.push_pin_outlined), title: Text(pinned ? 'Открепить' : 'Закрепить'), onTap: () => Navigator.pop(c, 'pin')),
           if (canSaveMedia(disp) && (!(Platform.isAndroid || Platform.isIOS) || isImg || disp.messageType == MessageTypes.Video))
             ListTile(leading: const Icon(Icons.download_rounded), title: Text(saveMediaLabel), onTap: () => Navigator.pop(c, 'save')),
-          if (isImg && !e.redacted) ListTile(leading: const Icon(Icons.emoji_emotions_outlined), title: const Text('В мои стикеры'), onTap: () => Navigator.pop(c, 'sticker')),
+          if (isGifEvent(disp) && !e.redacted) ListTile(leading: const Icon(Icons.gif_box_outlined), title: const Text('Сохранить GIF'), onTap: () => Navigator.pop(c, 'gif')),
+          if (isImg && !e.redacted && !isGifEvent(disp)) ListTile(leading: const Icon(Icons.emoji_emotions_outlined), title: const Text('В мои стикеры'), onTap: () => Navigator.pop(c, 'sticker')),
           if (disp.hasAttachment && !isImg && !e.redacted) ListTile(leading: const Icon(Icons.download_outlined), title: const Text('Открыть файл'), onTap: () => Navigator.pop(c, 'open')),
           if (!mine && !e.redacted)
             ListTile(leading: const Icon(Icons.flag_outlined), title: const Text('Пожаловаться администратору'), onTap: () => Navigator.pop(c, 'report')),
@@ -236,6 +237,9 @@ extension _ChatMessages on _ChatPageState {
         await _togglePin(e);
       case 'sticker':
         _toast(await addToOwnPack(disp));
+      case 'gif':
+        _toast('Сохраняем GIF…');
+        _toast(await saveGifFromEvent(disp));
       case 'open':
         await openAttachment(disp, _toast, context: context);
       case 'save':
