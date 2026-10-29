@@ -53,6 +53,22 @@ Future<int> waitAny(WidgetTester t, List<Finder> fs, String what, {int seconds =
   throw TestFailure('не дождались за $seconds с: $what. На экране: ${screenText()}');
 }
 
+/// Нажимать, пока не появится [expect] (нажатие могло прийти во время перестройки списка или под плашку).
+Future<void> tapUntil(WidgetTester t, Finder target, Finder expect, String what, {int tries = 8}) async {
+  for (var i = 0; i < tries; i++) {
+    if (target.evaluate().isNotEmpty) {
+      await t.ensureVisible(target.first);
+      await settle(t);
+      await t.tap(target.first, warnIfMissed: false);
+    }
+    for (var k = 0; k < 20; k++) {
+      await settle(t, 250);
+      if (expect.evaluate().isNotEmpty) return;
+    }
+  }
+  throw TestFailure('нажатие не сработало: $what. На экране: ${screenText()}');
+}
+
 Future<void> step(String name, Future<void> Function() body) async {
   debugPrint('E2E: $name');
   await body();
@@ -93,8 +109,7 @@ void main() {
 
     await step('приглашение в группу', () async {
       await waitFor(t, find.text('Тест-группа'), 'группа в списке чатов', seconds: 600);
-      await t.tap(find.text('Тест-группа').first);
-      await waitFor(t, find.text('Вступить'), 'окно приглашения');
+      await tapUntil(t, find.ancestor(of: find.text('Тест-группа'), matching: find.byType(ListTile)), find.text('Вступить'), 'приглашение в группу');
       await t.tap(find.text('Вступить'));
       await waitFor(t, find.text('Привет из автотеста'), 'сообщение от второго участника', seconds: 90);
     });
@@ -119,7 +134,11 @@ void main() {
     });
 
     await step('напоминание', () async {
-      await t.longPress(find.byWidgetPredicate((w) => w is RichText && w.text.toPlainText().contains('Привет из автотеста')).first);
+      final msg = find.byWidgetPredicate((w) => w is RichText && w.text.toPlainText().contains('Привет из автотеста'));
+      for (var i = 0; i < 5 && find.text('Напомнить').evaluate().isEmpty; i++) {
+        await t.longPress(msg.first, warnIfMissed: false);
+        await settle(t, 1000);
+      }
       await waitFor(t, find.text('Напомнить'), 'меню сообщения');
       await t.tap(find.text('Напомнить'));
       await waitFor(t, find.text('Через час'), 'варианты напоминания');
