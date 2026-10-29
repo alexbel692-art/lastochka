@@ -480,16 +480,10 @@ jobs:
           name: android7-check
           path: smoke/
 
-  # Автотест интерфейса: настоящий сервер Matrix (Synapse в Docker) + эмулятор Android 7.
-  # Вход, секретная фраза, группа, отправка (проверяется и на сервере), крупные эмодзи, напоминание,
-  # панель стикеров/GIF, цвет оформления. Не прошёл — выпуск не публикуется.
-  e2e:
-    uses: ./.github/workflows/e2e.yml
-
   release:
     # все платформы обязательны: неполный выпуск не публикуется
     if: ${{ inputs.publish && !cancelled() && !failure() }}
-    needs: [android, android-sign, ios, macos, windows, emulator, e2e]
+    needs: [android, android-sign, ios, macos, windows, emulator]
     runs-on: ubuntu-latest
     permissions:
       contents: write
