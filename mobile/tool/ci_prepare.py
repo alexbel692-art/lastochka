@@ -284,10 +284,12 @@ if os.path.exists(fw):
         if head not in s or 'SetChildContent(' not in s or '  switch (message) {\n' not in s:
             raise SystemExit('flutter_window.cpp: шаблон изменился, обработчик переподключения RDP не добавлен')
         s = s.replace(head, head + '''
+#include <shellapi.h>
 #include <wtsapi32.h>
 #include <cwchar>
 #include <string>
 #pragma comment(lib, "Wtsapi32.lib")
+#pragma comment(lib, "Shell32.lib")
 
 namespace {
 constexpr UINT_PTR kLastochkaReconnectTimer = 0x4C41;
@@ -329,6 +331,22 @@ bool LastochkaDesktopReady() {
   return ok && _wcsicmp(name, L"Default") == 0;
 }
 
+// After a restart on RDP reconnect the window stayed white until a click on the tray icon. The click
+// brings the window to the foreground (Windows allows that only after user input) - do the same here.
+bool g_lastochka_bring_front = false;
+void LastochkaBringToFront(HWND hwnd) {
+  HWND fg = GetForegroundWindow();
+  if (fg == hwnd) return;
+  const DWORD me = GetCurrentThreadId();
+  const DWORD other = fg != nullptr ? GetWindowThreadProcessId(fg, nullptr) : 0;
+  const bool attached = other != 0 && other != me && AttachThreadInput(me, other, TRUE) != FALSE;
+  ShowWindow(hwnd, SW_SHOW);
+  SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE);
+  BringWindowToTop(hwnd);
+  SetForegroundWindow(hwnd);
+  if (attached) AttachThreadInput(me, other, FALSE);
+}
+
 // Restart Lastochka in the same state: visible window -> window, hidden in tray -> tray (ASCII only: MSVC /WX).
 void LastochkaRestart(HWND hwnd) {
   wchar_t path[MAX_PATH];
@@ -338,6 +356,12 @@ void LastochkaRestart(HWND hwnd) {
   STARTUPINFOW si{};
   si.cb = sizeof(si);
   PROCESS_INFORMATION pi{};
+  // remove our tray icon first (tray_manager: main window + id 1), otherwise a dead icon stays in the tray
+  NOTIFYICONDATAW nid{};
+  nid.cbSize = sizeof(nid);
+  nid.hWnd = hwnd;
+  nid.uID = 1;
+  Shell_NotifyIconW(NIM_DELETE, &nid);
   if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
@@ -359,7 +383,10 @@ void LastochkaRestart(HWND hwnd) {
       }
       break;
     case WM_SHOWWINDOW:
-      if (wparam == TRUE) LastochkaScheduleKick(hwnd);
+      if (wparam == TRUE) {
+        if (wcsstr(GetCommandLineW(), L"--restart") != nullptr) g_lastochka_bring_front = true;
+        LastochkaScheduleKick(hwnd);
+      }
       break;
     case WM_ACTIVATE:
       // switching back to Lastochka from another program: redraw, at most once per 5 seconds
@@ -389,6 +416,10 @@ void LastochkaRestart(HWND hwnd) {
     case WM_TIMER:
       if (wparam == kLastochkaKickTimer) {
         KillTimer(hwnd, kLastochkaKickTimer);
+        if (g_lastochka_bring_front) {
+          g_lastochka_bring_front = false;
+          LastochkaBringToFront(hwnd);
+        }
         if (flutter_controller_ && flutter_controller_->view()) {
           LastochkaNudge(hwnd, flutter_controller_->view()->GetNativeWindow());
           flutter_controller_->ForceRedraw();

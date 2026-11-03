@@ -128,15 +128,19 @@ Future<void> showMainWindow() async {
 /// оставалось белым, пока его не «будили» щелчком по значку в трее. Делаем то же самое сами: показываем
 /// окно так же, как щелчок по трею, слегка меняем размер (система заново создаёт поверхность для рисования)
 /// и несколько раз просим нарисовать кадр.
-Future<void> wakeWindowOnStart() async {
+Future<void> wakeWindowOnStart({bool restart = false}) async {
   if (!Platform.isWindows) return;
   // RDP: рабочий стол сеанса может появиться не сразу — «будим» окно несколько раз, каждый раз полностью
-  for (final ms in const [400, 1500, 4000, 8000]) {
+  var first = true;
+  for (final ms in restart ? const [400, 1500, 3000, 6000, 10000, 20000] : const [400, 1500, 4000, 8000]) {
     await Future.delayed(Duration(milliseconds: ms));
     try {
       if (!await windowManager.isVisible() || await windowManager.isMinimized()) continue;
-      // как щелчок по трею; фокус забираем только в первый раз — дальше человек может работать в другой программе
-      if (ms == 400) {
+      // как щелчок по трею; фокус забираем в первый раз (после переподключения к RDP — первые три раза:
+      // человек только что вошёл, а без переднего плана окно на сервере оставалось белым)
+      final focus = first || (restart && ms <= 3000);
+      first = false;
+      if (focus) {
         await showMainWindow();
       } else {
         await windowManager.show(inactive: true);
