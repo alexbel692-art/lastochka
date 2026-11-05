@@ -12,7 +12,7 @@ import '../system/diag.dart';
 import 'sounds.dart';
 import '../system/notify.dart' show keyguardLocked;
 import '../system/trust.dart' show SendBlocked;
-import 'voip.dart' show answerCall;
+import 'voip.dart' show answerCall, hangupCall;
 
 const _reasons = {
   CallErrorCode.userHangup: 'Звонок завершён',
@@ -238,7 +238,7 @@ class _CallPageState extends State<CallPage> {
     _ticker?.cancel();
     final init = _rendInit;
     _detach();
-    if (!call.callHasEnded) call.hangup(reason: CallErrorCode.userHangup).catchError((_) {});
+    if (!call.callHasEnded) unawaited(hangupCall(call));
     // окна видео освобождаем чуть позже — когда модуль звонков закончит со своими потоками
     if (init != null) {
       final r = _remote, l = _local;
@@ -391,7 +391,7 @@ class _CallPageState extends State<CallPage> {
                     const SizedBox(height: 22),
                     _btn(Icons.call_end, 'Завершить', () {
                       Diag.mark('звонок: нажато «Завершить»');
-                      call.hangup(reason: CallErrorCode.userHangup);
+                      hangupCall(call);
                     }, bg: const Color(0xFFE53935)),
                   ]),
                 )

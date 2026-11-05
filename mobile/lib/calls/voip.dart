@@ -222,7 +222,7 @@ void initVoip() {
     // отбой из окна на экране блокировки — для идущего звонка
     if (action == 'hangup') {
       final cur = currentCall.value;
-      if (cur != null && cur.callId == callId && !cur.callHasEnded) cur.hangup(reason: CallErrorCode.userHangup);
+      if (cur != null && cur.callId == callId && !cur.callHasEnded) unawaited(hangupCall(cur));
       return;
     }
     final c = ringing;
@@ -257,6 +257,19 @@ void initVoip() {
 }
 
 /// Позвонить собеседнику в чате.
+/// Завершить звонок. Сначала сообщаем собеседнику, потом закрываем соединение у себя: модуль Matrix
+/// делает наоборот, и на Android закрытие соединения может задержаться — тогда отбой не уходил,
+/// и у собеседника (например, в Element) звонок продолжал звонить.
+Future<void> hangupCall(CallSession c) async {
+  if (c.callHasEnded) return;
+  try {
+    await c.sendHangupCall(c.room, c.callId, c.localPartyId, 'user_hangup');
+  } catch (e) {
+    Diag.err('Отбой звонка', e);
+  }
+  if (!c.callHasEnded) await c.hangup(reason: CallErrorCode.userHangup).catchError((_) {});
+}
+
 Future<void> startCall(BuildContext context, Room room, {required bool video}) async {
   if (voip.currentCID != null) {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Уже идёт другой звонок')));

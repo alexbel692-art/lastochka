@@ -198,15 +198,56 @@ class CallsPage extends StatefulWidget {
 
 class _CallsPageState extends State<CallsPage> {
   List<_CallItem>? _items;
+  StreamSubscription? _sub;
+  Timer? _again;
+  bool _loading = false, _dirty = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // список обновляется сам: пришёл или закончился звонок (раньше вкладка загружалась один раз — новые
+    // звонки появлялись, только если потянуть список вниз)
+    _sub = client.onTimelineEvent.stream
+        .where((e) => e.type == EventTypes.CallInvite || e.type == EventTypes.CallAnswer || e.type == EventTypes.CallHangup || e.type == EventTypes.CallReject)
+        .listen((_) => _soon());
+    currentCall.addListener(_soon);
+    // сразу после запуска чаты ещё не пришли с сервера — перечитать после первой синхронизации
+    if (client.prevBatch == null) client.onSync.stream.first.then((_) => _soon());
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _again?.cancel();
+    currentCall.removeListener(_soon);
+    super.dispose();
+  }
+
+  void _soon() {
+    _again?.cancel();
+    _again = Timer(const Duration(milliseconds: 1500), () => _load());
   }
 
   /// История звонков — из истории чатов на устройстве (расшифровывать ничего не нужно: события звонков не шифруются).
   Future<void> _load() async {
+    if (_loading) {
+      _dirty = true;
+      return;
+    }
+    _loading = true;
+    try {
+      await _read();
+    } finally {
+      _loading = false;
+    }
+    if (_dirty && mounted) {
+      _dirty = false;
+      unawaited(_load());
+    }
+  }
+
+  Future<void> _read() async {
     final out = <_CallItem>[];
     final rooms = client.rooms.where((r) => r.membership == Membership.join).toList()
       ..sort((a, b) => (b.lastEvent?.originServerTs ?? DateTime(2000)).compareTo(a.lastEvent?.originServerTs ?? DateTime(2000)));
