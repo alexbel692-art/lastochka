@@ -28,12 +28,17 @@ String? phraseProblem(String p1, String p2) {
 bool needsVerification() =>
     client.encryption?.crossSigning.enabled == true && client.isUnknownSession;
 
-/// У аккаунта ещё нет подписи устройств (новый аккаунт, ни разу не входили в Element/Ласточку).
-/// Без неё любое новое устройство с паролем получало бы ключи — поэтому настраиваем сразу.
+/// У аккаунта ещё нет секретной фразы — новый пользователь. Предлагаем придумать её сразу после входа,
+/// чтобы не забыть: без неё не подтвердить новое устройство и не вернуть переписку.
+/// Раньше экран появлялся, только если у аккаунта не было и подписи устройств; но Element при первом входе
+/// создаёт подпись сам, без фразы, — и тогда Ласточка фразу не предлагала (или просила несуществующую).
 bool needsSecuritySetup() {
   final enc = client.encryption;
-  return enc != null && client.prevBatch != null && !enc.crossSigning.enabled && enc.ssss.defaultKeyId == null;
+  return enc != null && client.prevBatch != null && enc.ssss.defaultKeyId == null;
 }
+
+/// Подпись устройств уже есть (её создал Element), но фразы нет — ключи создаются заново.
+bool get _signingWithoutPhrase => client.encryption?.crossSigning.enabled == true && client.encryption?.ssss.defaultKeyId == null;
 
 class VerifyGate extends StatefulWidget {
   final Widget child;
@@ -213,7 +218,10 @@ class _VerifyGateState extends State<VerifyGate> {
       _setupError = null;
     });
     final done = Completer<void>();
-    final wipe = _resetting; // сброс: старые ключи, подпись устройств и резервную копию — заменить новыми
+    // сброс: старые ключи, подпись устройств и резервную копию — заменить новыми. Если фразы у аккаунта не было,
+    // старую резервную копию всё равно не открыть (ключ от неё нигде не сохранён) — тоже создаём новую
+    final wipe = _resetting;
+    final noPhrase = client.encryption?.ssss.defaultKeyId == null;
     if (wipe) Trust.instance.selfReset = true;
     client.encryption!.bootstrap(onUpdate: (bs) async {
       try {
@@ -231,7 +239,7 @@ class _VerifyGateState extends State<VerifyGate> {
           case BootstrapState.askSetupCrossSigning:
             await bs.askSetupCrossSigning(setupMasterKey: true, setupSelfSigningKey: true, setupUserSigningKey: true);
           case BootstrapState.askWipeOnlineKeyBackup:
-            bs.wipeOnlineKeyBackup(wipe);
+            bs.wipeOnlineKeyBackup(wipe || noPhrase);
           case BootstrapState.askSetupOnlineKeyBackup:
             await bs.askSetupOnlineKeyBackup(true);
           case BootstrapState.done:
@@ -287,6 +295,14 @@ class _VerifyGateState extends State<VerifyGate> {
                   textAlign: TextAlign.center,
                   style: TextStyle(color: hint),
                 ),
+                if (!_resetting && _signingWithoutPhrase) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Другие ваши устройства (например, Element) после этого попросят подтверждения — подтвердите их этой фразой.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: hint, fontSize: 13),
+                  ),
+                ],
                 const SizedBox(height: 18),
                 TextField(
                   enableIMEPersonalizedLearning: false,
