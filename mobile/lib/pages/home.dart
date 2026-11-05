@@ -79,6 +79,30 @@ class _ContactsPageState extends State<ContactsPage> {
   Timer? _t;
 
   @override
+  void initState() {
+    super.initState();
+    _loadDirectory();
+  }
+
+  /// Все пользователи сервера, как в списке на компьютере: пустой запрос к справочнику и запрос по имени
+  /// сервера дают всех, кого сервер разрешает видеть (раньше здесь были только люди из ваших чатов).
+  Future<void> _loadDirectory() async {
+    final domain = client.userID?.domain ?? '';
+    final terms = {'', if (domain.isNotEmpty) domain.split('.').first, if (domain.isNotEmpty) domain};
+    final res = await Future.wait(terms.map((t) => client.searchUserDirectory(t, limit: 500).then((r) => r.results).catchError((_) => <Profile>[])));
+    if (!mounted) return;
+    setState(() {
+      for (final list in res) {
+        for (final p in list) {
+          // служебные учётные записи мостов (telegram_…, whatsapp_… и т. п.) не показываем
+          if (RegExp(r'^@(_|(telegram|whatsapp|signal|discord|slack|facebook|instagram)_)').hasMatch(p.userId)) continue;
+          _found[p.userId] = p;
+        }
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _t?.cancel();
     _q.dispose();
