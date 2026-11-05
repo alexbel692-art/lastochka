@@ -34,6 +34,16 @@ import 'login.dart';
 import '../chat/link_preview.dart' show linkPreviews, setLinkPreviews;
 import '../calls/voip.dart' show micNoise, micGain, micNoisePref, micGainPref;
 
+/// Своё имя или фото изменились — экраны перечитывают профиль (раньше новое имя было видно только после перезапуска).
+final ownProfileChanged = ValueNotifier<int>(0);
+
+Future<void> _ownProfileUpdated() async {
+  try {
+    await client.database.markUserProfileAsOutdated(client.userID!);
+  } catch (_) {}
+  ownProfileChanged.value++;
+}
+
 Future<void> logout(BuildContext context) async {
   final ok = await showDialog<bool>(
     context: context,
@@ -290,6 +300,7 @@ class _SettingsPageState extends State<SettingsPage> {
       await client.request(RequestType.PUT, '/client/v3/profile/${Uri.encodeComponent(client.userID!)}/displayname', data: {'displayname': v});
       // сервер уже обновил имя, а сохранённый профиль — ещё нет
       if (mounted) setState(() => _me = Profile(userId: client.userID!, displayName: v, avatarUrl: _me?.avatarUrl));
+      unawaited(_ownProfileUpdated());
     } catch (_) {
       _toast('Не удалось сменить имя');
     }
@@ -307,6 +318,7 @@ class _SettingsPageState extends State<SettingsPage> {
         url = Uri.tryParse('${r['avatar_url'] ?? ''}');
       } catch (_) {}
       if (mounted) setState(() => _me = Profile(userId: client.userID!, displayName: _me?.displayName, avatarUrl: url ?? _me?.avatarUrl));
+      unawaited(_ownProfileUpdated());
     } catch (_) {
       _toast('Не удалось сменить фото');
     }

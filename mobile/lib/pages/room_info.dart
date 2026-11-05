@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:matrix/matrix.dart';
 
@@ -30,11 +32,22 @@ class RoomInfoPage extends StatefulWidget {
 class _RoomInfoPageState extends State<RoomInfoPage> {
   Room get room => widget.room;
   List<User>? _members;
+  StreamSubscription? _syncSub;
 
   @override
   void initState() {
     super.initState();
+    // новое название или описание приходит с сервера чуть позже — показать сразу, как пришло
+    _syncSub = client.onSync.stream.where((s) => s.rooms?.join?.containsKey(room.id) == true).listen((_) {
+      if (mounted) setState(() {});
+    });
     room.requestParticipants().then((m) => mounted ? setState(() => _members = m.where((u) => u.membership == Membership.join).toList()) : null).catchError((_) {});
+  }
+
+  @override
+  void dispose() {
+    _syncSub?.cancel();
+    super.dispose();
   }
 
   void _toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));

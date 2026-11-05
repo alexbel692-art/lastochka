@@ -222,6 +222,11 @@ class _ChatsPageState extends State<ChatsPage> {
     heroesLoaded.addListener(_redraw);
     unawaited(loadRoomHeroes(client));
     _me = client.fetchOwnProfile();
+    ownProfileChanged.addListener(_reloadMe);
+  }
+
+  void _reloadMe() {
+    if (mounted) setState(() => _me = client.fetchOwnProfile());
   }
 
   Timer? _redrawTimer;
@@ -237,6 +242,7 @@ class _ChatsPageState extends State<ChatsPage> {
   void dispose() {
     Drafts.instance.changed.removeListener(_redraw);
     heroesLoaded.removeListener(_redraw);
+    ownProfileChanged.removeListener(_reloadMe);
     _kbFocus.dispose();
     _redrawTimer?.cancel();
     _msgTimer?.cancel();
