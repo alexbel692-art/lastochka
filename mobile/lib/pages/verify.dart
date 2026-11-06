@@ -91,12 +91,35 @@ class _VerifyGateState extends State<VerifyGate> {
   Future<void> _otherDevice() async {
     final keys = client.userDeviceKeys[client.userID!];
     if (keys == null) return;
+    // подтвердить вход может только устройство, которое само подтверждено: иначе эмодзи совпадут,
+    // но вход так и останется неподтверждённым (раньше показывалось «Готово», а экран не пропадал)
+    if (await _activeTrustedDevice(recentOnly: false) == null) {
+      if (mounted) await _noTrustedDevice();
+      return;
+    }
     final req = await keys.startVerification();
     if (!mounted) return;
     await showVerificationDialog(context, req);
     await client.updateUserDeviceKeys();
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    if (needsVerification()) await _noTrustedDevice();
   }
+
+  Future<void> _noTrustedDevice() => showDialog<void>(
+        context: context,
+        builder: (d) => AlertDialog(
+          icon: const Icon(Icons.devices_outlined, size: 36),
+          title: const Text('Нет подтверждённого устройства'),
+          content: const Text(
+            'Подтвердить вход может только устройство, которое само уже подтверждено секретной фразой. '
+            'Ваши другие устройства (например, Element) пока не подтверждены — сравнение эмодзи с ними вход не подтвердит.\n\n'
+            'Введите секретную фразу. Если её нет или она не подходит — нажмите «Забыли секретную фразу?»: '
+            'переписка в Element при этом останется, а после подтверждения Element новой фразой появится и здесь.',
+          ),
+          actions: [FilledButton(onPressed: () => Navigator.pop(d), child: const Text('Понятно'))],
+        ),
+      );
 
   /// «Забыли секретную фразу?» — новая фраза вместо старой, со сбросом ключей (после двух предупреждений).
   bool _resetting = false;
@@ -104,7 +127,7 @@ class _VerifyGateState extends State<VerifyGate> {
 
   /// Есть ли другое подтверждённое устройство, которое заходило недавно. Тогда сброс не нужен (и опасен:
   /// так поступил бы и злоумышленник, узнавший пароль) — подтверждать нужно с того устройства.
-  Future<String?> _activeTrustedDevice() async {
+  Future<String?> _activeTrustedDevice({bool recentOnly = true}) async {
     try {
       final me = client.userID!;
       final keys = client.userDeviceKeys[me]?.deviceKeys ?? const {};
@@ -113,7 +136,7 @@ class _VerifyGateState extends State<VerifyGate> {
       for (final d in devices) {
         if (d.deviceId == client.deviceID) continue;
         final seen = d.lastSeenTs;
-        final recent = seen != null && now - seen < const Duration(days: 14).inMilliseconds;
+        final recent = !recentOnly || (seen != null && now - seen < const Duration(days: 14).inMilliseconds);
         // устройство подписано текущим ключом аккаунта (с нового неподтверждённого устройства
         // обычное «verified» всегда ложно — проверяем саму цепочку подписей)
         final k = keys[d.deviceId];
