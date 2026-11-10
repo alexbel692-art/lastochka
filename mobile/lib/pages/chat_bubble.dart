@@ -30,6 +30,7 @@ class _Bubble extends StatelessWidget {
   final VoidCallback? onThread;
   final VoidCallback? onMenu; // меню сообщения (правая кнопка мыши по невыделенному тексту)
   const _Bubble({
+    super.key,
     this.onMenu,
     this.threadCount = 0,
     this.onThread,

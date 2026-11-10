@@ -7,6 +7,7 @@ import 'dart:ui' show PointerDeviceKind;
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:pasteboard/pasteboard.dart';
+import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -134,6 +135,12 @@ class _ChatPageState extends State<ChatPage> {
   List<User> _mentionHits = [];
   // выбор нескольких сообщений
   Set<String>? _sel;
+  // компьютер: выделение нескольких сообщений протягиванием мыши, как в Telegram Desktop
+  String? _dragFrom; // сообщение, на котором нажали кнопку мыши
+  List<Event> _dragList = const [];
+  String? _dragCleared; // у этого сообщения сброшено выделение текста (начали выделять сообщения целиком)
+  int _dragEpoch = 0;
+  final _selFocus = FocusNode(debugLabel: 'выбор сообщений');
   // непрочитанное на момент открытия чата: разделитель «Новые сообщения» и упоминания
   String _readAnchor = '';
   int _unreadAtOpen = 0, _mentionsAtOpen = 0;
@@ -297,6 +304,7 @@ class _ChatPageState extends State<ChatPage> {
     final rv = _review;
     if (rv != null) rv.$1.delete().catchError((Object _) => rv.$1);
     _focus.dispose();
+    _selFocus.dispose();
     super.dispose();
   }
 
@@ -370,7 +378,18 @@ class _ChatPageState extends State<ChatPage> {
     _albums = albums;
     final typing = room.typingUsers.any((u) => u.id != client.userID);
     final accent = Theme.of(context).colorScheme.primary;
-    final page = PopScope(
+    // фокус экрана чата: после выделения сообщений мышью Ctrl+C / ⌘C копирует их (а не текст поля ввода)
+    final page = Focus(
+      focusNode: _selFocus,
+      onKeyEvent: (node, ev) {
+        final k = HardwareKeyboard.instance;
+        if (ev is KeyDownEvent && ev.logicalKey == LogicalKeyboardKey.keyC && (k.isControlPressed || k.isMetaPressed) && _sel != null) {
+          _selCopy();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: PopScope(
       canPop: _sel == null,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _sel != null) setState(() => _sel = null);
@@ -379,6 +398,13 @@ class _ChatPageState extends State<ChatPage> {
         bindings: {
           const SingleActivator(LogicalKeyboardKey.keyF, control: true): () => setState(() => _searching = true),
           const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () => setState(() => _searching = true),
+          // выбранные сообщения: Ctrl+C / ⌘C копирует их с именами и временем
+          const SingleActivator(LogicalKeyboardKey.keyC, control: true): () {
+            if (_sel != null) _selCopy();
+          },
+          const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () {
+            if (_sel != null) _selCopy();
+          },
           const SingleActivator(LogicalKeyboardKey.escape): () {
             if (_sel != null) return setState(() => _sel = null);
             if (_searching) return _closeSearch();
@@ -540,7 +566,7 @@ class _ChatPageState extends State<ChatPage> {
       ),
     ),
     ),
-    );
+    ));
     // компьютер: профиль чата — панелью справа, как в Element (без нового окна)
     if (!widget.embedded || !_info) return page;
     return Row(children: [

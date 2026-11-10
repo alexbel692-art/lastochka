@@ -53,7 +53,7 @@ extension _ChatCompose on _ChatPageState {
           // долгое нажатие — только пальцем: на компьютере после разворота окна двойным щелчком по заголовку
           // Windows присылает «отпускание» мыши уже в окно, и это принималось за долгое нажатие на сообщение.
           // Мышью меню открывается правой кнопкой
-          child: GestureDetector(
+          child: _dragSelectable(e, events, GestureDetector(
             supportedDevices: const {PointerDeviceKind.touch, PointerDeviceKind.stylus, PointerDeviceKind.invertedStylus},
             onLongPress: () => _sel != null ? _toggleSel(e) : _actions(e),
             child: GestureDetector(
@@ -65,6 +65,8 @@ extension _ChatCompose on _ChatPageState {
               child: AbsorbPointer(
                 absorbing: _sel != null,
                 child: _Bubble(
+                // начали выделять сообщения целиком — сбросить выделение текста в том, с которого начали
+                key: ValueKey('${e.eventId}/${e.eventId == _dragCleared ? _dragEpoch : 0}'),
                 onMenu: () => _actions(e),
                 event: e,
                 timeline: tl,
@@ -83,9 +85,53 @@ extension _ChatCompose on _ChatPageState {
               ),
             ),
           ),
-          ),
+          )),
         ),
     ]);
+  }
+
+  /// Компьютер: нажать кнопку мыши на сообщении и протянуть на соседние — выделяются все сообщения между ними,
+  /// как в Telegram Desktop. Внутри одного сообщения по-прежнему выделяется текст.
+  Widget _dragSelectable(Event e, List<Event> events, Widget child) {
+    if (!isDesktop) return child;
+    return Listener(
+      onPointerDown: (p) {
+        if (p.kind == PointerDeviceKind.mouse && p.buttons == kPrimaryButton) {
+          _dragFrom = e.eventId;
+          _dragList = events;
+        }
+      },
+      onPointerUp: (_) => _dragFrom = null,
+      onPointerCancel: (_) => _dragFrom = null,
+      child: MouseRegion(
+        onEnter: (p) {
+          final from = _dragFrom;
+          if (from == null || from == e.eventId || p.buttons & kPrimaryButton == 0) return;
+          _selectRange(from, e.eventId);
+        },
+        child: child,
+      ),
+    );
+  }
+
+  void _selectRange(String from, String to) {
+    final a = _dragList.indexWhere((x) => x.eventId == from), b = _dragList.indexWhere((x) => x.eventId == to);
+    if (a < 0 || b < 0) return;
+    final ids = <String>{
+      for (final x in _dragList.sublist(min(a, b), max(a, b) + 1))
+        if (!x.redacted && (x.type == EventTypes.Message || x.type == EventTypes.Sticker || x.type == EventTypes.Encrypted)) x.eventId,
+    };
+    if (ids.isEmpty) return;
+    final starting = _sel == null;
+    _set(() {
+      _sel = ids;
+      if (starting) {
+        _dragCleared = from;
+        _dragEpoch++;
+      }
+    });
+    // Ctrl+C должен копировать выбранные сообщения, а не текст поля ввода
+    if (starting) _selFocus.requestFocus();
   }
 
   Widget _pinBar(BuildContext context) {
