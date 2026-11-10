@@ -286,6 +286,7 @@ if os.path.exists(fw):
         s = s.replace(head, head + '''
 #include <shellapi.h>
 #include <wtsapi32.h>
+#include <cstdio>
 #include <cwchar>
 #include <string>
 #pragma comment(lib, "Wtsapi32.lib")
@@ -300,11 +301,35 @@ int g_lastochka_tries = 0;
 bool g_lastochka_minimized = false;
 ULONGLONG g_lastochka_last_kick = 0;
 
+// Diagnostics: what happened to the window around RDP reconnects -> %TEMP%\\lastochka_rdp.txt (shown in the
+// diagnostics report). Kept small: over 64 KB the file starts again.
+void LastochkaLog(const wchar_t* what, long long a = -1, long long b = -1) {
+  wchar_t path[MAX_PATH];
+  const DWORD n = GetTempPathW(MAX_PATH, path);
+  if (n == 0 || n > MAX_PATH - 32) return;
+  wcscat_s(path, MAX_PATH, L"lastochka_rdp.txt");
+  WIN32_FILE_ATTRIBUTE_DATA fa{};
+  const bool big = GetFileAttributesExW(path, GetFileExInfoStandard, &fa) && fa.nFileSizeLow > 64 * 1024;
+  FILE* f = nullptr;
+  if (_wfopen_s(&f, path, big ? L"w" : L"a") != 0 || f == nullptr) return;
+  SYSTEMTIME t;
+  GetLocalTime(&t);
+  fwprintf(f, L"%02d.%02d %02d:%02d:%02d.%03d pid %lu %ls", t.wDay, t.wMonth, t.wHour, t.wMinute, t.wSecond,
+           t.wMilliseconds, GetCurrentProcessId(), what);
+  if (a != -1) fwprintf(f, L" %lld", a);
+  if (b != -1) fwprintf(f, L" %lld", b);
+  fwprintf(f, L"\\n");
+  fclose(f);
+}
+
 // The window is shown again (restored, unhidden, activated after a while, display or session changed):
 // after RDP reconnects or a restore the Flutter surface sometimes stays white until something resizes it.
 // Resize the Flutter view by one pixel and back - this makes Flutter draw a fresh frame of the right size.
 void LastochkaNudge(HWND hwnd, HWND child) {
-  if (child == nullptr || IsIconic(hwnd) || !IsWindowVisible(hwnd)) return;
+  if (child == nullptr || IsIconic(hwnd) || !IsWindowVisible(hwnd)) {
+    LastochkaLog(L"nudge skipped: iconic/hidden", IsIconic(hwnd) ? 1 : 0, IsWindowVisible(hwnd) ? 1 : 0);
+    return;
+  }
   RECT r;
   if (!GetClientRect(hwnd, &r)) return;
   const int w = r.right - r.left;
@@ -312,6 +337,7 @@ void LastochkaNudge(HWND hwnd, HWND child) {
   if (w < 2 || h < 2) return;
   MoveWindow(child, 0, 0, w, h - 1, FALSE);
   MoveWindow(child, 0, 0, w, h, TRUE);
+  LastochkaLog(L"nudge", w, h);
 }
 
 void LastochkaScheduleKick(HWND hwnd) {
@@ -343,8 +369,9 @@ void LastochkaBringToFront(HWND hwnd) {
   ShowWindow(hwnd, SW_SHOW);
   SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE);
   BringWindowToTop(hwnd);
-  SetForegroundWindow(hwnd);
+  const BOOL ok = SetForegroundWindow(hwnd);
   if (attached) AttachThreadInput(me, other, FALSE);
+  LastochkaLog(L"bring to front: ok, foreground is us", ok ? 1 : 0, GetForegroundWindow() == hwnd ? 1 : 0);
 }
 
 // Restart Lastochka in the same state: visible window -> window, hidden in tray -> tray (ASCII only: MSVC /WX).
@@ -362,6 +389,7 @@ void LastochkaRestart(HWND hwnd) {
   nid.hWnd = hwnd;
   nid.uID = 1;
   Shell_NotifyIconW(NIM_DELETE, &nid);
+  LastochkaLog(visible ? L"restart (window visible)" : L"restart (in tray)");
   if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
@@ -383,6 +411,7 @@ void LastochkaRestart(HWND hwnd) {
       }
       break;
     case WM_SHOWWINDOW:
+      LastochkaLog(L"show window", static_cast<long long>(wparam));
       if (wparam == TRUE) {
         if (wcsstr(GetCommandLineW(), L"--restart") != nullptr) g_lastochka_bring_front = true;
         LastochkaScheduleKick(hwnd);
@@ -399,6 +428,7 @@ void LastochkaRestart(HWND hwnd) {
       LastochkaScheduleKick(hwnd);
       break;
     case WM_WTSSESSION_CHANGE:
+      LastochkaLog(L"session event", static_cast<long long>(wparam));
       if (wparam == WTS_REMOTE_CONNECT || wparam == WTS_CONSOLE_CONNECT || wparam == WTS_SESSION_UNLOCK) {
         LastochkaScheduleKick(hwnd);
       }
@@ -434,6 +464,7 @@ void LastochkaRestart(HWND hwnd) {
       }
       if (wparam == kLastochkaReconnectTimer) {
         if (!LastochkaDesktopReady()) {
+          if (g_lastochka_tries % 10 == 0) LastochkaLog(L"desktop not ready, try", g_lastochka_tries);
           // lock screen or password prompt is still shown: check again every second, up to 3 minutes,
           // then wait for the next unlock / connect event
           if (++g_lastochka_tries < 180) {

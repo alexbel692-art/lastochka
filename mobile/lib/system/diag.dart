@@ -374,6 +374,19 @@ class Diag {
           return const <String>[];
         }
       }(),
+      // Windows: что происходило с окном при входе по RDP (пишет системная часть программы)
+      ...() {
+        if (!Platform.isWindows) return const <String>[];
+        try {
+          final tmp = Platform.environment['TEMP'] ?? Platform.environment['TMP'] ?? '';
+          final f = File(p.join(tmp, 'lastochka_rdp.txt'));
+          if (tmp.isEmpty || !f.existsSync()) return const <String>[];
+          final l = f.readAsStringSync().trim().split('\n').where((x) => x.isNotEmpty).toList();
+          return ['— Окно и RDP (Windows) —', ...l.reversed.take(80).toList().reversed, ''];
+        } catch (_) {
+          return const <String>[];
+        }
+      }(),
       '— Ошибки приложения —',
       ..._buf,
       '',
