@@ -70,7 +70,10 @@ Future<void> main(List<String> args) async {
       );
   // заставка сразу — пока открывается защищённое хранилище и подключается всё остальное
   final started = DateTime.now();
+  Diag.rdp('start${args.contains('--restart') ? ' (restart)' : ''}${args.contains('--hidden') ? ' (hidden)' : ''}');
   runApp(const Root());
+  // первый кадр и первая синхронизация — по журналу видно, долго ли окно было пустым
+  WidgetsBinding.instance.addPostFrameCallback((_) => Diag.rdp('first frame +${DateTime.now().difference(started).inMilliseconds} ms'));
   await initializeDateFormatting('ru');
   final hidden = args.contains('--hidden');
   if (args.contains('--restart')) Diag.add('Запуск: перезапуск после переподключения к RDP${hidden ? ' (в трей)' : ''}');
@@ -79,6 +82,8 @@ Future<void> main(List<String> args) async {
   await Appearance.instance.init();
   try {
     client = await createClient();
+    Diag.rdp('client ready +${DateTime.now().difference(started).inMilliseconds} ms');
+    unawaited(client.onSync.stream.first.then((_) => Diag.rdp('first sync +${DateTime.now().difference(started).inMilliseconds} ms')));
   } catch (e, st) {
     Diag.err('Хранилище не открылось', e, st);
     await showMainWindow();

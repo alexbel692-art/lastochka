@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'diag.dart';
 import 'notify.dart';
 
 final bool isDesktopOS = Platform.isWindows || Platform.isMacOS || Platform.isLinux;
@@ -135,7 +136,9 @@ Future<void> wakeWindowOnStart({bool restart = false}) async {
   for (final ms in restart ? const [400, 1500, 3000, 6000, 10000, 20000] : const [400, 1500, 4000, 8000]) {
     await Future.delayed(Duration(milliseconds: ms));
     try {
-      if (!await windowManager.isVisible() || await windowManager.isMinimized()) continue;
+      final vis = await windowManager.isVisible(), mini = await windowManager.isMinimized();
+      Diag.rdp('wake $ms ms: visible $vis, minimized $mini');
+      if (!vis || mini) continue;
       // как щелчок по трею; фокус забираем в первый раз (после переподключения к RDP — первые три раза:
       // человек только что вошёл, а без переднего плана окно на сервере оставалось белым)
       final focus = first || (restart && ms <= 3000);

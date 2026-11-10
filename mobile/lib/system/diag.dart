@@ -27,6 +27,20 @@ import 'updater.dart';
 class Diag {
   static final List<String> _buf = [];
 
+  /// Windows: строка в журнал окна и RDP (%TEMP%\\lastochka_rdp.txt, туда же пишет системная часть) —
+  /// чтобы по отчёту было видно, на каком шаге запуска окно оставалось белым.
+  static void rdp(String s) {
+    if (!Platform.isWindows) return;
+    try {
+      final tmp = Platform.environment['TMP'] ?? Platform.environment['TEMP'] ?? '';
+      if (tmp.isEmpty) return;
+      final n = DateTime.now();
+      String two(int v, [int w = 2]) => '$v'.padLeft(w, '0');
+      final t = '${two(n.day)}.${two(n.month)} ${two(n.hour)}:${two(n.minute)}:${two(n.second)}.${two(n.millisecond, 3)}';
+      File(p.join(tmp, 'lastochka_rdp.txt')).writeAsStringSync('$t pid $pid dart: $s\n', mode: FileMode.append, flush: true);
+    } catch (_) {}
+  }
+
   static void add(String s) {
     final line = '${DateTime.now().toIso8601String().substring(0, 19)} $s';
     _buf.add(line);
@@ -378,7 +392,7 @@ class Diag {
       ...() {
         if (!Platform.isWindows) return const <String>[];
         try {
-          final tmp = Platform.environment['TEMP'] ?? Platform.environment['TMP'] ?? '';
+          final tmp = Platform.environment['TMP'] ?? Platform.environment['TEMP'] ?? '';
           final f = File(p.join(tmp, 'lastochka_rdp.txt'));
           if (tmp.isEmpty || !f.existsSync()) return const <String>[];
           final l = f.readAsStringSync().trim().split('\n').where((x) => x.isNotEmpty).toList();
