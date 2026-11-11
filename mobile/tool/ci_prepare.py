@@ -299,6 +299,7 @@ constexpr UINT_PTR kLastochkaRedrawTimer = 0x4C43;
 bool g_lastochka_reconnected = false;
 int g_lastochka_tries = 0;
 bool g_lastochka_minimized = false;
+int g_lastochka_redraws_left = 0;
 ULONGLONG g_lastochka_last_kick = 0;
 
 // Diagnostics: what happened to the window around RDP reconnects -> %TEMP%\\lastochka_rdp.txt (shown in the
@@ -454,12 +455,22 @@ void LastochkaRestart(HWND hwnd) {
           LastochkaNudge(hwnd, flutter_controller_->view()->GetNativeWindow());
           flutter_controller_->ForceRedraw();
         }
-        SetTimer(hwnd, kLastochkaRedrawTimer, 1200, nullptr);
+        // The first nudge right after the window appears is sometimes too early (after an RDP reconnect the
+        // window stayed white until a second click on the tray icon, which nudged it again). Repeat it:
+        // after 0.8 s, 2 s and 4 s.
+        g_lastochka_redraws_left = 3;
+        SetTimer(hwnd, kLastochkaRedrawTimer, 800, nullptr);
         return 0;
       }
       if (wparam == kLastochkaRedrawTimer) {
         KillTimer(hwnd, kLastochkaRedrawTimer);
-        if (flutter_controller_) flutter_controller_->ForceRedraw();
+        if (flutter_controller_ && flutter_controller_->view()) {
+          LastochkaNudge(hwnd, flutter_controller_->view()->GetNativeWindow());
+          flutter_controller_->ForceRedraw();
+        }
+        if (--g_lastochka_redraws_left > 0) {
+          SetTimer(hwnd, kLastochkaRedrawTimer, g_lastochka_redraws_left == 2 ? 1200 : 2000, nullptr);
+        }
         return 0;
       }
       if (wparam == kLastochkaReconnectTimer) {
