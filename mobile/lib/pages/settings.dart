@@ -118,7 +118,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   Profile? _me;
   SharedPreferences? _p;
-  bool _battery = true, _autostart = true;
+  bool _battery = true, _autostart = true, _openOnLogin = true;
 
   @override
   void initState() {
@@ -129,6 +129,7 @@ class _SettingsPageState extends State<SettingsPage> {
     SharedPreferences.getInstance().then((p) => mounted ? setState(() => _p = p) : null);
     isIgnoringBatteryOptimizations().then((v) => mounted ? setState(() => _battery = v) : null);
     autostartEnabled().then((v) => mounted ? setState(() => _autostart = v) : null);
+    openOnLogin().then((v) => mounted ? setState(() => _openOnLogin = v) : null);
   }
 
   bool _pref(String k, [bool def = true]) => _p?.getBool(k) ?? def;
@@ -510,9 +511,14 @@ class _SettingsPageState extends State<SettingsPage> {
           }),
         ],
         if (Platform.isWindows)
-          _switch(Icons.power_settings_new, 'Запускать вместе с Windows', 'Ласточка тихо запускается в трее и принимает звонки', _autostart, (v) async {
+          _switch(Icons.power_settings_new, 'Запускать вместе с Windows', 'Ласточка запускается при входе в Windows и принимает звонки', _autostart, (v) async {
             await setAutostart(v);
             setState(() => _autostart = v);
+          }),
+        if (Platform.isWindows)
+          _switch(Icons.open_in_new, 'Открывать окно при входе', 'При входе в Windows и подключении к удалённому рабочему столу окно открывается само. Выключено — Ласточка ждёт в трее', _openOnLogin, (v) async {
+            await setOpenOnLogin(v);
+            setState(() => _openOnLogin = v);
           }),
         if (isDesktopOS)
           _row(Icons.info_outline, 'Закрытие окна', sub: 'Крестик прячет Ласточку в ${Platform.isMacOS ? 'строку меню' : 'трей'} — сообщения и звонки продолжают приходить. Выйти полностью можно через меню значка.'),

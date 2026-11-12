@@ -75,9 +75,17 @@ Future<void> main(List<String> args) async {
   // первый кадр и первая синхронизация — по журналу видно, долго ли окно было пустым
   WidgetsBinding.instance.addPostFrameCallback((_) => Diag.rdp('first frame +${DateTime.now().difference(started).inMilliseconds} ms'));
   await initializeDateFormatting('ru');
-  final hidden = args.contains('--hidden');
+  // автозапуск и перезапуск после подключения к RDP приходят с --hidden (окно было в трее);
+  // с настройкой «Открывать окно при входе» окно всё равно показывается — как у Element
+  final askedHidden = args.contains('--hidden');
+  final hidden = askedHidden && !await openOnLogin();
   if (args.contains('--restart')) Diag.add('Запуск: перезапуск после переподключения к RDP${hidden ? ' (в трей)' : ''}');
   await initDesktop(hidden: hidden);
+  // системная часть при --hidden окно не показывает — показать самим
+  if (askedHidden && !hidden) {
+    Diag.rdp('open on login');
+    await showMainWindow();
+  }
   await CertPinning.instance.init();
   await Appearance.instance.init();
   try {

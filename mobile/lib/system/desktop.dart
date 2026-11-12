@@ -182,6 +182,18 @@ Future<bool> autostartEnabled() async {
   return (await SharedPreferences.getInstance()).getBool('autostart') ?? true;
 }
 
+/// Windows: при входе в систему и при каждом подключении к удалённому рабочему столу окно открывается само,
+/// как у Element, — даже если перед этим Ласточку свернули в трей. Выключено — тихий запуск в трее.
+Future<bool> openOnLogin() async {
+  if (!Platform.isWindows) return false;
+  return (await SharedPreferences.getInstance()).getBool('openOnLogin') ?? true;
+}
+
+Future<void> setOpenOnLogin(bool on) async {
+  if (!Platform.isWindows) return;
+  await (await SharedPreferences.getInstance()).setBool('openOnLogin', on);
+}
+
 Future<void> setAutostart(bool on) async {
   if (!Platform.isWindows) return;
   await (await SharedPreferences.getInstance()).setBool('autostart', on);
