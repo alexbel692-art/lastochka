@@ -285,12 +285,14 @@ if os.path.exists(fw):
             raise SystemExit('flutter_window.cpp: шаблон изменился, обработчик переподключения RDP не добавлен')
         s = s.replace(head, head + '''
 #include <shellapi.h>
+#include <shobjidl.h>
 #include <wtsapi32.h>
 #include <cstdio>
 #include <cwchar>
 #include <string>
 #pragma comment(lib, "Wtsapi32.lib")
 #pragma comment(lib, "Shell32.lib")
+#pragma comment(lib, "Ole32.lib")
 
 namespace {
 constexpr UINT_PTR kLastochkaReconnectTimer = 0x4C41;
@@ -301,6 +303,45 @@ int g_lastochka_tries = 0;
 bool g_lastochka_minimized = false;
 int g_lastochka_redraws_left = 0;
 ULONGLONG g_lastochka_last_kick = 0;
+
+// Unread counter on the taskbar button (like Telegram): Dart draws %TEMP%\\lastochka_badge.ico and posts
+// kLastochkaBadgeMsg (wparam = count, lparam = 1 to flash the button if the window is not in front).
+const UINT kLastochkaBadgeMsg = WM_APP + 0x0B42;
+void LastochkaSetBadge(HWND hwnd, int count, bool flash) {
+  static ITaskbarList3* tb = nullptr;
+  static HICON shown = nullptr;
+  if (tb == nullptr) {
+    if (FAILED(CoCreateInstance(CLSID_TaskbarList, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&tb)))) {
+      tb = nullptr;
+      return;
+    }
+    if (FAILED(tb->HrInit())) {
+      tb->Release();
+      tb = nullptr;
+      return;
+    }
+  }
+  HICON next = nullptr;
+  if (count > 0) {
+    wchar_t path[MAX_PATH];
+    const DWORD n = GetTempPathW(MAX_PATH, path);
+    if (n > 0 && n < MAX_PATH - 32) {
+      wcscat_s(path, MAX_PATH, L"lastochka_badge.ico");
+      next = static_cast<HICON>(LoadImageW(nullptr, path, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                           GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE));
+    }
+  }
+  tb->SetOverlayIcon(hwnd, next, count > 0 ? L"Unread messages" : L"");
+  if (shown != nullptr) DestroyIcon(shown);
+  shown = next;
+  if (flash && GetForegroundWindow() != hwnd) {
+    FLASHWINFO fi{};
+    fi.cbSize = sizeof(fi);
+    fi.hwnd = hwnd;
+    fi.dwFlags = FLASHW_TRAY | FLASHW_TIMERNOFG;
+    FlashWindowEx(&fi);
+  }
+}
 
 // Diagnostics: what happened to the window around RDP reconnects -> %TEMP%\\lastochka_rdp.txt (shown in the
 // diagnostics report). Kept small: over 64 KB the file starts again.
@@ -428,6 +469,9 @@ void LastochkaRestart(HWND hwnd) {
     case WM_DWMCOMPOSITIONCHANGED:
       LastochkaScheduleKick(hwnd);
       break;
+    case kLastochkaBadgeMsg:
+      LastochkaSetBadge(hwnd, static_cast<int>(wparam), lparam != 0);
+      return 0;
     case WM_WTSSESSION_CHANGE:
       LastochkaLog(L"session event", static_cast<long long>(wparam));
       if (wparam == WTS_REMOTE_CONNECT || wparam == WTS_CONSOLE_CONNECT || wparam == WTS_SESSION_UNLOCK) {

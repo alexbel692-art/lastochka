@@ -23,6 +23,7 @@ import 'system/pinning.dart';
 import 'system/privacy.dart';
 import 'system/trust.dart';
 import 'system/updater.dart';
+import 'system/badge.dart';
 import 'system/desktop.dart';
 import 'system/device_guard.dart';
 import 'system/notify.dart';
@@ -91,6 +92,7 @@ Future<void> main(List<String> args) async {
   try {
     client = await createClient();
     Diag.rdp('client ready +${DateTime.now().difference(started).inMilliseconds} ms');
+    UnreadBadge.instance.start(); // Windows: число непрочитанных на кнопке в панели задач и на значке в трее
     unawaited(client.onSync.stream.first.then((_) => Diag.rdp('first sync +${DateTime.now().difference(started).inMilliseconds} ms')));
   } catch (e, st) {
     Diag.err('Хранилище не открылось', e, st);
