@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'diag.dart';
 import 'notify.dart';
+import 'push.dart';
 
 final bool isDesktopOS = Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 const _android = MethodChannel('lastochka/system');
@@ -21,6 +22,8 @@ const _android = MethodChannel('lastochka/system');
 
 Future<void> startBackgroundService() async {
   if (!Platform.isAndroid) return;
+  // версия из Google Play: вместо постоянной фоновой службы — уведомления через Google
+  if (playBuild) return registerPush();
   final prefs = await SharedPreferences.getInstance();
   await prefs.setBool('bg.loggedIn', true);
   if (prefs.getBool('bg.enabled') == false) return;
@@ -40,7 +43,7 @@ Future<void> stopBackgroundService() async {
 }
 
 Future<bool> isIgnoringBatteryOptimizations() async {
-  if (!Platform.isAndroid) return true;
+  if (!Platform.isAndroid || playBuild) return true;
   try {
     return await _android.invokeMethod<bool>('isIgnoringBattery') ?? true;
   } catch (_) {

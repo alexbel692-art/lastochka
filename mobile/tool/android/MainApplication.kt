@@ -114,6 +114,23 @@ class MainApplication : Application() {
         private var dartReady = false
         private var clipStamp = 0L
         private val pendingTaps = mutableListOf<Map<String, String>>()
+        private var pendingPush = false
+        @Volatile var pushLatch: java.util.concurrent.CountDownLatch? = null
+
+        /** «Толчок» от Google (версия из Play): запустить Flutter, если не запущен, и синхронизироваться. */
+        fun push(app: Application) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                engine(app)
+                if (dartReady) channel?.invokeMethod("push", null) else pendingPush = true
+            }
+        }
+
+        /** Google выдал новый ключ устройства — перерегистрировать на сервере Matrix. */
+        fun pushToken(t: String) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (dartReady) try { channel?.invokeMethod("pushToken", t) } catch (_: Throwable) {}
+            }
+        }
 
         /** Состояние самообновления — в Dart. */
         fun installStatus(s: String) {
@@ -171,6 +188,7 @@ class MainApplication : Application() {
                         dartReady = true
                         pendingTaps.forEach { ch.invokeMethod("notificationTap", it) }
                         pendingTaps.clear()
+                        if (pendingPush) { pendingPush = false; ch.invokeMethod("push", null) }
                         watchNetwork(ctx)
                         result.success(true)
                     }
@@ -210,6 +228,10 @@ class MainApplication : Application() {
                         // ответ — сразу, а флаги окна меняются после текущего кадра (см. applyCallMode)
                         MainActivity.callMode = call.arguments == true
                         result.success(true)
+                        // версия из Google Play: служба с микрофоном — только на время звонка
+                        if (SyncService.isPlay(ctx)) {
+                            if (MainActivity.callMode) SyncService.start(ctx) else ctx.stopService(Intent(ctx, SyncService::class.java))
+                        }
                         MainActivity.current?.applyCallModeLater()
                     }
                     // звуки — в отдельном потоке: системный генератор тонов и мелодия звонка
@@ -272,6 +294,14 @@ class MainApplication : Application() {
                         }
                         result.success(ours)
                     }
+                    // ключ устройства для уведомлений Google — класс PushService есть только в сборке для Play
+                    "pushToken" -> {
+                        try {
+                            val m = Class.forName("app.lastochka.lastochka.PushService").getMethod("token", Context::class.java, Function1::class.java)
+                            m.invoke(null, ctx, { t: String? -> android.os.Handler(android.os.Looper.getMainLooper()).post { result.success(t) } })
+                        } catch (_: Throwable) { result.success(null) }
+                    }
+                    "pushDone" -> { pushLatch?.countDown(); result.success(true) }
                     "startService" -> { SyncService.start(ctx); result.success(true) }
                     "stopService" -> { ctx.stopService(Intent(ctx, SyncService::class.java)); result.success(true) }
                     "isIgnoringBattery" -> {

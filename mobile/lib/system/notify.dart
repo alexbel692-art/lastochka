@@ -19,6 +19,7 @@ import '../calls/voip.dart' show callActive;
 import '../pages/chat.dart';
 import 'desktop.dart';
 import 'diag.dart';
+import 'push.dart';
 
 final _fln = FlutterLocalNotificationsPlugin();
 const _portName = 'lastochka_notification_actions';
@@ -86,6 +87,10 @@ Future<void> initNotifications() async {
       if (call.method == 'notificationTap' && call.arguments is Map) {
         final m = call.arguments as Map;
         _handle('${m['action'] ?? ''}', '${m['payload'] ?? ''}');
+      } else if (call.method == 'push') {
+        await onPushWake();
+      } else if (call.method == 'pushToken') {
+        await registerPush(token: '${call.arguments ?? ''}');
       } else if (call.method == 'networkChanged') {
         onNetworkChanged?.call();
       } else if (call.method == 'installStatus') {

@@ -10,8 +10,10 @@ import '../system/lru.dart';
 import 'album.dart';
 import 'voice.dart' show fmtDur;
 import '../system/diag.dart';
+import '../system/push.dart' show playBuild;
 
-final bool galleryStripSupported = Platform.isAndroid || Platform.isIOS;
+// в версии из Google Play — без полного доступа к галерее (правила Play): фото выбираются системным окном
+final bool galleryStripSupported = Platform.isIOS || (Platform.isAndroid && !playBuild);
 
 final _thumbs = Lru<String, Future<Uint8List?>>(120)..register();
 

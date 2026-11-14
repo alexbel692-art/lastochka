@@ -152,6 +152,8 @@ jobs:
       - name: Сборка APK
         env:
           GIPHY_KEY: ${{ secrets.GIPHY_KEY }}
+          PUSH_GATEWAY: ${{ secrets.PUSH_GATEWAY }}
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         id: apk
         run: |
           mkdir -p ../dist
@@ -165,10 +167,12 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android-arm.apk"
           tool/annotate.sh "build apk" flutter build apk $B
           cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android.apk"
-          # Google Play: пакет AAB без самообновления и без разрешения ставить приложения (правила Play) —
-          # обновления там ставит сам Google Play
-          sed -i '/android.permission.REQUEST_INSTALL_PACKAGES/d' android/app/src/main/AndroidManifest.xml
-          tool/annotate.sh "build aab" flutter build appbundle $B --dart-define=PLAY=true
+          # Google Play: пакет AAB по правилам Play — без самообновления, без постоянной фоновой службы
+          # (сообщения будит Google), без полного доступа к галерее; подробности — в tool/play_prepare.py
+          python3 tool/play_prepare.py
+          P="--dart-define=PLAY=true"
+          [ -n "$PUSH_GATEWAY" ] && [ -n "$GOOGLE_SERVICES_JSON" ] && P="$P --dart-define=PUSH_GATEWAY=$PUSH_GATEWAY"
+          tool/annotate.sh "build aab" flutter build appbundle $B $P
           cp build/app/outputs/bundle/release/app-release.aab "../dist/Lastochka-$V-GooglePlay.aab"
           for f in ../dist/*.apk; do echo "::notice::$(basename $f) — $(( $(stat -c%s $f) / 1048576 )) МБ, $(unzip -l $f | grep -oE 'lib/[^/]+/' | sort -u | tr '\n' ' ')"; done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

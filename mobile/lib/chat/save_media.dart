@@ -10,6 +10,7 @@ import 'package:photo_manager/photo_manager.dart';
 
 import '../system/diag.dart';
 import '../system/file_safety.dart';
+import '../system/push.dart' show playBuild;
 
 bool canSaveMedia(Event e) =>
     !e.redacted &&
@@ -56,8 +57,11 @@ Future<void> saveMedia(BuildContext context, Event e) async {
         toast('Сохранять в галерею можно фото и видео');
         return;
       }
-      final ps = await PhotoManager.requestPermissionExtend();
-      if (!ps.hasAccess) {
+      // версия из Google Play не просит доступ к галерее: на Android 10+ сохранение в галерею
+      // разрешения не требует
+      if (playBuild && Platform.isAndroid) await PhotoManager.setIgnorePermissionCheck(true);
+      final ps = playBuild && Platform.isAndroid ? null : await PhotoManager.requestPermissionExtend();
+      if (ps != null && !ps.hasAccess) {
         toast('Разрешите Ласточке доступ к фото, чтобы сохранять');
         return;
       }

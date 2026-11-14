@@ -33,6 +33,7 @@ import '../widgets/avatar.dart';
 import 'login.dart';
 import '../chat/link_preview.dart' show linkPreviews, setLinkPreviews;
 import '../calls/voip.dart' show micNoise, micGain, micNoisePref, micGainPref;
+import '../system/push.dart' show playBuild;
 
 /// Своё имя или фото изменились — экраны перечитывают профиль (раньше новое имя было видно только после перезапуска).
 final ownProfileChanged = ValueNotifier<int>(0);
@@ -488,6 +489,7 @@ class _SettingsPageState extends State<SettingsPage> {
         _switch(Icons.notifications_outlined, 'Уведомления', 'О новых сообщениях и звонках', _pref('notify.enabled'), (v) => _set('notify.enabled', v)),
         _switch(Icons.short_text, 'Текст сообщения', 'Показывать текст в уведомлении (иначе — «Новое сообщение»)', _pref('notify.text'), (v) => _set('notify.text', v)),
         if (Platform.isAndroid) ...[
+          if (!playBuild)
           _switch(Icons.sync, 'Работать в фоне', 'Сообщения и звонки приходят, даже когда Ласточка закрыта', _pref('bg.enabled'), (v) async {
             await _set('bg.enabled', v);
             v ? await startBackgroundService() : await stopBackgroundService();
