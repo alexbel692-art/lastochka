@@ -52,6 +52,10 @@ Future<bool> verifyUpdateSignature(Map<String, dynamic> s) async {
   }
 }
 
+
+/// Сборка для Google Play (--dart-define=PLAY=true).
+const _fromPlay = bool.fromEnvironment('PLAY');
+
 class UpdateInfo {
   final String version, notes, fileName, fileUrl, sigUrl;
   final int size;
@@ -74,7 +78,8 @@ class Updater {
   final error = ValueNotifier<String?>(null);
   Timer? _timer;
 
-  bool get supported => Platform.isWindows || Platform.isMacOS || Platform.isAndroid;
+  // версия из Google Play обновляется только через Play (правила магазина) — своё обновление выключено
+  bool get supported => Platform.isWindows || Platform.isMacOS || (Platform.isAndroid && !_fromPlay);
 
   DateTime? _lastCheck;
 

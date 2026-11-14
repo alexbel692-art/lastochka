@@ -165,6 +165,11 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android-arm.apk"
           tool/annotate.sh "build apk" flutter build apk $B
           cp build/app/outputs/flutter-apk/app-release.apk "../dist/Lastochka-$V-Android.apk"
+          # Google Play: пакет AAB без самообновления и без разрешения ставить приложения (правила Play) —
+          # обновления там ставит сам Google Play
+          sed -i '/android.permission.REQUEST_INSTALL_PACKAGES/d' android/app/src/main/AndroidManifest.xml
+          tool/annotate.sh "build aab" flutter build appbundle $B --dart-define=PLAY=true
+          cp build/app/outputs/bundle/release/app-release.aab "../dist/Lastochka-$V-GooglePlay.aab"
           for f in ../dist/*.apk; do echo "::notice::$(basename $f) — $(( $(stat -c%s $f) / 1048576 )) МБ, $(unzip -l $f | grep -oE 'lib/[^/]+/' | sort -u | tr '\n' ' ')"; done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -198,12 +203,22 @@ jobs:
           if [ -z "$KS" ]; then
             [ "$PUBLISH" = "true" ] && { echo "::error::Секрет ANDROID_KEYSTORE не задан — выпуск невозможен"; exit 1; }
             echo "::warning::Ключ не задан — APK остаются с временной подписью (только для проверки)"
-            cp in/*.apk out/; exit 0
+            cp in/*.apk in/*.aab out/; exit 0
           fi
           AS="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
           printf '%s' "$KS" | base64 -d > "$RUNNER_TEMP/k.jks"
           for f in in/*.apk; do
             "$AS" sign --ks "$RUNNER_TEMP/k.jks" --ks-pass env:KP --ks-key-alias lastochka --key-pass env:KP --out "out/$(basename "$f")" "$f"
+          done
+          # пакет для Google Play — тем же ключом (это «ключ загрузки» Play); временную подпись сборки снимаем
+          for f in in/*.aab; do
+            cp "$f" "$RUNNER_TEMP/u.aab"
+            zip -q -d "$RUNNER_TEMP/u.aab" 'META-INF/*' || true
+            jarsigner -keystore "$RUNNER_TEMP/k.jks" -storepass:env KP -keypass:env KP -signedjar "out/$(basename "$f")" "$RUNNER_TEMP/u.aab" lastochka >/dev/null
+            rm -f "$RUNNER_TEMP/u.aab"
+            got="$(keytool -printcert -jarfile "out/$(basename "$f")" | grep -m1 'SHA256:' | awk '{print $2}' | tr -d ':' | tr 'A-F' 'a-f')"
+            [ "$got" = "7994c098efa34a2dc89d31cfcbaf72e2b8585d4f0abc53668d5871784a057647" ] || { echo "::error::$(basename "$f") подписан не тем ключом ('$got')"; exit 1; }
+            echo "$(basename "$f"): подписан ключом Ласточки"
           done
           rm -f "$RUNNER_TEMP/k.jks"
           # подпись — именно нашим ключом: полный отпечаток сертификата и ровно одна подпись
@@ -518,7 +533,7 @@ jobs:
               cp "$src/$n" dist/
             done
           }
-          take android-signed "Lastochka-$V-Android-arm64.apk" "Lastochka-$V-Android-arm.apk" "Lastochka-$V-Android.apk"
+          take android-signed "Lastochka-$V-Android-arm64.apk" "Lastochka-$V-Android-arm.apk" "Lastochka-$V-Android.apk" "Lastochka-$V-GooglePlay.aab"
           take ios "Lastochka-$V-iPhone-unsigned.ipa"
           take macos "Lastochka-$V-arm64.dmg" "Lastochka-$V-x64.dmg"
           take windows "Lastochka-Setup-$V.exe" "Lastochka-$V-Windows-portable.zip"
@@ -547,6 +562,7 @@ jobs:
             • Windows: Lastochka-Setup-….exe — установка для всех пользователей (подходит для RDP), живёт в трее, запускается с Windows. Прежняя версия 3.x удаляется автоматически.
             • macOS (Apple Silicon и Intel): Lastochka-…-arm64.dmg (или -x64.dmg — это тот же файл)
             • Android (телефоны и планшеты): Lastochka-…-Android.apk
+            • Google Play: Lastochka-…-GooglePlay.aab — пакет для загрузки в Play Console (не для установки на телефон)
             • iPhone: Lastochka-…-iPhone-unsigned.ipa — НЕ готовый установочный пакет: он не подписан Apple и на iPhone сам не установится. Это заготовка для самостоятельной подписи своим Apple ID (Sideloadly, AltStore) или сертификатом разработчика; подписанная версия для обычной установки появится после подключения учётной записи Apple Developer.
             • Подлинность любого файла: рядом лежит .sig (подпись Ласточки) и SHA256SUMS.txt.
           files: dist/*
