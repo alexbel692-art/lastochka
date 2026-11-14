@@ -126,6 +126,29 @@ fi
 cat > "$BASE/sygnal/sygnal.yaml" <<EOF
 # Создано setup-push-server.sh — правки вручную перезапишутся при следующем запуске скрипта
 log:
+  # при своём разделе log Sygnal не подставляет настройки журнала по умолчанию — указываем их полностью
+  setup:
+    version: 1
+    disable_existing_loggers: false
+    formatters:
+      normal:
+        format: "%(asctime)s [%(process)d] %(levelname)-5s %(name)s %(message)s"
+    handlers:
+      stderr:
+        class: logging.StreamHandler
+        formatter: normal
+        stream: ext://sys.stderr
+    loggers:
+      sygnal.access:
+        propagate: false
+        handlers: [stderr]
+        level: INFO
+      sygnal:
+        propagate: false
+        handlers: [stderr]
+    root:
+      handlers: [stderr]
+      level: INFO
   access:
     x_forwarded_for: true
 http:
