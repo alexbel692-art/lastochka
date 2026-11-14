@@ -537,7 +537,7 @@ jobs:
           take ios "Lastochka-$V-iPhone-unsigned.ipa"
           take macos "Lastochka-$V-arm64.dmg" "Lastochka-$V-x64.dmg"
           take windows "Lastochka-Setup-$V.exe" "Lastochka-$V-Windows-portable.zip"
-          [ "$(ls dist | wc -l)" -eq 8 ] || { echo "::error::ожидалось 8 файлов"; ls -la dist; exit 1; }
+          [ "$(ls dist | wc -l)" -eq 9 ] || { echo "::error::ожидалось 9 файлов (с пакетом для Google Play)"; ls -la dist; exit 1; }
           ls -la dist
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
