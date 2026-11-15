@@ -228,10 +228,6 @@ class MainApplication : Application() {
                         // ответ — сразу, а флаги окна меняются после текущего кадра (см. applyCallMode)
                         MainActivity.callMode = call.arguments == true
                         result.success(true)
-                        // версия из Google Play: служба с микрофоном — только на время звонка
-                        if (SyncService.isPlay(ctx)) {
-                            if (MainActivity.callMode) SyncService.start(ctx) else ctx.stopService(Intent(ctx, SyncService::class.java))
-                        }
                         MainActivity.current?.applyCallModeLater()
                     }
                     // звуки — в отдельном потоке: системный генератор тонов и мелодия звонка
@@ -300,6 +296,13 @@ class MainApplication : Application() {
                             val m = Class.forName("app.lastochka.lastochka.PushService").getMethod("token", Context::class.java, Function1::class.java)
                             m.invoke(null, ctx, { t: String? -> android.os.Handler(android.os.Looper.getMainLooper()).post { result.success(t) } })
                         } catch (_: Throwable) { result.success(null) }
+                    }
+                    // версия из Google Play: служба с микрофоном — только пока идёт звонок
+                    "callService" -> {
+                        if (SyncService.isPlay(ctx)) {
+                            if (call.arguments == true) SyncService.start(ctx) else ctx.stopService(Intent(ctx, SyncService::class.java))
+                        }
+                        result.success(true)
                     }
                     "pushDone" -> { pushLatch?.countDown(); result.success(true) }
                     "startService" -> { SyncService.start(ctx); result.success(true) }

@@ -26,7 +26,7 @@ class SyncService : Service() {
         }
         // версия из Google Play: служба работает только во время звонка (микрофон в фоне),
         // сообщения будит Google (FCM) — постоянной фоновой службы там нет
-        if (isPlay(this) && (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED || MainActivity.current == null)) {
+        if (isPlay(this) && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -43,7 +43,12 @@ class SyncService : Service() {
         // такой тип разрешён, только когда служба запущена из открытого окна
         val mic = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED && MainActivity.current != null
         if (isPlay(this)) {
-            if (Build.VERSION.SDK_INT >= 30) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) else startForeground(1, n)
+            // из фона Android не даёт включить микрофон — тогда служба просто не нужна (окно звонка открыто)
+            try {
+                if (Build.VERSION.SDK_INT >= 30) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) else startForeground(1, n)
+            } catch (_: Exception) {
+                stopSelf()
+            }
             return START_NOT_STICKY
         }
         if (Build.VERSION.SDK_INT >= 34) {

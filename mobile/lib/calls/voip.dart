@@ -16,6 +16,7 @@ import '../system/diag.dart';
 import '../system/desktop.dart';
 import '../system/lock.dart';
 import '../system/notify.dart';
+import '../system/push.dart' show playBuild, callService;
 import '../system/trust.dart';
 import 'turn_proxy.dart';
 
@@ -217,6 +218,18 @@ Future<void> answerCall(CallSession c) async {
 
 void initVoip() {
   voip = VoIP(client, LastochkaVoip());
+  // версия из Google Play: служба с микрофоном — только пока идёт звонок (разговор не прерывается,
+  // когда Ласточку сворачивают; в шторке — «Идёт звонок»). Повторно — когда звонок соединился:
+  // входящий мог прийти, пока Ласточка была в фоне, а запустить службу можно только с открытым окном
+  if (playBuild) {
+    callActive.addListener(() => callService(callActive.value));
+    currentCall.addListener(() {
+      final c = currentCall.value;
+      c?.onCallStateChanged.stream.listen((s) {
+        if (s == CallState.kConnected && callActive.value) callService(true);
+      });
+    });
+  }
   // кнопки «Ответить» / «Отклонить» в уведомлении
   onCallAction = (action, callId) {
     // отбой из окна на экране блокировки — для идущего звонка

@@ -56,6 +56,14 @@ Future<void> registerPush({String? token}) async {
   }
 }
 
+/// Служба с микрофоном на время звонка (версия из Google Play).
+Future<void> callService(bool on) async {
+  if (!Platform.isAndroid || !playBuild) return;
+  try {
+    await _system.invokeMethod('callService', on);
+  } catch (_) {}
+}
+
 /// Пришёл «толчок» от Google: сразу забрать новые сообщения и звонки.
 Future<void> onPushWake() async {
   try {
