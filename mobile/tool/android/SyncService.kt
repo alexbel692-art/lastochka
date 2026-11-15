@@ -71,11 +71,16 @@ class SyncService : Service() {
         private const val CHANNEL = "background"
 
         /** Сборка для Google Play: признак в манифесте (meta-data lastochka_play), его кладёт только сборка AAB. */
-        fun isPlay(ctx: Context): Boolean = play ?: try {
-            @Suppress("DEPRECATION")
-            ctx.packageManager.getApplicationInfo(ctx.packageName, android.content.pm.PackageManager.GET_META_DATA)
-                .metaData?.getBoolean("lastochka_play", false) == true
-        } catch (_: Throwable) { false }.also { play = it }
+        fun isPlay(ctx: Context): Boolean {
+            play?.let { return it }
+            val v = try {
+                @Suppress("DEPRECATION")
+                ctx.packageManager.getApplicationInfo(ctx.packageName, android.content.pm.PackageManager.GET_META_DATA)
+                    .metaData?.getBoolean("lastochka_play", false) == true
+            } catch (_: Throwable) { false }
+            play = v
+            return v
+        }
         private var play: Boolean? = null
 
         /** Запустить, если пользователь вошёл и не отключил работу в фоне. */
