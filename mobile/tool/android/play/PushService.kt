@@ -19,8 +19,9 @@ class PushService : FirebaseMessagingService() {
         val done = CountDownLatch(1)
         MainApplication.pushLatch = done
         MainApplication.push(application)
-        // держим процесс, пока Ласточка забирает новые события (Google даёт на это несколько секунд)
-        try { done.await(9, TimeUnit.SECONDS) } catch (_: InterruptedException) {}
+        // держим процесс, пока Ласточка забирает новые события, а при входящем звонке — пока он звонит
+        // (иначе Android «замораживает» свёрнутое приложение и звонок виден только после открытия)
+        try { done.await(28, TimeUnit.SECONDS) } catch (_: InterruptedException) {}
     }
 
     override fun onNewToken(token: String) {

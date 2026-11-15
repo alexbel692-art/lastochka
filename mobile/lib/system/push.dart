@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:matrix/matrix.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../calls/voip.dart' show ringing;
 import '../main.dart' show client;
 
 /// Сборка для Google Play (--dart-define=PLAY=true).
@@ -66,8 +67,16 @@ Future<void> callService(bool on) async {
 
 /// Пришёл «толчок» от Google: сразу забрать новые сообщения и звонки.
 Future<void> onPushWake() async {
+  final started = DateTime.now();
   try {
     if (client.isLogged()) await client.oneShotSync().timeout(const Duration(seconds: 8));
+    // входящий звонок разбирается уже после синхронизации (расшифровка, уведомление о звонке) —
+    // даём на это время, а пока звонок звонит, не отпускаем: иначе Android «заморозит» свёрнутую
+    // Ласточку, и звонок покажется только когда её откроют
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
+    while (ringing != null && DateTime.now().difference(started) < const Duration(seconds: 25)) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
   } catch (e) {
     Logs().w('[Ласточка] синхронизация по уведомлению Google', e);
   } finally {
