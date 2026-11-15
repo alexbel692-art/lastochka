@@ -46,7 +46,7 @@ class SyncService : Service() {
             // из фона Android не даёт включить микрофон — тогда служба просто не нужна (окно звонка открыто)
             try {
                 if (Build.VERSION.SDK_INT >= 30) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) else startForeground(1, n)
-            } catch (_: Exception) {
+            } catch (_: Throwable) {
                 stopSelf()
             }
             return START_NOT_STICKY
@@ -55,7 +55,9 @@ class SyncService : Service() {
             try {
                 startForeground(1, n, if (mic) ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
             } catch (_: Exception) {
-                startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
+                // без микрофона — только связь с сервером; если и так нельзя, служба не запускается,
+                // но приложение не падает
+                try { startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING) } catch (_: Throwable) { stopSelf(); return START_NOT_STICKY }
             }
         } else if (Build.VERSION.SDK_INT >= 30) {
             startForeground(1, n, if (mic) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
@@ -68,11 +70,13 @@ class SyncService : Service() {
     companion object {
         private const val CHANNEL = "background"
 
-        /** Сборка для Google Play: ресурс lastochka_play кладёт туда только сборка AAB. */
-        fun isPlay(ctx: Context): Boolean = try {
-            val id = ctx.resources.getIdentifier("lastochka_play", "bool", ctx.packageName)
-            id != 0 && ctx.resources.getBoolean(id)
-        } catch (_: Throwable) { false }
+        /** Сборка для Google Play: признак в манифесте (meta-data lastochka_play), его кладёт только сборка AAB. */
+        fun isPlay(ctx: Context): Boolean = play ?: try {
+            @Suppress("DEPRECATION")
+            ctx.packageManager.getApplicationInfo(ctx.packageName, android.content.pm.PackageManager.GET_META_DATA)
+                .metaData?.getBoolean("lastochka_play", false) == true
+        } catch (_: Throwable) { false }.also { play = it }
+        private var play: Boolean? = null
 
         /** Запустить, если пользователь вошёл и не отключил работу в фоне. */
         fun startIfEnabled(ctx: Context) {

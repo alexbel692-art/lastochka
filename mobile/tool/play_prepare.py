@@ -29,10 +29,11 @@ s = s.replace('android:foregroundServiceType="remoteMessaging|microphone"', 'and
 if 'foregroundServiceType="microphone"' not in s:
     raise SystemExit('не найдена служба SyncService в манифесте')
 
+# признак «версия для Google Play» для Kotlin-части (SyncService.isPlay) — в манифесте: ресурс
+# с таким признаком удалял сжиматель ресурсов, и Play-версия падала при запуске фоновой службы
+s = s.replace('</application>', '        <meta-data android:name="lastochka_play" android:value="true"/>\n    </application>', 1)
 values = 'android/app/src/main/res/values'
 os.makedirs(values, exist_ok=True)
-open(f'{values}/lastochka_play.xml', 'w', encoding='utf-8').write(
-    '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <bool name="lastochka_play">true</bool>\n</resources>\n')
 
 gs = os.environ.get('GOOGLE_SERVICES_JSON', '').strip()
 if gs:

@@ -12,6 +12,8 @@ import java.util.concurrent.TimeUnit
  * Сервер Matrix → шлюз уведомлений → Firebase → сюда. В «толчке» только номер события, без текста:
  * Ласточка просыпается, сама забирает сообщения с сервера и показывает уведомление или звонок.
  */
+// @Keep: метод token вызывается по имени (рефлексией) — сжиматель кода не должен его переименовать
+@androidx.annotation.Keep
 class PushService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         val done = CountDownLatch(1)
