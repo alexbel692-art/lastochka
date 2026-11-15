@@ -69,7 +69,14 @@ Future<void> callService(bool on) async {
 Future<void> onPushWake() async {
   final started = DateTime.now();
   try {
-    if (client.isLogged()) await client.oneShotSync().timeout(const Duration(seconds: 8));
+    if (client.isLogged()) {
+      // пока Ласточка спала, Android отключал ей сеть: незаконченный запрос синхронизации «повис»,
+      // и oneShotSync ждал именно его (до таймаута). Бросаем его и сразу начинаем новый — он вернёт
+      // новые события (сообщения, входящий звонок) за секунду-две
+      await client.abortSync();
+      client.backgroundSync = true;
+      await client.oneShotSync().timeout(const Duration(seconds: 15));
+    }
     // входящий звонок разбирается уже после синхронизации (расшифровка, уведомление о звонке) —
     // даём на это время, а пока звонок звонит, не отпускаем: иначе Android «заморозит» свёрнутую
     // Ласточку, и звонок покажется только когда её откроют
