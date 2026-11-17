@@ -1,8 +1,11 @@
-// Уведомления через Google (FCM) — только версия из Google Play.
-// Там нет постоянной фоновой службы (правила Play): сервер Matrix отправляет «толчок» через шлюз
+// Уведомления через Google (FCM) — версия из Google Play, и через Apple (APNs) — версия из App Store.
+// Android: постоянной фоновой службы нет (правила Play): сервер Matrix отправляет «толчок» через шлюз
 // уведомлений (Sygnal) в Firebase, Firebase будит Ласточку, она синхронизируется и сама показывает
-// уведомление о сообщении или звонке. Во «толчке» нет текста сообщений — только номер события
-// (формат event_id_only), поэтому Google переписку не видит.
+// уведомление о сообщении или звонке.
+// iPhone: закрытую Ласточку iOS не будит, поэтому Apple показывает готовое уведомление
+// «Новое сообщение» (default_payload ниже) — без имени и текста; откроете Ласточку — увидите всё.
+// В обоих случаях во «толчке» нет текста сообщений — только номер события (формат event_id_only),
+// поэтому ни Google, ни Apple переписку не видят.
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -18,25 +21,36 @@ const bool playBuild = bool.fromEnvironment('PLAY');
 /// Адрес шлюза уведомлений (секрет сборки PUSH_GATEWAY), например https://…/_matrix/push/v1/notify.
 const String pushGateway = String.fromEnvironment('PUSH_GATEWAY');
 
-/// Должен совпадать с именем приложения в настройках шлюза (sygnal.yaml).
-const String pushAppId = 'app.lastochka.android';
+/// Сборка для App Store (--dart-define=APPSTORE=true).
+const bool appStoreBuild = bool.fromEnvironment('APPSTORE');
+
+/// Должен совпадать с именем приложения в настройках шлюза (sygnal.yaml, server/setup-push-server.sh).
+String get pushAppId => Platform.isIOS ? 'app.lastochka.ios' : 'app.lastochka.android';
+
+/// Уведомление, которое Apple показывает сама (Sygnal добавляет к нему только номера комнаты и события).
+const _iosPayload = {
+  'aps': {
+    'alert': {'title': 'Ласточка', 'body': 'Новое сообщение'},
+    'sound': 'default',
+  },
+};
 
 const _system = MethodChannel('lastochka/system');
 
-bool get pushSupported => Platform.isAndroid && playBuild && pushGateway.isNotEmpty;
+bool get pushSupported => pushGateway.isNotEmpty && ((Platform.isAndroid && playBuild) || (Platform.isIOS && appStoreBuild));
 
-/// Зарегистрировать телефон на сервере Matrix для уведомлений через Google.
+/// Зарегистрировать телефон на сервере Matrix для уведомлений через Google или Apple.
 /// Повторный вызов с тем же ключом ничего не меняет на сервере.
 Future<void> registerPush({String? token}) async {
   if (!pushSupported || !client.isLogged()) return;
   try {
     token ??= await _system.invokeMethod<String>('pushToken');
     if (token == null || token.isEmpty) {
-      Logs().w('[Ласточка] уведомления Google: нет ключа устройства');
+      Logs().w('[Ласточка] уведомления: нет ключа устройства');
       return;
     }
     final prefs = await SharedPreferences.getInstance();
-    final mark = '${client.userID}|${client.deviceID}|$token';
+    final mark = '${client.userID}|${client.deviceID}|$token|$pushAppId';
     if (prefs.getString('push.registered') == mark) return;
     await client.postPusher(
       Pusher(
@@ -44,16 +58,20 @@ Future<void> registerPush({String? token}) async {
         kind: 'http',
         appId: pushAppId,
         appDisplayName: 'Ласточка',
-        deviceDisplayName: client.deviceName ?? 'Android',
+        deviceDisplayName: client.deviceName ?? (Platform.isIOS ? 'iPhone' : 'Android'),
         lang: 'ru',
-        data: PusherData(url: Uri.parse(pushGateway), format: 'event_id_only'),
+        data: PusherData(
+          url: Uri.parse(pushGateway),
+          format: 'event_id_only',
+          additionalProperties: Platform.isIOS ? {'default_payload': _iosPayload} : const {},
+        ),
       ),
       append: true,
     );
     await prefs.setString('push.registered', mark);
-    Logs().i('[Ласточка] уведомления Google включены');
+    Logs().i('[Ласточка] уведомления через ${Platform.isIOS ? 'Apple' : 'Google'} включены');
   } catch (e, st) {
-    Logs().w('[Ласточка] не удалось включить уведомления Google', e, st);
+    Logs().w('[Ласточка] не удалось включить уведомления', e, st);
   }
 }
 

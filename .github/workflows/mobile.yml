@@ -14,6 +14,10 @@ on:
         description: 'Тестовая версия (получат только те, у кого включены «Тестовые версии»)'
         type: boolean
         default: false
+      notes:
+        description: 'Что нового (для Google Play и App Store; пусто — «Исправления и улучшения»)'
+        required: false
+        default: ''
       deps:
         description: 'Библиотеки: locked — строго по pubspec.lock; add — добавить новые (остальные не трогать); upgrade — обновить все'
         type: choice
@@ -292,6 +296,89 @@ jobs:
           name: ios
           path: dist/*
 
+  # iPhone для App Store: подписанная сборка уходит в App Store Connect (TestFlight) при каждом запуске;
+  # на проверку Apple её отправляет этап stores — только после публикации выпуска на GitHub.
+  # Пока не заданы секреты Apple — этап пропускается, остальной выпуск идёт как раньше.
+  ios-appstore:
+    runs-on: macos-latest
+    steps:
+      - name: Есть ли ключи Apple
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          if [ -n "$ASC_KEY_P8" ]; then echo "ON=true" >> "$GITHUB_ENV"
+          else echo "::warning::App Store пропущен: нет секретов Apple (см. docs/appstore/README.md)"; fi
+        working-directory: .
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.ON == 'true'
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        if: env.ON == 'true'
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: ${{ inputs.deps == 'locked' }}
+      - name: Платформенные папки
+        if: env.ON == 'true'
+        run: |
+          tool/annotate.sh "create" flutter create --no-pub --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
+          rm -f test/widget_test.dart
+          python3 tool/ci_prepare.py
+          # правила App Store: только iPhone, звонки в фоне, декларация шифрования, манифест конфиденциальности
+          python3 tool/appstore_prepare.py
+      - name: Зависимости
+        if: env.ON == 'true'
+        run: |
+          if [ "$DEPS" = "upgrade" ]; then tool/annotate.sh "appstore pub upgrade" flutter pub upgrade
+          elif [ "$DEPS" = "add" ]; then tool/annotate.sh "appstore pub get" flutter pub get
+          elif git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then tool/annotate.sh "appstore pub get" flutter pub get; git diff --quiet -- pubspec.lock || { echo "::error::pubspec.lock изменился: $(git diff -- pubspec.lock | grep '^[-+] ' | head -20 | tr '\n' ' ')"; exit 1; }
+          else tool/annotate.sh "appstore pub get" flutter pub get; fi
+          dart run flutter_launcher_icons
+      # Подпись — «облачная» через ключ App Store Connect API (роль Admin): Xcode сам создаёт
+      # сертификат и профиль. Нужны секреты APPLE_TEAM_ID, ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8
+      # (содержимое файла AuthKey_….p8). Подробно — docs/appstore/README.md.
+      - name: Сборка и отправка в App Store Connect
+        if: env.ON == 'true'
+        env:
+          GIPHY_KEY: ${{ secrets.GIPHY_KEY }}
+          PUSH_GATEWAY: ${{ secrets.PUSH_GATEWAY }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          for x in TEAM ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
+            [ -n "${!x}" ] || { echo "::error::не задан секрет для $x — см. docs/appstore/README.md"; exit 1; }
+          done
+          KEY="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s\n' "$ASC_KEY_P8" > "$KEY"
+          AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+          # уведомления через Apple — если задан шлюз (тот же Sygnal, что для Google Play)
+          P="--dart-define=APPSTORE=true"
+          [ -n "$PUSH_GATEWAY" ] && P="$P --dart-define=PUSH_GATEWAY=$PUSH_GATEWAY"
+          tool/annotate.sh "appstore config" flutter build ios --release --no-codesign --config-only $P --dart-define=APP_VERSION="$V" --dart-define=GIPHY_KEY="$GIPHY_KEY" --build-name="$V" --build-number="${{ github.run_number }}"
+          cd ios
+          ../tool/annotate.sh "appstore archive" xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release \
+            -sdk iphoneos -destination generic/platform=iOS -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
+            DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic "${AUTH[@]}" archive -quiet
+          cat > "$RUNNER_TEMP/export.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          PLIST
+          ../tool/annotate.sh "appstore upload" xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export.plist" -exportPath "$RUNNER_TEMP/export" "${AUTH[@]}"
+          rm -f "$KEY"
+          echo "::notice title=App Store::сборка $V (${{ github.run_number }}) отправлена — через 10–30 минут появится в App Store Connect → TestFlight"
+
   macos:
     runs-on: macos-latest
     steps:
@@ -502,7 +589,7 @@ jobs:
   release:
     # все платформы обязательны: неполный выпуск не публикуется
     if: ${{ inputs.publish && !cancelled() && !failure() }}
-    needs: [android, android-sign, ios, macos, windows, emulator]
+    needs: [android, android-sign, ios, ios-appstore, macos, windows, emulator]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -567,6 +654,46 @@ jobs:
             • macOS (Apple Silicon и Intel): Lastochka-…-arm64.dmg (или -x64.dmg — это тот же файл)
             • Android (телефоны и планшеты): Lastochka-…-Android.apk
             • Google Play: Lastochka-…-GooglePlay.aab — пакет для загрузки в Play Console (не для установки на телефон)
-            • iPhone: Lastochka-…-iPhone-unsigned.ipa — НЕ готовый установочный пакет: он не подписан Apple и на iPhone сам не установится. Это заготовка для самостоятельной подписи своим Apple ID (Sideloadly, AltStore) или сертификатом разработчика; подписанная версия для обычной установки появится после подключения учётной записи Apple Developer.
+            • iPhone: Ласточка в App Store. Lastochka-…-iPhone-unsigned.ipa — неподписанная заготовка для самостоятельной подписи своим Apple ID (Sideloadly, AltStore).
             • Подлинность любого файла: рядом лежит .sig (подпись Ласточки) и SHA256SUMS.txt.
           files: dist/*
+
+  # Магазины — сразу после выпуска на GitHub (компьютеры и APK обновляются сами с GitHub):
+  # Google Play — пакет AAB на дорожку PLAY_TRACK; App Store — сборка из TestFlight на проверку Apple.
+  # Оба выходят к людям сами, как только магазин закончит проверку. Нет секретов — магазин пропускается.
+  stores:
+    needs: [release, android-sign, ios-appstore]
+    if: ${{ inputs.publish && !cancelled() && needs.release.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      BUILD: ${{ github.run_number }}
+      NOTES: ${{ inputs.notes }}
+      BETA: ${{ inputs.beta }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-signed
+          path: art
+      - name: Библиотека для ключей магазинов
+        run: pip install --quiet 'pyjwt[crypto]==2.10.1'
+      - name: Google Play
+        env:
+          PLAY_SERVICE_ACCOUNT: ${{ secrets.PLAY_SERVICE_ACCOUNT }}
+          PLAY_TRACK: ${{ vars.PLAY_TRACK }}
+          PLAY_BETA_TRACK: ${{ vars.PLAY_BETA_TRACK }}
+          AAB: ${{ github.workspace }}/art/Lastochka-${{ inputs.version }}-GooglePlay.aab
+        run: python3 tool/store_publish.py play
+      - name: App Store
+        if: ${{ !cancelled() }}
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: python3 tool/store_publish.py appstore

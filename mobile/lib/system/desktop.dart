@@ -21,6 +21,8 @@ const _android = MethodChannel('lastochka/system');
 // ---------------- Android ----------------
 
 Future<void> startBackgroundService() async {
+  // iPhone из App Store: уведомления через Apple (в остальных сборках registerPush ничего не делает)
+  if (Platform.isIOS) return registerPush();
   if (!Platform.isAndroid) return;
   // версия из Google Play: вместо постоянной фоновой службы — уведомления через Google
   if (playBuild) return registerPush();
