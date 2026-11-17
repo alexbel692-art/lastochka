@@ -298,29 +298,19 @@ jobs:
 
   # iPhone для App Store: подписанная сборка уходит в App Store Connect (TestFlight) при каждом запуске;
   # на проверку Apple её отправляет этап stores — только после публикации выпуска на GitHub.
-  # Пока не заданы секреты Apple — этап пропускается, остальной выпуск идёт как раньше.
+  # Пока не заданы секреты Apple — собирается без подписи (проверка, что всё компилируется) и никуда не уходит.
   ios-appstore:
     runs-on: macos-latest
     steps:
-      - name: Есть ли ключи Apple
-        env:
-          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-        run: |
-          if [ -n "$ASC_KEY_P8" ]; then echo "ON=true" >> "$GITHUB_ENV"
-          else echo "::warning::App Store пропущен: нет секретов Apple (см. docs/appstore/README.md)"; fi
-        working-directory: .
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: env.ON == 'true'
         with:
           persist-credentials: false
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
-        if: env.ON == 'true'
         with:
           channel: stable
           flutter-version: 3.47.7
           cache: ${{ inputs.deps == 'locked' }}
       - name: Платформенные папки
-        if: env.ON == 'true'
         run: |
           tool/annotate.sh "create" flutter create --no-pub --platforms android,ios,macos,windows --org app.lastochka --project-name lastochka .
           rm -f test/widget_test.dart
@@ -328,7 +318,6 @@ jobs:
           # правила App Store: только iPhone, звонки в фоне, декларация шифрования, манифест конфиденциальности
           python3 tool/appstore_prepare.py
       - name: Зависимости
-        if: env.ON == 'true'
         run: |
           if [ "$DEPS" = "upgrade" ]; then tool/annotate.sh "appstore pub upgrade" flutter pub upgrade
           elif [ "$DEPS" = "add" ]; then tool/annotate.sh "appstore pub get" flutter pub get
@@ -339,7 +328,6 @@ jobs:
       # сертификат и профиль. Нужны секреты APPLE_TEAM_ID, ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8
       # (содержимое файла AuthKey_….p8). Подробно — docs/appstore/README.md.
       - name: Сборка и отправка в App Store Connect
-        if: env.ON == 'true'
         env:
           GIPHY_KEY: ${{ secrets.GIPHY_KEY }}
           PUSH_GATEWAY: ${{ secrets.PUSH_GATEWAY }}
@@ -348,16 +336,26 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
         run: |
-          for x in TEAM ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
+          # уведомления через Apple — если задан шлюз (тот же Sygnal, что для Google Play)
+          P="--dart-define=APPSTORE=true"
+          [ -n "$PUSH_GATEWAY" ] && P="$P --dart-define=PUSH_GATEWAY=$PUSH_GATEWAY"
+          CFG=(flutter build ios --release --no-codesign --config-only $P --dart-define=APP_VERSION="$V" --dart-define=GIPHY_KEY="$GIPHY_KEY" --build-name="$V" --build-number="${{ github.run_number }}")
+          if [ -z "$ASC_KEY_P8" ]; then
+            tool/annotate.sh "appstore config" "${CFG[@]}"
+            cd ios
+            ../tool/annotate.sh "appstore check build" xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release \
+              -sdk iphoneos -destination generic/platform=iOS -derivedDataPath build/dd \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" build -quiet
+            echo "::warning title=App Store::сборка для App Store компилируется; в App Store Connect не отправлена — нет секретов Apple (docs/appstore/README.md)"
+            exit 0
+          fi
+          for x in TEAM ASC_KEY_ID ASC_ISSUER_ID; do
             [ -n "${!x}" ] || { echo "::error::не задан секрет для $x — см. docs/appstore/README.md"; exit 1; }
           done
           KEY="$RUNNER_TEMP/AuthKey.p8"
           printf '%s\n' "$ASC_KEY_P8" > "$KEY"
           AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
-          # уведомления через Apple — если задан шлюз (тот же Sygnal, что для Google Play)
-          P="--dart-define=APPSTORE=true"
-          [ -n "$PUSH_GATEWAY" ] && P="$P --dart-define=PUSH_GATEWAY=$PUSH_GATEWAY"
-          tool/annotate.sh "appstore config" flutter build ios --release --no-codesign --config-only $P --dart-define=APP_VERSION="$V" --dart-define=GIPHY_KEY="$GIPHY_KEY" --build-name="$V" --build-number="${{ github.run_number }}"
+          tool/annotate.sh "appstore config" "${CFG[@]}"
           cd ios
           ../tool/annotate.sh "appstore archive" xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release \
             -sdk iphoneos -destination generic/platform=iOS -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
